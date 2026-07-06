@@ -63,13 +63,20 @@ def test_color_monotonic():
 
 def test_render_snapshot(snapshot):
     console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
-    render(make_result(), console, RenderOptions(worst=3))
+    render(make_result(), console, RenderOptions(stats=True, worst=3))
     snapshot("render_synthetic.ansi", console.export_text(styles=True))
+
+
+def test_render_default_is_body_only():
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    render(make_result(), console)
+    out = console.export_text()
+    assert out == "The prompt. A very likely sentence!\n"
 
 
 def test_render_hide_context():
     console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
-    render(make_result(), console, RenderOptions(hide_context=True, worst=0, show_legend=False))
+    render(make_result(), console, RenderOptions(hide_context=True))
     assert "The prompt." not in console.export_text()
 
 

@@ -40,8 +40,15 @@ def test_chat_score_json_snapshot(chat_result, snapshot):
 
 def test_chat_render_snapshot(chat_result, snapshot):
     console = Console(record=True, force_terminal=True, color_system="truecolor", width=100)
-    render(chat_result, console, RenderOptions(worst=5))
+    render(chat_result, console, RenderOptions(stats=True, worst=5))
     snapshot("chat_render.ansi", console.export_text(styles=True))
+
+
+def test_chat_render_default_snapshot(chat_result, snapshot):
+    """Default output: nothing but the gradient-colored text."""
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=100)
+    render(chat_result, console)
+    snapshot("chat_render_default.ansi", console.export_text(styles=True))
 
 
 def test_chat_scored_span_is_exactly_the_assistant_turn(chat_result):

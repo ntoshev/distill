@@ -40,8 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--index", type=int, default=0, help="rollout row (default 0)")
     out = p.add_argument_group("output")
     out.add_argument("--metric", choices=["logprob", "prob"], default="logprob")
+    out.add_argument("--stats", action="store_true", help="show color legend and summary stats")
+    out.add_argument("--worst", type=int, default=0, help="table of N most surprising tokens")
     out.add_argument("--top-k", type=int, default=3, help="alternatives per surprising token")
-    out.add_argument("--worst", type=int, default=10, help="rows in surprise table (0 = off)")
     out.add_argument("--hide-context", action="store_true", help="do not echo unscored context")
     out.add_argument("--json", action="store_true", help="print JSON instead of colored text")
     out.add_argument("--color", choices=["auto", "always", "never"], default="auto")
@@ -51,17 +52,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    force = True if args.color == "always" else None
     console = Console(
-        force_terminal=True if args.color == "always" else None,
+        force_terminal=force,
         no_color=args.color == "never",
+        color_system=None if args.color == "never" else "truecolor",
         width=args.width,
     )
+    errcon = Console(stderr=True)
 
     if bool(args.rollout) == bool(args.completion is not None):
-        console.print("[red]error:[/red] provide either --completion or --rollout")
+        errcon.print("[red]error:[/red] provide either --completion or --rollout")
         return 2
     if args.raw and (args.system or args.rollout):
-        console.print("[red]error:[/red] --raw only combines with --prompt/--completion")
+        errcon.print("[red]error:[/red] --raw only combines with --prompt/--completion")
         return 2
 
     from mlx_lm import load  # deferred: slow import
@@ -99,14 +103,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
+    for w in result.warnings:
+        errcon.print(f"[yellow]warning:[/yellow] {w}")
     if meta:
-        console.print(
-            "rollout: " + "  ".join(f"{k}={v}" for k, v in meta.items()), style="grey50"
-        )
+        errcon.print("rollout: " + "  ".join(f"{k}={v}" for k, v in meta.items()), style="grey50")
     render(
         result,
         console,
-        RenderOptions(metric=args.metric, hide_context=args.hide_context, worst=args.worst),
+        RenderOptions(
+            metric=args.metric,
+            hide_context=args.hide_context,
+            stats=args.stats,
+            worst=args.worst,
+        ),
     )
     return 0
 

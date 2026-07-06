@@ -51,12 +51,14 @@ cli.py ──► templating.py  BuiltText(text, spans, warnings)
   metadata (`example_id`, `reward`, `task`, …). Message fields that are
   explicit nulls in the row (`reasoning_content`, `tool_calls`) are dropped
   before templating.
-- **render.py** — rich-based output. Foreground color on a red→yellow→green
-  gradient over logprob clamped to `[-8, 0]` (`--metric prob` maps linearly in
-  probability instead). Context tokens are dim grey. Also: a color legend,
-  summary stats (scored/total tokens, mean logprob, perplexity), a
-  most-surprising-tokens table with the model's preferred alternatives, and
-  `to_json_dict` for `--json` output and snapshots.
+- **render.py** — rich-based output. The default output is nothing but the
+  text itself, foreground-colored on a red→yellow→green truecolor gradient
+  over logprob clamped to `[-8, 0]` (`--metric prob` maps linearly in
+  probability instead); context tokens are dim grey. Opt-in extras: `--stats`
+  (color legend and scored/total tokens, mean logprob, perplexity), `--worst N`
+  (most-surprising-tokens table with the model's preferred alternatives), and
+  `to_json_dict` for `--json` output and snapshots. Warnings and rollout
+  metadata go to stderr so stdout stays pipeable.
 - **cli.py** — argparse; `--completion` XOR `--rollout`; values accept inline
   strings, `@file`, and `-` (stdin). Validation happens before the (slow)
   model import so error paths are instant and testable.

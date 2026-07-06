@@ -26,9 +26,11 @@ uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
     --rollout outputs/evals/.../results.jsonl --index 0
 ```
 
-Useful flags: `--metric logprob|prob` (color scale), `--worst N` (table of most
-surprising tokens with top-k alternatives), `--json` (machine-readable output),
-`--hide-context` (omit the uncolored prompt/context), `--color always|never|auto`.
+By default the output is just the text, gradient-colored (context in dim grey).
+Useful flags: `--stats` (color legend + mean logprob/perplexity), `--worst N`
+(table of most surprising tokens with top-k alternatives), `--metric logprob|prob`
+(color scale), `--json` (machine-readable output), `--hide-context` (omit the
+uncolored prompt/context), `--color always|never|auto`.
 
 ## Development
 

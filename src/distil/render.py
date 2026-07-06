@@ -40,14 +40,12 @@ def color_for(logprob: float, metric: str = "logprob") -> str:
 class RenderOptions:
     metric: str = "logprob"  # logprob | prob
     hide_context: bool = False
-    worst: int = 10  # rows in the most-surprising-tokens table (0 disables)
-    show_legend: bool = True
+    stats: bool = False  # legend + summary line
+    worst: int = 0  # rows in the most-surprising-tokens table (0 disables)
 
 
 def render(result: ScoreResult, console: Console, opts: RenderOptions | None = None) -> None:
     opts = opts or RenderOptions()
-    for w in result.warnings:
-        console.print(f"[yellow]warning:[/yellow] {w}")
 
     body = Text()
     for tok in result.tokens:
@@ -55,26 +53,25 @@ def render(result: ScoreResult, console: Console, opts: RenderOptions | None = N
             body.append(tok.text, style=color_for(tok.logprob, opts.metric))
         elif not opts.hide_context:
             body.append(tok.text, style=CONTEXT_STYLE)
-    console.print(body)
-    console.print()
+    console.print(body, soft_wrap=True, end="" if body.plain.endswith("\n") else "\n")
 
     scored = result.scored
     if not scored:
         console.print("[red]no tokens were scored[/red]")
         return
 
-    if opts.show_legend:
+    if opts.stats:
+        console.print()
         legend = Text("scale  ")
         for lp in (-8, -6, -4, -2, -1, -0.5, -0.1):
             legend.append(f" {lp:g} ", style=f"bold white on {color_for(lp, opts.metric)}")
         legend.append("  logprob" if opts.metric == "logprob" else "  (prob-scaled)")
         console.print(legend)
-
-    console.print(
-        f"tokens scored: [bold]{len(scored)}[/bold] of {len(result.tokens)}   "
-        f"mean logprob: [bold]{result.mean_logprob:.4f}[/bold]   "
-        f"perplexity: [bold]{result.perplexity:.3f}[/bold]"
-    )
+        console.print(
+            f"tokens scored: [bold]{len(scored)}[/bold] of {len(result.tokens)}   "
+            f"mean logprob: [bold]{result.mean_logprob:.4f}[/bold]   "
+            f"perplexity: [bold]{result.perplexity:.3f}[/bold]"
+        )
 
     if opts.worst > 0:
         console.print()
