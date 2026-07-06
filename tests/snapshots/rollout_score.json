@@ -1,0 +1,615 @@
+{
+  "model": "mlx-community/Qwen3.5-0.8B-4bit",
+  "warnings": [],
+  "num_tokens": 394,
+  "num_scored": 299,
+  "mean_logprob": -0.554,
+  "perplexity": 1.74,
+  "tokens": [
+    {
+      "text": "<|im_start|>",
+      "scored": false
+    },
+    {
+      "text": "system",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "Please",
+      "scored": false
+    },
+    {
+      "text": " reason",
+      "scored": false
+    },
+    {
+      "text": " step",
+      "scored": false
+    },
+    {
+      "text": " by",
+      "scored": false
+    },
+    {
+      "text": " step",
+      "scored": false
+    },
+    {
+      "text": ",",
+      "scored": false
+    },
+    {
+      "text": " and",
+      "scored": false
+    },
+    {
+      "text": " put",
+      "scored": false
+    },
+    {
+      "text": " your",
+      "scored": false
+    },
+    {
+      "text": " final",
+      "scored": false
+    },
+    {
+      "text": " answer",
+      "scored": false
+    },
+    {
+      "text": " within",
+      "scored": false
+    },
+    {
+      "text": " \\",
+      "scored": false
+    },
+    {
+      "text": "boxed",
+      "scored": false
+    },
+    {
+      "text": "{}.",
+      "scored": false
+    },
+    {
+      "text": "<|im_end|>",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "<|im_start|>",
+      "scored": false
+    },
+    {
+      "text": "user",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "Jan",
+      "scored": false
+    },
+    {
+      "text": "et",
+      "scored": false
+    },
+    {
+      "text": "’s",
+      "scored": false
+    },
+    {
+      "text": " ducks",
+      "scored": false
+    },
+    {
+      "text": " lay",
+      "scored": false
+    },
+    {
+      "text": " ",
+      "scored": false
+    },
+    {
+      "text": "1",
+      "scored": false
+    },
+    {
+      "text": "6",
+      "scored": false
+    },
+    {
+      "text": " eggs",
+      "scored": false
+    },
+    {
+      "text": " per",
+      "scored": false
+    },
+    {
+      "text": " day",
+      "scored": false
+    },
+    {
+      "text": ".",
+      "scored": false
+    },
+    {
+      "text": " She",
+      "scored": false
+    },
+    {
+      "text": " eats",
+      "scored": false
+    },
+    {
+      "text": " three",
+      "scored": false
+    },
+    {
+      "text": " for",
+      "scored": false
+    },
+    {
+      "text": " breakfast",
+      "scored": false
+    },
+    {
+      "text": " every",
+      "scored": false
+    },
+    {
+      "text": " morning",
+      "scored": false
+    },
+    {
+      "text": " and",
+      "scored": false
+    },
+    {
+      "text": " b",
+      "scored": false
+    },
+    {
+      "text": "akes",
+      "scored": false
+    },
+    {
+      "text": " muff",
+      "scored": false
+    },
+    {
+      "text": "ins",
+      "scored": false
+    },
+    {
+      "text": " for",
+      "scored": false
+    },
+    {
+      "text": " her",
+      "scored": false
+    },
+    {
+      "text": " friends",
+      "scored": false
+    },
+    {
+      "text": " every",
+      "scored": false
+    },
+    {
+      "text": " day",
+      "scored": false
+    },
+    {
+      "text": " with",
+      "scored": false
+    },
+    {
+      "text": " four",
+      "scored": false
+    },
+    {
+      "text": ".",
+      "scored": false
+    },
+    {
+      "text": " She",
+      "scored": false
+    },
+    {
+      "text": " sells",
+      "scored": false
+    },
+    {
+      "text": " the",
+      "scored": false
+    },
+    {
+      "text": " remainder",
+      "scored": false
+    },
+    {
+      "text": " at",
+      "scored": false
+    },
+    {
+      "text": " $",
+      "scored": true,
+      "logprob": -0.7,
+      "top": [
+        [
+          " $",
+          -0.7
+        ],
+        [
+          " **",
+          -1.32
+        ],
+        [
+          " $\\",
+          -2.07
+        ]
+      ]
+    },
+    {
+      "text": "1",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -6.75
+        ],
+        [
+          "6",
+          -9.63
+        ]
+      ]
+    },
+    {
+      "text": "8",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          ".",
+          -9.88
+        ],
+        [
+          "5",
+          -10.0
+        ]
+      ]
+    },
+    {
+      "text": " per",
+      "scored": true,
+      "logprob": -2.99,
+      "top": [
+        [
+          " every",
+          -1.37
+        ],
+        [
+          ".",
+          -1.49
+        ],
+        [
+          " in",
+          -1.62
+        ]
+      ]
+    },
+    {
+      "text": " day",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          " day",
+          -0.0
+        ],
+        [
+          " week",
+          -7.63
+        ],
+        [
+          " dollar",
+          -8.88
+        ]
+      ]
+    },
+    {
+      "text": " at",
+      "scored": true,
+      "logprob": -0.25,
+      "top": [
+        [
+          " at",
+          -0.25
+        ],
+        [
+          ".",
+          -2.12
+        ],
+        [
+          " from",
+          -2.75
+        ]
+      ]
+    },
+    {
+      "text": " the",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          " the",
+          -0.0
+        ],
+        [
+          " farmers",
+          -9.13
+        ],
+        [
+          " that",
+          -11.13
+        ]
+      ]
+    },
+    {
+      "text": " farmers",
+      "scored": true,
+      "logprob": -0.01,
+      "top": [
+        [
+          " farmers",
+          -0.01
+        ],
+        [
+          " market",
+          -5.26
+        ],
+        [
+          " markets",
+          -7.51
+        ]
+      ]
+    },
+    {
+      "text": "'",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "'",
+          -0.0
+        ],
+        [
+          "'.",
+          -8.5
+        ],
+        [
+          " market",
+          -9.38
+        ]
+      ]
+    },
+    {
+      "text": " market",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          " market",
+          -0.0
+        ],
+        [
+          "市场",
+          -11.0
+        ],
+        [
+          " marketplace",
+          -11.75
+        ]
+      ]
+    },
+    {
+      "text": ".",
+      "scored": true,
+      "logprob": -0.01,
+      "top": [
+        [
+          ".",
+          -0.01
+        ],
+        [
+          " from",
+          -5.63
+        ],
+        [
+          " by",
+          -6.13
+        ]
+      ]
+    },
+    {
+      "text": "\n\n",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "\n\n",
+          -0.0
+        ],
+        [
+          "<|im_end|>",
+          -6.25
+        ],
+        [
+          " \\",
+          -8.25
+        ]
+      ]
+    },
+    {
+      "text": "\\",
+      "scored": true,
+      "logprob": -0.03,
+      "top": [
+        [
+          "\\",
+          -0.03
+        ],
+        [
+          "The",
+          -4.78
+        ],
+        [
+          "###",
+          -5.15
+        ]
+      ]
+    },
+    {
+      "text": "boxed",
+      "scored": true,
+      "logprob": -0.01,
+      "top": [
+        [
+          "boxed",
+          -0.01
+        ],
+        [
+          "\n",
+          -5.01
+        ],
+        [
+          "[\\",
+          -7.76
+        ]
+      ]
+    },
+    {
+      "text": "{",
+      "scored": true,
+      "logprob": -0.01,
+      "top": [
+        [
+          "{",
+          -0.01
+        ],
+        [
+          "{\\",
+          -5.01
+        ],
+        [
+          "1",
+          -5.89
+        ]
+      ]
+    },
+    {
+      "text": "1",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -8.5
+        ],
+        [
+          "8",
+          -10.25
+        ]
+      ]
+    },
+    {
+      "text": "8",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          "6",
+          -9.75
+        ],
+        [
+          "7",
+          -9.88
+        ]
+      ]
+    },
+    {
+      "text": "}",
+      "scored": true,
+      "logprob": -0.05,
+      "top": [
+        [
+          "}",
+          -0.05
+        ],
+        [
+          ".",
+          -3.05
+        ],
+        [
+          "<|im_end|>",
+          -6.55
+        ]
+      ]
+    },
+    {
+      "text": "<|im_end|>",
+      "scored": true,
+      "logprob": -0.0,
+      "top": [
+        [
+          "<|im_end|>",
+          -0.0
+        ],
+        [
+          "\n",
+          -7.5
+        ],
+        [
+          "\n\n",
+          -10.13
+        ]
+      ]
+    },
+    {
+      "text": "\n",
+      "scored": false
+    }
+  ]
+}

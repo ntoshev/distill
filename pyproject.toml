@@ -1,0 +1,31 @@
+[project]
+name = "distil"
+version = "0.1.0"
+description = "Visualize per-token likelihood of a text/rollout according to an LLM (mlx-lm)"
+readme = "README.md"
+authors = [
+    { name = "Nikola Toshev", email = "312759+ntoshev@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mlx-lm>=0.24",
+    "rich>=13.0",
+]
+
+[project.scripts]
+distil = "distil.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "model: tests that load the local mlx model (slow, needs cached weights)",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
