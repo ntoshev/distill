@@ -4,7 +4,7 @@ import json
 
 from rich.console import Console
 
-from distil.render import RenderOptions, color_for, render, to_json_dict
+from distil.render import RenderOptions, color_for, render, style_for, to_json_dict
 from distil.scoring import ScoreResult, TokenScore, TopToken
 
 
@@ -42,12 +42,25 @@ def make_result() -> ScoreResult:
 
 
 def test_color_endpoints():
-    assert color_for(0.0) == "#28b446"  # green at certainty
-    assert color_for(-8.0) == "#c82828"  # red at the clamp floor
-    assert color_for(-4.0) == "#d2b428"  # yellow midpoint
-    assert color_for(-100.0) == color_for(-8.0)  # clamped
-    assert color_for(0.0, metric="prob") == "#28b446"
+    assert color_for(0.0) == "#00c853"  # green at certainty
+    assert color_for(-10.0) == "#ff1744"  # hot red at the clamp floor
+    assert color_for(-8.0) == "#c62828"  # red in the low-probability tail
+    assert color_for(-6.0) == "#e85d19"  # hot orange before the midpoint
+    assert color_for(-4.0) == "#f97316"  # orange midpoint
+    assert color_for(-100.0) == color_for(-10.0)  # clamped
+    assert color_for(0.0, metric="prob") == "#00c853"
     assert color_for(-20.0, metric="prob") == color_for(-8.0)
+
+
+def test_extreme_logprob_style_is_emphasized():
+    assert style_for(-7.49) == color_for(-7.49)
+    assert style_for(-7.5) == f"bold underline {color_for(-7.5)}"
+
+
+def test_high_likelihood_colors_are_distinct():
+    assert color_for(-1.0) == "#d1d42f"
+    assert color_for(-0.5) == "#65a30d"
+    assert color_for(-0.1) == "#00a86b"
 
 
 def test_color_monotonic():
@@ -56,7 +69,7 @@ def test_color_monotonic():
         c = color_for(lp)
         return int(c[1:3], 16) - int(c[3:5], 16)
 
-    vals = [r_minus_g(lp) for lp in (-8, -6, -4, -2, -1, -0.1)]
+    vals = [r_minus_g(lp) for lp in (-10, -8, -6, -4, -2, -1, -0.1)]
     assert vals == sorted(vals, reverse=True)
     assert len(set(vals)) == len(vals)
 

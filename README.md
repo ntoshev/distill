@@ -3,8 +3,12 @@
 Visualize the per-token likelihood of a text/rollout according to an LLM, using a
 single forward pass with [mlx-lm](https://github.com/ml-explore/mlx-lm).
 
-Tokens are colored on a red→yellow→green gradient by their log-probability under the
-model: green = the model finds the token likely, red = surprising.
+Tokens are colored on a red→orange→yellow→green gradient by their log-probability
+under the model: green = the model finds the token likely, red = surprising. The
+palette lives in `src/distil/render.py` as hex color literals so editors can show
+inline swatches. The far tail below logprob \(-7.5\), roughly probability
+\(e^{-7.5} \approx 0.06\%\), is bold and underlined so near-impossible tokens
+remain visually distinct.
 
 ## Usage
 
