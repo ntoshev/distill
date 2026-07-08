@@ -16,6 +16,11 @@ def model_and_tokenizer():
 
 
 @pytest.fixture(scope="session")
+def model(model_and_tokenizer):
+    return model_and_tokenizer[0]
+
+
+@pytest.fixture(scope="session")
 def tokenizer(model_and_tokenizer):
     return model_and_tokenizer[1]
 

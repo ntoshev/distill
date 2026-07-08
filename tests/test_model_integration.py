@@ -22,8 +22,7 @@ pytestmark = pytest.mark.model
 
 
 @pytest.fixture(scope="module")
-def chat_result(model_and_tokenizer):
-    model, tokenizer = model_and_tokenizer
+def chat_result(model, tokenizer):
     built = build_chat(
         tokenizer,
         prompt="What is 2+2?",
@@ -60,8 +59,7 @@ def test_chat_scored_span_is_exactly_the_assistant_turn(chat_result):
     assert scored_text == "\n\n</think>\n\n2+2 equals 4.<|im_end|>"
 
 
-def test_rollout_score_json_snapshot(model_and_tokenizer, snapshot):
-    model, tokenizer = model_and_tokenizer
+def test_rollout_score_json_snapshot(model, tokenizer, snapshot):
     r = load_rollout(FIXTURE_DIR / "results.jsonl", 0)
     built = build_rollout(tokenizer, r.messages)
     assert built.warnings == []
@@ -72,7 +70,7 @@ def test_rollout_score_json_snapshot(model_and_tokenizer, snapshot):
     snapshot("rollout_score.json", json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 
 
-def test_greedy_roundtrip(model_and_tokenizer):
+def test_greedy_roundtrip(model, tokenizer):
     """Generate greedily, then re-score the generated tokens with the scorer's
     single full-sequence forward pass. Each generated token must be recovered
     as (near-)argmax and its logprob must match the generation-time logprob.
@@ -80,7 +78,6 @@ def test_greedy_roundtrip(model_and_tokenizer):
     no golden data at all."""
     from mlx_lm import stream_generate
 
-    model, tokenizer = model_and_tokenizer
     prompt_ids = tokenizer.apply_chat_template(
         [{"role": "user", "content": "Count from 1 to 20, separated by commas."}],
         add_generation_prompt=True,
@@ -106,9 +103,7 @@ def test_greedy_roundtrip(model_and_tokenizer):
     assert argmax_hits >= 0.9 * len(positions)
 
 
-def test_predictable_beats_shuffled(model_and_tokenizer):
-    model, tokenizer = model_and_tokenizer
-
+def test_predictable_beats_shuffled(model, tokenizer):
     def mean_lp(completion):
         built = build_raw("Here is a sequence: 1 2 3 4 5", completion)
         result = score_text(model, tokenizer, built.text, built.spans, top_k=0)
@@ -117,8 +112,7 @@ def test_predictable_beats_shuffled(model_and_tokenizer):
     assert mean_lp(" 6 7 8 9 10 11 12") > mean_lp(" 11 7 12 6 9 8 10")
 
 
-def test_offsets_roundtrip_on_templated_text(model_and_tokenizer):
-    _, tokenizer = model_and_tokenizer
+def test_offsets_roundtrip_on_templated_text(tokenizer):
     r = load_rollout(FIXTURE_DIR / "results.jsonl", 0)
     built = build_rollout(tokenizer, r.messages)
     ids, offsets = tokenize_with_offsets(tokenizer, built.text)
