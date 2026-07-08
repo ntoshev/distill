@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "mlx<0.32",
     "mlx-lm>=0.24",
     "rich>=13.0",
 ]
@@ -24,6 +25,9 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "model: tests that load the local mlx model (slow, needs cached weights)",
+]
+filterwarnings = [
+    "ignore:builtin type (SwigPyPacked|SwigPyObject|swigvarlink) has no __module__ attribute:DeprecationWarning",
 ]
 
 [build-system]
