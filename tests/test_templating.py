@@ -77,7 +77,7 @@ def test_rollout_thinking_template_final_turn_exact():
     assert built.warnings == []
 
 
-def test_rollout_thinking_template_skips_unlocatable_intermediate_turn():
+def test_rollout_thinking_template_scores_intermediate_recorded_content():
     msgs = [
         {"role": "user", "content": "q1"},
         {"role": "assistant", "content": "a1", "reasoning_content": "hmm"},
@@ -85,10 +85,8 @@ def test_rollout_thinking_template_skips_unlocatable_intermediate_turn():
         {"role": "assistant", "content": "a2", "reasoning_content": "mmh"},
     ]
     built = build_rollout(ThinkingFakeTokenizer(), msgs)
-    # intermediate turn is re-rendered without thinking -> cannot be located exactly
-    assert len(built.spans) == 1
-    assert built.text[built.spans[0][0] : built.spans[0][1]] == "mmh\n</think>\na2</s>"
-    assert len(built.warnings) == 1 and "assistant message 1" in built.warnings[0]
+    assert [built.text[s:e] for s, e in built.spans] == ["a1", "mmh\n</think>\na2</s>"]
+    assert built.warnings == []
 
 
 def test_rollout_null_fields_dropped():

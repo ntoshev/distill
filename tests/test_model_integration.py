@@ -118,3 +118,19 @@ def test_offsets_roundtrip_on_templated_text(tokenizer):
     ids, offsets = tokenize_with_offsets(tokenizer, built.text)
     assert tokenizer.decode(ids) == built.text
     assert "".join(built.text[s:e] for s, e in offsets) == built.text
+
+
+def test_multiturn_rollout_scores_recorded_assistant_content(tokenizer):
+    r = load_rollout(
+        FIXTURE_DIR.parent.parent
+        / "examples"
+        / "verifiers"
+        / "wordle-qwen3.5-9b-6bit-results.jsonl",
+        0,
+    )
+    built = build_rollout(tokenizer, r.messages)
+    scored_text = "\n".join(built.text[s:e] for s, e in built.spans)
+    assert len(built.spans) == 4
+    assert "<guess>" in scored_text
+    assert "You have 5 guesses left." not in scored_text
+    assert built.warnings == []

@@ -13,3 +13,8 @@ def test_rejects_both_inputs(capsys):
 
 def test_raw_excludes_system(capsys):
     assert main(["--model", "m", "--raw", "--system", "s", "--completion", "x"]) == 2
+
+
+def test_bad_rollout_path_exits_before_model_load(capsys):
+    assert main(["--model", "m", "--rollout", "outputs/evals/.../results.jsonl"]) == 2
+    assert "rollout pattern matched no files" in capsys.readouterr().err

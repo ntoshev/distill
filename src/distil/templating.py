@@ -6,10 +6,11 @@ than concatenating token ids) avoids retokenization drift at message
 boundaries — e.g. Qwen's generation prompt ends in "<think>\n" which merges
 with a following "\n" into a single token when tokenized jointly.
 
-Spans are derived from chat-template prefix renderings and are only accepted
-when the prefix property actually holds against the full rendering; anything
-that cannot be located exactly is skipped with a warning instead of scored
-approximately.
+Spans are derived from chat-template prefix renderings when possible. Some
+templates, notably Qwen-style thinking templates, render already-recorded
+intermediate assistant turns differently from a fresh generation prompt; in
+that case we fall back to scoring the assistant message's recorded content when
+it can be located exactly after the preceding conversation.
 """
 
 from dataclasses import dataclass, field
@@ -62,6 +63,10 @@ def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
         start_render = render(messages[:i], True)
         end_render = render(messages[: i + 1], False)
         if not (full.startswith(start_render) and full.startswith(end_render)):
+            fallback = _content_span_after_prefix(tokenizer, messages, full, i)
+            if fallback is not None:
+                spans.append(fallback)
+                continue
             warnings.append(
                 f"assistant message {i}: cannot locate exactly in the rendered "
                 "conversation (the chat template re-renders intermediate turns, "
@@ -78,6 +83,25 @@ def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
     if not spans:
         warnings.append("no assistant spans could be located; nothing will be scored")
     return BuiltText(text=full, spans=spans, warnings=warnings)
+
+
+def _content_span_after_prefix(tokenizer, messages: list[dict], full: str, i: int) -> tuple[int, int] | None:
+    """Locate a rendered assistant turn by its recorded content.
+
+    This is deliberately narrower than the primary prefix method: it scores only
+    the content field, not hidden generation-prefix text or end-of-turn glue.
+    """
+    content = messages[i].get("content")
+    if not content:
+        return None
+    prefix = tokenizer.apply_chat_template(messages[:i], tokenize=False, add_generation_prompt=False)
+    if not full.startswith(prefix):
+        return None
+    start = full.find(content, len(prefix))
+    if start < 0:
+        return None
+    end = start + len(content)
+    return start, end
 
 
 _MESSAGE_KEYS = ("role", "content", "reasoning_content", "tool_calls", "tool_call_id", "name")

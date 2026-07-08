@@ -68,19 +68,27 @@ def main(argv: list[str] | None = None) -> int:
         errcon.print("[red]error:[/red] --raw only combines with --prompt/--completion")
         return 2
 
+    meta = {}
+    if args.rollout:
+        try:
+            rollout = load_rollout(args.rollout, args.index)
+        except (FileNotFoundError, IndexError, ValueError) as e:
+            errcon.print(f"[red]error:[/red] {e}")
+            return 2
+        meta = rollout.meta
+    else:
+        rollout = None
+        completion = _read_input(args.completion)
+        prompt = _read_input(args.prompt) or ""
+        system = _read_input(args.system)
+
     from mlx_lm import load  # deferred: slow import
 
     model, tokenizer = load(args.model)
 
-    meta = {}
     if args.rollout:
-        rollout = load_rollout(args.rollout, args.index)
-        meta = rollout.meta
         built = build_rollout(tokenizer, rollout.messages)
     else:
-        completion = _read_input(args.completion)
-        prompt = _read_input(args.prompt) or ""
-        system = _read_input(args.system)
         if args.raw:
             built = build_raw(prompt, completion)
         else:

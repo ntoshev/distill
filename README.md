@@ -27,8 +27,18 @@ uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
 
 # score a verifiers / prime-rl rollout (results.jsonl from `prime eval run`)
 uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --rollout outputs/evals/.../results.jsonl --index 0
+    --rollout examples/verifiers/gsm8k-results.jsonl --index 1
+
+# score a generated multi-turn Qwen3.5-9B-6bit Wordle rollout
+uv run distil --model mlx-community/Qwen3.5-9B-6bit \
+    --rollout examples/verifiers/wordle-qwen3.5-9b-6bit-results.jsonl --index 0
 ```
+
+The example rollouts are copied from or generated with real verifiers evals:
+GSM8K for a single-turn task and Wordle for multi-turn environments. For your
+own eval runs, point `--rollout` at the generated `results.jsonl`; `...` is
+accepted as a recursive wildcard path segment when it matches exactly one file,
+e.g. `outputs/evals/.../results.jsonl`.
 
 By default the output is just the text, gradient-colored (context in dim grey).
 Useful flags: `--stats` (color legend + mean logprob/perplexity), `--worst N`
