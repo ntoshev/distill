@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+_MODEL_ONLY_OFFSET = (-1, -1)
+
 
 @dataclass
 class TopToken:
@@ -82,6 +84,20 @@ def tokenize_with_offsets(tokenizer, text: str) -> tuple[list[int], list[tuple[i
     return ids, offsets
 
 
+def _tokenize_for_scoring(tokenizer, text: str) -> tuple[list[int], list[tuple[int, int]]]:
+    """Tokenize text, using BOS as invisible context when it is not rendered."""
+    ids, offsets = tokenize_with_offsets(tokenizer, text)
+    bos_id = getattr(tokenizer, "bos_token_id", None)
+    if bos_id is not None and (not ids or ids[0] != bos_id):
+        return [bos_id, *ids], [_MODEL_ONLY_OFFSET, *offsets]
+    return ids, offsets
+
+
+def _visible_ids(ids: list[int], offsets: list[tuple[int, int]]) -> list[int]:
+    """Token ids represented by characters in the displayed text."""
+    return [tid for tid, (start, _) in zip(ids, offsets) if start >= 0]
+
+
 def score_ids(
     model,
     ids: list[int],
@@ -139,8 +155,8 @@ def score_text(
     Position 0 has nothing to condition on and is never scored.
     """
     warnings = list(warnings or [])
-    ids, offsets = tokenize_with_offsets(tokenizer, text)
-    if tokenizer.decode(ids) != text:
+    ids, offsets = _tokenize_for_scoring(tokenizer, text)
+    if tokenizer.decode(_visible_ids(ids, offsets)) != text:
         warnings.append("tokenization does not round-trip the rendered text; offsets may be off")
 
     scored_set = set(_scored_positions(ids, offsets, spans))
@@ -148,6 +164,8 @@ def score_text(
 
     tokens = []
     for t, (tid, (start, end)) in enumerate(zip(ids, offsets)):
+        if start < 0:
+            continue
         alts = alternatives.get(t)
         tokens.append(
             TokenScore(
@@ -252,9 +270,9 @@ def score_text_pair(
     warnings = list(built_student.warnings)
     warnings += [f"teacher: {w}" for w in built_teacher.warnings if w not in built_student.warnings]
 
-    ids_s, offsets_s = tokenize_with_offsets(student_tokenizer, built_student.text)
-    ids_t, offsets_t = tokenize_with_offsets(teacher_tokenizer, built_teacher.text)
-    if student_tokenizer.decode(ids_s) != built_student.text:
+    ids_s, offsets_s = _tokenize_for_scoring(student_tokenizer, built_student.text)
+    ids_t, offsets_t = _tokenize_for_scoring(teacher_tokenizer, built_teacher.text)
+    if student_tokenizer.decode(_visible_ids(ids_s, offsets_s)) != built_student.text:
         warnings.append("tokenization does not round-trip the rendered text; offsets may be off")
 
     scored_s = _scored_positions(ids_s, offsets_s, built_student.spans)
@@ -278,6 +296,8 @@ def score_text_pair(
     scored_set = set(scored_s)
     tokens = []
     for t, (tid, (start, end)) in enumerate(zip(ids_s, offsets_s)):
+        if start < 0:
+            continue
         tokens.append(
             TokenScore(
                 token_id=tid,
