@@ -33,6 +33,22 @@ _PROB_STOPS = [
     (0.9, "#00a86b"),
     (1.0, "#00c853"),
 ]
+# KL(teacher ‖ student) in nats: 0 = the two distributions agree (green),
+# growing disagreement runs the gradient in reverse toward red.
+KL_HI = 10.0
+EXTREME_KL = 7.5
+_KL_STOPS = [
+    (0.0, "#00c853"),  # agreement
+    (0.05, "#00a86b"),
+    (0.15, "#65a30d"),
+    (0.4, "#d1d42f"),
+    (1.0, "#facc15"),
+    (2.0, "#f97316"),
+    (4.0, "#e85d19"),
+    (6.0, "#dc3f24"),
+    (8.0, "#c62828"),
+    (10.0, "#ff1744"),  # off-scale: severe disagreement
+]
 
 CONTEXT_STYLE = "grey50"
 
@@ -70,33 +86,42 @@ def _legend_style(logprob: float, metric: str) -> str:
     return f"bold {foreground} on {color}"
 
 
-def color_for(logprob: float, metric: str = "logprob") -> str:
-    """Map a token logprob to a hex color on the red->orange->yellow->green gradient.
+def color_for(value: float, metric: str = "logprob") -> str:
+    """Map a per-token value to a hex color on the red↔green gradient.
 
     metric "logprob": position on the scale is the logprob clamped to [-10, 0].
     metric "prob": position is exp(logprob), linear in probability.
+    metric "kl": KL(teacher ‖ student) in nats clamped to [0, 10], reversed
+    (0 = agreement = green).
     """
     if metric == "prob":
-        t = min(max(math.exp(logprob), 0.0), 1.0)
+        t = min(max(math.exp(value), 0.0), 1.0)
         return _interpolate_stops(t, _PROB_STOPS)
+    elif metric == "kl":
+        return _interpolate_stops(min(max(value, 0.0), KL_HI), _KL_STOPS)
     else:
-        return _interpolate_stops(min(max(logprob, LP_LO), 0.0), _LOGPROB_STOPS)
+        return _interpolate_stops(min(max(value, LP_LO), 0.0), _LOGPROB_STOPS)
 
 
-def style_for(logprob: float, metric: str = "logprob") -> str:
+def style_for(value: float, metric: str = "logprob") -> str:
     """Terminal style for a scored token."""
-    color = color_for(logprob, metric)
-    if logprob <= EXTREME_LOGPROB:
+    color = color_for(value, metric)
+    extreme = value >= EXTREME_KL if metric == "kl" else value <= EXTREME_LOGPROB
+    if extreme:
         return f"bold underline {color}"
     return color
 
 
 @dataclass
 class RenderOptions:
-    metric: str = "logprob"  # logprob | prob
+    metric: str = "logprob"  # logprob | prob | kl (kl needs teacher-mode scores)
     hide_context: bool = False
     stats: bool = False  # legend + summary line
-    worst: int = 0  # rows in the most-surprising-tokens table (0 disables)
+    worst: int = 0  # rows in the most-surprising-tokens / disagreements table (0 disables)
+
+
+def _token_value(tok: TokenScore, metric: str) -> float | None:
+    return tok.kl if metric == "kl" else tok.logprob
 
 
 def render(result: ScoreResult, console: Console, opts: RenderOptions | None = None) -> None:
@@ -104,8 +129,9 @@ def render(result: ScoreResult, console: Console, opts: RenderOptions | None = N
 
     body = Text()
     for tok in result.tokens:
-        if tok.scored:
-            body.append(tok.text, style=style_for(tok.logprob, opts.metric))
+        value = _token_value(tok, opts.metric)
+        if tok.scored and value is not None:
+            body.append(tok.text, style=style_for(value, opts.metric))
         elif not opts.hide_context:
             body.append(tok.text, style=CONTEXT_STYLE)
     console.print(body, soft_wrap=True, end="" if body.plain.endswith("\n") else "\n")
@@ -118,19 +144,33 @@ def render(result: ScoreResult, console: Console, opts: RenderOptions | None = N
     if opts.stats:
         console.print()
         legend = Text("scale  ")
-        for lp in (-10, -8, -7, -6, -4, -2, -1, -0.5, -0.1):
-            legend.append(f" {lp:g} ", style=_legend_style(lp, opts.metric))
-        legend.append("  logprob" if opts.metric == "logprob" else "  (prob-scaled)")
+        if opts.metric == "kl":
+            for kl in (0, 0.05, 0.15, 0.4, 1, 2, 4, 6, 8):
+                legend.append(f" {kl:g} ", style=_legend_style(kl, opts.metric))
+            legend.append("  KL(teacher ‖ student), nats")
+        else:
+            for lp in (-10, -8, -7, -6, -4, -2, -1, -0.5, -0.1):
+                legend.append(f" {lp:g} ", style=_legend_style(lp, opts.metric))
+            legend.append("  logprob" if opts.metric == "logprob" else "  (prob-scaled)")
         console.print(legend)
-        console.print(
+        line = (
             f"tokens scored: [bold]{len(scored)}[/bold] of {len(result.tokens)}   "
             f"mean logprob: [bold]{result.mean_logprob:.4f}[/bold]   "
             f"perplexity: [bold]{result.perplexity:.3f}[/bold]"
         )
+        if result.teacher_model_name:
+            line += (
+                f"   teacher mean logprob: [bold]{result.mean_teacher_logprob:.4f}[/bold]   "
+                f"mean KL: [bold]{result.mean_kl:.4f}[/bold]"
+            )
+        console.print(line)
 
     if opts.worst > 0:
         console.print()
-        console.print(_worst_table(scored, opts.worst))
+        if opts.metric == "kl":
+            console.print(_disagreement_table(scored, opts.worst))
+        else:
+            console.print(_worst_table(scored, opts.worst))
 
 
 def _worst_table(scored: list[TokenScore], n: int) -> Table:
@@ -152,27 +192,69 @@ def _worst_table(scored: list[TokenScore], n: int) -> Table:
     return table
 
 
+def _disagreement_table(scored: list[TokenScore], n: int) -> Table:
+    """Positions where the teacher's and student's distributions differ most."""
+
+    def preferred(alts):
+        return f"{alts[0].text!r} {math.exp(alts[0].logprob):.0%}" if alts else ""
+
+    table = Table(title=f"{n} largest teacher/student disagreements", title_justify="left")
+    table.add_column("token", style="bold")
+    table.add_column("KL", justify="right")
+    table.add_column("student lp", justify="right")
+    table.add_column("teacher lp", justify="right")
+    table.add_column("student preferred")
+    table.add_column("teacher preferred")
+    ranked = [t for t in scored if t.kl is not None]
+    for tok in sorted(ranked, key=lambda t: -t.kl)[:n]:
+        table.add_row(
+            repr(tok.text),
+            f"{tok.kl:.3f}",
+            f"{tok.logprob:.3f}",
+            f"{tok.teacher_logprob:.3f}",
+            preferred(tok.top_k),
+            preferred(tok.teacher_top_k),
+        )
+    return table
+
+
 def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
     """Machine-readable (and snapshot-friendly) form; logprobs rounded."""
     scored = result.scored
-    return {
+    teacher = bool(result.teacher_model_name)
+    payload = {
         "model": result.model_name,
+        **({"teacher_model": result.teacher_model_name} if teacher else {}),
         "warnings": result.warnings,
         "num_tokens": len(result.tokens),
         "num_scored": len(scored),
         "mean_logprob": round(result.mean_logprob, 3) if scored else None,
         "perplexity": round(result.perplexity, 2) if scored else None,
-        "tokens": [
-            {
-                "text": t.text,
-                "scored": t.scored,
-                **({"logprob": round(t.logprob, ndigits)} if t.scored else {}),
-                **(
-                    {"top": [[a.text, round(a.logprob, ndigits)] for a in t.top_k]}
-                    if t.scored and t.top_k
-                    else {}
-                ),
-            }
-            for t in result.tokens
-        ],
     }
+    if teacher:
+        payload["mean_teacher_logprob"] = round(result.mean_teacher_logprob, 3) if scored else None
+        payload["mean_kl"] = round(result.mean_kl, 3) if scored else None
+    payload["tokens"] = [
+        {
+            "text": t.text,
+            "scored": t.scored,
+            **({"logprob": round(t.logprob, ndigits)} if t.scored else {}),
+            **(
+                {"teacher_logprob": round(t.teacher_logprob, ndigits), "kl": round(t.kl, ndigits)}
+                if t.scored and t.kl is not None
+                else {}
+            ),
+            **(
+                {"top": [[a.text, round(a.logprob, ndigits)] for a in t.top_k]}
+                if t.scored and t.top_k
+                else {}
+            ),
+            **(
+                {"teacher_top": [[a.text, round(a.logprob, ndigits)] for a in t.teacher_top_k]}
+                if t.scored and t.teacher_top_k
+                else {}
+            ),
+        }
+        for t in result.tokens
+    ]
+    return payload

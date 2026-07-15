@@ -1,0 +1,842 @@
+{
+  "model": "mlx-community/Qwen3.5-0.8B-4bit",
+  "teacher_model": "mlx-community/Qwen3.5-0.8B-4bit",
+  "warnings": [],
+  "num_tokens": 394,
+  "num_scored": 299,
+  "mean_logprob": -0.554,
+  "perplexity": 1.74,
+  "mean_teacher_logprob": -0.6,
+  "mean_kl": 0.052,
+  "tokens": [
+    {
+      "text": "<|im_start|>",
+      "scored": false
+    },
+    {
+      "text": "system",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "Please",
+      "scored": false
+    },
+    {
+      "text": " reason",
+      "scored": false
+    },
+    {
+      "text": " step",
+      "scored": false
+    },
+    {
+      "text": " by",
+      "scored": false
+    },
+    {
+      "text": " step",
+      "scored": false
+    },
+    {
+      "text": ",",
+      "scored": false
+    },
+    {
+      "text": " and",
+      "scored": false
+    },
+    {
+      "text": " put",
+      "scored": false
+    },
+    {
+      "text": " your",
+      "scored": false
+    },
+    {
+      "text": " final",
+      "scored": false
+    },
+    {
+      "text": " answer",
+      "scored": false
+    },
+    {
+      "text": " within",
+      "scored": false
+    },
+    {
+      "text": " \\",
+      "scored": false
+    },
+    {
+      "text": "boxed",
+      "scored": false
+    },
+    {
+      "text": "{}.",
+      "scored": false
+    },
+    {
+      "text": "<|im_end|>",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "<|im_start|>",
+      "scored": false
+    },
+    {
+      "text": "user",
+      "scored": false
+    },
+    {
+      "text": "\n",
+      "scored": false
+    },
+    {
+      "text": "Jan",
+      "scored": false
+    },
+    {
+      "text": "et",
+      "scored": false
+    },
+    {
+      "text": "’s",
+      "scored": false
+    },
+    {
+      "text": " ducks",
+      "scored": false
+    },
+    {
+      "text": " lay",
+      "scored": false
+    },
+    {
+      "text": " ",
+      "scored": false
+    },
+    {
+      "text": "1",
+      "scored": false
+    },
+    {
+      "text": "6",
+      "scored": false
+    },
+    {
+      "text": " eggs",
+      "scored": false
+    },
+    {
+      "text": " per",
+      "scored": false
+    },
+    {
+      "text": " day",
+      "scored": false
+    },
+    {
+      "text": ".",
+      "scored": false
+    },
+    {
+      "text": " She",
+      "scored": false
+    },
+    {
+      "text": " eats",
+      "scored": false
+    },
+    {
+      "text": " three",
+      "scored": false
+    },
+    {
+      "text": " for",
+      "scored": false
+    },
+    {
+      "text": " breakfast",
+      "scored": false
+    },
+    {
+      "text": " $",
+      "scored": true,
+      "logprob": -0.7,
+      "teacher_logprob": -2.41,
+      "kl": 0.76,
+      "top": [
+        [
+          " $",
+          -0.7
+        ],
+        [
+          " **",
+          -1.32
+        ],
+        [
+          " $\\",
+          -2.07
+        ]
+      ],
+      "teacher_top": [
+        [
+          " **",
+          -0.16
+        ],
+        [
+          " $",
+          -2.41
+        ],
+        [
+          " ",
+          -3.54
+        ]
+      ]
+    },
+    {
+      "text": "1",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -6.75
+        ],
+        [
+          "6",
+          -9.63
+        ]
+      ],
+      "teacher_top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -6.25
+        ],
+        [
+          "**",
+          -8.5
+        ]
+      ]
+    },
+    {
+      "text": "8",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          ".",
+          -9.88
+        ],
+        [
+          "5",
+          -10.0
+        ]
+      ],
+      "teacher_top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          "5",
+          -9.13
+        ],
+        [
+          ".",
+          -9.5
+        ]
+      ]
+    },
+    {
+      "text": " per",
+      "scored": true,
+      "logprob": -2.99,
+      "teacher_logprob": -3.13,
+      "kl": 0.02,
+      "top": [
+        [
+          " every",
+          -1.37
+        ],
+        [
+          ".",
+          -1.49
+        ],
+        [
+          " in",
+          -1.62
+        ]
+      ],
+      "teacher_top": [
+        [
+          ".",
+          -1.38
+        ],
+        [
+          " every",
+          -1.38
+        ],
+        [
+          " in",
+          -1.5
+        ]
+      ]
+    },
+    {
+      "text": " day",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          " day",
+          -0.0
+        ],
+        [
+          " week",
+          -7.63
+        ],
+        [
+          " dollar",
+          -8.88
+        ]
+      ],
+      "teacher_top": [
+        [
+          " day",
+          -0.0
+        ],
+        [
+          " week",
+          -7.75
+        ],
+        [
+          " month",
+          -9.0
+        ]
+      ]
+    },
+    {
+      "text": " at",
+      "scored": true,
+      "logprob": -0.25,
+      "teacher_logprob": -0.31,
+      "kl": 0.01,
+      "top": [
+        [
+          " at",
+          -0.25
+        ],
+        [
+          ".",
+          -2.12
+        ],
+        [
+          " from",
+          -2.75
+        ]
+      ],
+      "teacher_top": [
+        [
+          " at",
+          -0.31
+        ],
+        [
+          ".",
+          -1.93
+        ],
+        [
+          " from",
+          -2.56
+        ]
+      ]
+    },
+    {
+      "text": " the",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          " the",
+          -0.0
+        ],
+        [
+          " farmers",
+          -9.13
+        ],
+        [
+          " that",
+          -11.13
+        ]
+      ],
+      "teacher_top": [
+        [
+          " the",
+          -0.0
+        ],
+        [
+          " farmers",
+          -8.5
+        ],
+        [
+          " that",
+          -10.0
+        ]
+      ]
+    },
+    {
+      "text": " farmers",
+      "scored": true,
+      "logprob": -0.01,
+      "teacher_logprob": -0.01,
+      "kl": 0.0,
+      "top": [
+        [
+          " farmers",
+          -0.01
+        ],
+        [
+          " market",
+          -5.26
+        ],
+        [
+          " markets",
+          -7.51
+        ]
+      ],
+      "teacher_top": [
+        [
+          " farmers",
+          -0.01
+        ],
+        [
+          " market",
+          -4.51
+        ],
+        [
+          " markets",
+          -7.39
+        ]
+      ]
+    },
+    {
+      "text": "'",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "'",
+          -0.0
+        ],
+        [
+          "'.",
+          -8.5
+        ],
+        [
+          " market",
+          -9.38
+        ]
+      ],
+      "teacher_top": [
+        [
+          "'",
+          -0.0
+        ],
+        [
+          "'.",
+          -7.75
+        ],
+        [
+          " market",
+          -8.13
+        ]
+      ]
+    },
+    {
+      "text": " market",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          " market",
+          -0.0
+        ],
+        [
+          "市场",
+          -11.0
+        ],
+        [
+          " marketplace",
+          -11.75
+        ]
+      ],
+      "teacher_top": [
+        [
+          " market",
+          -0.0
+        ],
+        [
+          " marketplace",
+          -11.13
+        ],
+        [
+          "市场",
+          -11.13
+        ]
+      ]
+    },
+    {
+      "text": ".",
+      "scored": true,
+      "logprob": -0.01,
+      "teacher_logprob": -0.01,
+      "kl": 0.0,
+      "top": [
+        [
+          ".",
+          -0.01
+        ],
+        [
+          " from",
+          -5.63
+        ],
+        [
+          " by",
+          -6.13
+        ]
+      ],
+      "teacher_top": [
+        [
+          ".",
+          -0.01
+        ],
+        [
+          " from",
+          -5.88
+        ],
+        [
+          " by",
+          -6.26
+        ]
+      ]
+    },
+    {
+      "text": "\n\n",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.14,
+      "kl": 0.44,
+      "top": [
+        [
+          "\n\n",
+          -0.0
+        ],
+        [
+          "<|im_end|>",
+          -6.25
+        ],
+        [
+          " \\",
+          -8.25
+        ]
+      ],
+      "teacher_top": [
+        [
+          "\n\n",
+          -0.14
+        ],
+        [
+          "<|im_end|>",
+          -2.02
+        ],
+        [
+          " The",
+          -8.39
+        ]
+      ]
+    },
+    {
+      "text": "\\",
+      "scored": true,
+      "logprob": -0.03,
+      "teacher_logprob": -6.11,
+      "kl": 5.2,
+      "top": [
+        [
+          "\\",
+          -0.03
+        ],
+        [
+          "The",
+          -4.78
+        ],
+        [
+          "###",
+          -5.15
+        ]
+      ],
+      "teacher_top": [
+        [
+          "**",
+          -0.23
+        ],
+        [
+          "###",
+          -2.61
+        ],
+        [
+          "The",
+          -3.11
+        ]
+      ]
+    },
+    {
+      "text": "boxed",
+      "scored": true,
+      "logprob": -0.01,
+      "teacher_logprob": -0.51,
+      "kl": 1.73,
+      "top": [
+        [
+          "boxed",
+          -0.01
+        ],
+        [
+          "\n",
+          -5.01
+        ],
+        [
+          "[\\",
+          -7.76
+        ]
+      ],
+      "teacher_top": [
+        [
+          "boxed",
+          -0.51
+        ],
+        [
+          "\n",
+          -2.01
+        ],
+        [
+          "_\\",
+          -2.63
+        ]
+      ]
+    },
+    {
+      "text": "{",
+      "scored": true,
+      "logprob": -0.01,
+      "teacher_logprob": -0.04,
+      "kl": 0.05,
+      "top": [
+        [
+          "{",
+          -0.01
+        ],
+        [
+          "{\\",
+          -5.01
+        ],
+        [
+          "1",
+          -5.89
+        ]
+      ],
+      "teacher_top": [
+        [
+          "{",
+          -0.04
+        ],
+        [
+          " ",
+          -4.16
+        ],
+        [
+          "{\\",
+          -4.41
+        ]
+      ]
+    },
+    {
+      "text": "1",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -8.5
+        ],
+        [
+          "8",
+          -10.25
+        ]
+      ],
+      "teacher_top": [
+        [
+          "1",
+          -0.0
+        ],
+        [
+          "2",
+          -7.25
+        ],
+        [
+          "The",
+          -8.5
+        ]
+      ]
+    },
+    {
+      "text": "8",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          "6",
+          -9.75
+        ],
+        [
+          "7",
+          -9.88
+        ]
+      ],
+      "teacher_top": [
+        [
+          "8",
+          -0.0
+        ],
+        [
+          "}",
+          -8.0
+        ],
+        [
+          ".",
+          -9.13
+        ]
+      ]
+    },
+    {
+      "text": "}",
+      "scored": true,
+      "logprob": -0.05,
+      "teacher_logprob": -0.06,
+      "kl": 0.0,
+      "top": [
+        [
+          "}",
+          -0.05
+        ],
+        [
+          ".",
+          -3.05
+        ],
+        [
+          "<|im_end|>",
+          -6.55
+        ]
+      ],
+      "teacher_top": [
+        [
+          "}",
+          -0.06
+        ],
+        [
+          ".",
+          -2.94
+        ],
+        [
+          "<|im_end|>",
+          -5.31
+        ]
+      ]
+    },
+    {
+      "text": "<|im_end|>",
+      "scored": true,
+      "logprob": -0.0,
+      "teacher_logprob": -0.0,
+      "kl": 0.0,
+      "top": [
+        [
+          "<|im_end|>",
+          -0.0
+        ],
+        [
+          "\n",
+          -7.5
+        ],
+        [
+          "\n\n",
+          -10.13
+        ]
+      ],
+      "teacher_top": [
+        [
+          "<|im_end|>",
+          -0.0
+        ],
+        [
+          "\n",
+          -8.75
+        ],
+        [
+          "\n\n",
+          -9.25
+        ]
+      ]
+    },
+    {
+      "text": "\n",
+      "scored": false
+    }
+  ]
+}

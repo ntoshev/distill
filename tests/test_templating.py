@@ -1,6 +1,8 @@
 """Unit tests for span construction. Uses fake tokenizers, so no model/cache needed."""
 
-from distil.templating import build_chat, build_raw, build_rollout
+import pytest
+
+from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 
 
 class FakeTokenizer:
@@ -32,6 +34,26 @@ class ThinkingFakeTokenizer:
                 out += f"<s>{m['role']}\n{m['content']}</s>\n"
         if add_generation_prompt:
             out += "<s>assistant\n<think>\n"
+        return out
+
+
+class NoThinkingFakeTokenizer(ThinkingFakeTokenizer):
+    """Same shape, but supports the Qwen non-thinking generation prompt."""
+
+    def apply_chat_template(
+        self, messages, tokenize=False, add_generation_prompt=False, enable_thinking=True
+    ):
+        assert not tokenize
+        out = ""
+        for m in messages:
+            if m["role"] == "assistant":
+                out += f"<s>assistant\n<think>\n\n</think>\n\n{m['content']}</s>\n"
+            else:
+                out += f"<s>{m['role']}\n{m['content']}</s>\n"
+        if add_generation_prompt:
+            out += "<s>assistant\n<think>\n"
+            if enable_thinking is False:
+                out += "\n</think>\n\n"
         return out
 
 
@@ -89,6 +111,14 @@ def test_rollout_thinking_template_scores_intermediate_recorded_content():
     assert built.warnings == []
 
 
+def test_rollout_no_thinking_starts_at_assistant_content():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+    built = build_rollout(NoThinkingFakeTokenizer(), msgs, enable_thinking=False)
+    (start, end) = built.spans[0]
+    assert built.text[start:end] == "a</s>"
+    assert built.warnings == []
+
+
 def test_rollout_null_fields_dropped():
     # verifiers rows carry explicit nulls; the template must not see them
     msgs = [
@@ -97,3 +127,43 @@ def test_rollout_null_fields_dropped():
     ]
     built = build_rollout(FakeTokenizer(), msgs)
     assert built.text.endswith("<s>assistant\na</s>\n")
+
+
+def test_teacher_context_replaces_system():
+    msgs = [
+        {"role": "system", "content": "plain"},
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a"},
+    ]
+    out = apply_teacher_context(msgs, system="privileged")
+    assert out[0] == {"role": "system", "content": "privileged"}
+    assert out[1:] == msgs[1:]
+    assert msgs[0]["content"] == "plain"  # input not mutated
+
+
+def test_teacher_context_inserts_system_when_absent():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+    out = apply_teacher_context(msgs, system="privileged")
+    assert out[0] == {"role": "system", "content": "privileged"}
+    assert out[1:] == msgs
+
+
+def test_teacher_context_replaces_first_user_only():
+    msgs = [
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"},
+    ]
+    out = apply_teacher_context(msgs, prompt="privileged q")
+    assert out[0]["content"] == "privileged q"
+    assert out[2]["content"] == "q2"
+
+
+def test_teacher_context_prompt_needs_a_user_message():
+    with pytest.raises(ValueError, match="no user message"):
+        apply_teacher_context([{"role": "assistant", "content": "a"}], prompt="p")
+
+
+def test_teacher_context_noop_without_overrides():
+    msgs = [{"role": "user", "content": "q"}]
+    assert apply_teacher_context(msgs) == msgs

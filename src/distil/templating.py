@@ -23,12 +23,46 @@ class BuiltText:
     warnings: list[str] = field(default_factory=list)
 
 
+def apply_teacher_context(
+    messages: list[dict], system: str | None = None, prompt: str | None = None
+) -> list[dict]:
+    """Teacher-side conditioning: the same conversation under a different context.
+
+    `system` replaces the system message's content (or a system message is
+    inserted at the front if there is none); `prompt` replaces the first user
+    message's content. Assistant turns — the tokens being scored — are never
+    touched, so scored spans stay aligned between the two renderings.
+    """
+    out = [dict(m) for m in messages]
+    if system is not None:
+        for m in out:
+            if m.get("role") == "system":
+                m["content"] = system
+                break
+        else:
+            out.insert(0, {"role": "system", "content": system})
+    if prompt is not None:
+        for m in out:
+            if m.get("role") == "user":
+                m["content"] = prompt
+                break
+        else:
+            raise ValueError("--teacher-prompt: the conversation has no user message to replace")
+    return out
+
+
 def build_raw(prompt: str, completion: str) -> BuiltText:
     """No chat template: completion is scored as a continuation of prompt."""
     return BuiltText(text=prompt + completion, spans=[(len(prompt), len(prompt) + len(completion))])
 
 
-def build_chat(tokenizer, prompt: str, completion: str, system: str | None = None) -> BuiltText:
+def build_chat(
+    tokenizer,
+    prompt: str,
+    completion: str,
+    system: str | None = None,
+    enable_thinking: bool | None = None,
+) -> BuiltText:
     """Render prompt as a user message through the model's chat template and
     score the completion as the assistant turn."""
     messages = []
@@ -36,10 +70,12 @@ def build_chat(tokenizer, prompt: str, completion: str, system: str | None = Non
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     messages.append({"role": "assistant", "content": completion})
-    return build_rollout(tokenizer, messages)
+    return build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
 
 
-def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
+def build_rollout(
+    tokenizer, messages: list[dict], enable_thinking: bool | None = None
+) -> BuiltText:
     """Render a full conversation and mark assistant turns for scoring.
 
     For each assistant message, the span start comes from rendering the
@@ -50,8 +86,9 @@ def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
     skipped with a warning rather than guessed at.
     """
     messages = [_clean_message(m) for m in messages]
+    template_kwargs = _chat_template_kwargs(enable_thinking)
     render = lambda msgs, gen: tokenizer.apply_chat_template(
-        msgs, tokenize=False, add_generation_prompt=gen
+        msgs, tokenize=False, add_generation_prompt=gen, **template_kwargs
     )
     full = render(messages, False)
     spans: list[tuple[int, int]] = []
@@ -63,7 +100,7 @@ def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
         start_render = render(messages[:i], True)
         end_render = render(messages[: i + 1], False)
         if not (full.startswith(start_render) and full.startswith(end_render)):
-            fallback = _content_span_after_prefix(tokenizer, messages, full, i)
+            fallback = _content_span_after_prefix(tokenizer, messages, full, i, template_kwargs)
             if fallback is not None:
                 spans.append(fallback)
                 continue
@@ -85,7 +122,13 @@ def build_rollout(tokenizer, messages: list[dict]) -> BuiltText:
     return BuiltText(text=full, spans=spans, warnings=warnings)
 
 
-def _content_span_after_prefix(tokenizer, messages: list[dict], full: str, i: int) -> tuple[int, int] | None:
+def _chat_template_kwargs(enable_thinking: bool | None) -> dict:
+    return {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+
+
+def _content_span_after_prefix(
+    tokenizer, messages: list[dict], full: str, i: int, template_kwargs: dict
+) -> tuple[int, int] | None:
     """Locate a rendered assistant turn by its recorded content.
 
     This is deliberately narrower than the primary prefix method: it scores only
@@ -94,7 +137,9 @@ def _content_span_after_prefix(tokenizer, messages: list[dict], full: str, i: in
     content = messages[i].get("content")
     if not content:
         return None
-    prefix = tokenizer.apply_chat_template(messages[:i], tokenize=False, add_generation_prompt=False)
+    prefix = tokenizer.apply_chat_template(
+        messages[:i], tokenize=False, add_generation_prompt=False, **template_kwargs
+    )
     if not full.startswith(prefix):
         return None
     start = full.find(content, len(prefix))

@@ -12,9 +12,10 @@ import pytest
 from rich.console import Console
 
 from distil.render import RenderOptions, render, to_json_dict
-from distil.rollout import load_rollout
-from distil.scoring import score_ids, score_text, tokenize_with_offsets
-from distil.templating import build_chat, build_raw, build_rollout
+from distil.rollout import load_rollout, save_rollout
+from distil.sample import sample_completion
+from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
+from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 
 from conftest import FIXTURE_DIR, MODEL
 
@@ -134,3 +135,96 @@ def test_multiturn_rollout_scores_recorded_assistant_content(tokenizer):
     assert "<guess>" in scored_text
     assert "You have 5 guesses left." not in scored_text
     assert built.warnings == []
+
+
+def test_teacher_same_context_kl_is_zero(model, tokenizer):
+    """Teacher == student with identical conditioning must give KL ≈ 0
+    everywhere: the same forward pass compared against itself. Self-validating,
+    no golden data — an alignment or log-softmax bug shows up as nats."""
+    built = build_chat(
+        tokenizer,
+        prompt="What is 2+2?",
+        completion="2+2 equals 4.",
+        system="You are a terse assistant.",
+    )
+    result = score_text_pair(
+        model, tokenizer, built, model, tokenizer, built,
+        model_name=MODEL, teacher_name=MODEL,
+    )
+    assert result.scored
+    for t in result.scored:
+        assert abs(t.kl) < 1e-4
+        assert abs(t.teacher_logprob - t.logprob) < 1e-4
+
+
+def test_teacher_privileged_system_kl_snapshot(model, tokenizer, snapshot):
+    """Same weights, but the teacher's system prompt reveals the answer; the
+    completion tokens are shared and the per-token KL(teacher ‖ student) must
+    be finite, (near-)nonnegative, and positive on average."""
+    r = load_rollout(FIXTURE_DIR / "results.jsonl", 0)
+    built_s = build_rollout(tokenizer, r.messages)
+    built_t = build_rollout(
+        tokenizer,
+        apply_teacher_context(
+            r.messages, system="You are grading a solution. The correct final answer is 18."
+        ),
+    )
+    result = score_text_pair(
+        model, tokenizer, built_s, model, tokenizer, built_t,
+        model_name=MODEL, teacher_name=MODEL,
+    )
+    assert result.scored
+    assert result.mean_kl > 0
+    assert all(t.kl > -1e-4 for t in result.scored)
+
+    d = to_json_dict(result)
+    # keep the snapshot focused: summary plus the first/last tokens
+    d["tokens"] = d["tokens"][:40] + d["tokens"][-20:]
+    snapshot("rollout_teacher_kl.json", json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+
+
+def test_sample_greedy_scores_high_and_saves(model, tokenizer, tmp_path):
+    """Greedy-sample from the student, re-score the raw prompt+generation text,
+    and round-trip the saved rollout. Greedy tokens were argmax at generation
+    time, so the re-scored mean logprob must be high."""
+    messages = [{"role": "user", "content": "Count from 1 to 20, separated by commas."}]
+    s = sample_completion(model, tokenizer, messages, max_tokens=24, temperature=0.0, seed=0)
+    assert s.num_tokens > 0
+    assert s.prompt_text.endswith("<think>\n")
+
+    built = build_raw(s.prompt_text, s.completion_text)
+    result = score_text(model, tokenizer, built.text, built.spans, top_k=0)
+    assert result.warnings == []
+    assert result.mean_logprob > -1.0
+
+    path = tmp_path / "samples.jsonl"
+    index = save_rollout(
+        path, messages, [{"role": "assistant", "content": s.content}],
+        extra={"task": "distil-sample", "is_truncated": s.finish_reason != "stop"},
+    )
+    loaded = load_rollout(path, index)
+    assert loaded.completion[0]["content"] == s.content
+    assert loaded.meta["task"] == "distil-sample"
+
+
+def test_sample_then_teacher_scores_align(model, tokenizer):
+    """The on-policy loop: student generates, teacher (same weights, privileged
+    system prompt) scores the student's tokens under its own rendering. The two
+    renderings share the completion string, so scored positions must align."""
+    messages = [{"role": "user", "content": "Say hello in exactly three words."}]
+    s = sample_completion(model, tokenizer, messages, max_tokens=16, temperature=0.0, seed=0)
+    built_s = build_raw(s.prompt_text, s.completion_text)
+
+    teacher_messages = apply_teacher_context(messages, system="Privileged: grade generously.")
+    teacher_prompt = tokenizer.apply_chat_template(
+        teacher_messages, tokenize=False, add_generation_prompt=True
+    )
+    built_t = build_raw(teacher_prompt, s.completion_text)
+
+    result = score_text_pair(
+        model, tokenizer, built_s, model, tokenizer, built_t,
+        model_name=MODEL, teacher_name=MODEL,
+    )
+    assert result.scored
+    assert all(t.kl is not None and t.teacher_logprob is not None for t in result.scored)
+    assert result.mean_kl > -1e-4

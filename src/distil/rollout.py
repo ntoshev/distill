@@ -79,3 +79,23 @@ def load_rollout(path: str | Path, index: int = 0) -> Rollout:
         completion=row["completion"],
         meta={k: row[k] for k in _META_KEYS if row.get(k) is not None},
     )
+
+
+def save_rollout(
+    path: str | Path, prompt: list[dict], completion: list[dict], extra: dict | None = None
+) -> int:
+    """Append one rollout row in results.jsonl format; returns its line index.
+
+    The save format is the load format: a saved sample can be re-scored later
+    with `--rollout PATH --index <returned index>` or fed to anything else that
+    reads verifiers-style rollouts.
+    """
+    path = Path(path)
+    index = 0
+    if path.exists():
+        with open(path) as f:
+            index = sum(1 for _ in f)
+    row = {"prompt": prompt, "completion": completion, **(extra or {})}
+    with open(path, "a") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return index
