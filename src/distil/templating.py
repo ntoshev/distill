@@ -22,6 +22,18 @@ class BuiltText:
     spans: list[tuple[int, int]]  # char [start, end) ranges to score
     warnings: list[str] = field(default_factory=list)
 
+    # Example with mlx-community/Qwen3.5-0.8B-4bit:
+    # BuiltText(
+    #     text=(
+    #         "<|im_start|>user\nWhat is 2+2?<|im_end|>\n"
+    #         "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    #         "2+2 equals 5.<|im_end|>\n"
+    #     ),
+    #     spans=[(70, 104)],
+    #     warnings=[],
+    # )
+    # The span selects: "\n</think>\n\n2+2 equals 5.<|im_end|>"
+
 
 def apply_teacher_context(
     messages: list[dict], system: str | None = None, prompt: str | None = None

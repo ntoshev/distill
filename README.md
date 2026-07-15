@@ -15,7 +15,7 @@ remain visually distinct.
 ```sh
 # score a completion given a prompt (model chat template applied)
 uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --prompt "What is 2+2?" --completion "2+2 equals 4."
+    --prompt "What is 2+2?" --completion "2+2 equals 5."
 
 # optional system prompt; @file reads inputs from disk, "-" reads stdin
 uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
@@ -23,7 +23,7 @@ uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
 
 # raw mode: no chat template, completion scored as continuation of prompt
 uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --raw --prompt "1 2 3 4 5" --completion " 6 7 8 9 10"
+    --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
 
 # score a verifiers / prime-rl rollout (results.jsonl from `prime eval run`)
 uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
@@ -79,7 +79,7 @@ sample to a `results.jsonl` (the save format is the load format, so saved
 samples can be re-scored later with `--rollout`).
 
 ```sh
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit     --prompt "What is 7 times 8?"     --sample --temperature 0.7 --seed 0 --max-tokens 256     --teacher-system "The user is quizzing you; the correct answer is 56."     --save-rollout samples.jsonl --stats
+uv run distil --model mlx-community/Qwen3.5-0.8B-4bit     --prompt "What is 7 times 8?"     --sample --temperature 0.7 --seed 0 --max-tokens 256     --teacher-system "The user is quizzing you; the correct answer is 56." --stats    --save-rollout samples.jsonl
 ```
 
 Sampling flags: `--max-tokens` (default 512), `--temperature` (default 1.0,
