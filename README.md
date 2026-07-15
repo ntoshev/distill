@@ -85,6 +85,40 @@ uv run distil --model mlx-community/Qwen3.5-0.8B-4bit     --prompt "What is 7 ti
 Sampling flags: `--max-tokens` (default 512), `--temperature` (default 1.0,
 `0` = greedy), `--seed`.
 
+## LoRA context distillation
+
+`--train` runs on-policy self-distillation over a plain-text file containing
+one prompt per non-empty line. The student samples without privileged context;
+the frozen teacher is the same base model with `--teacher-system`. Only a LoRA
+adapter is updated, using full-vocabulary `KL(teacher ‖ student)`.
+
+This small synthetic example is intended as a fast end-to-end check:
+
+```sh
+uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
+    --train examples/distillation/lumen-questions.txt \
+    --teacher-system @examples/distillation/lumen-teacher.txt \
+    --adapter-path adapters/lumen-test \
+    --iters 20 --learning-rate 1e-4 --lora-rank 4 \
+    --max-tokens 16 --temperature 0 --seed 0 --no-thinking
+
+uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
+    --adapter-path adapters/lumen-test \
+    --prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
+    --sample --temperature 0 --max-tokens 16 --seed 0 --no-thinking
+```
+
+The base model answers `PL-001` in the pinned integration test; after 20
+updates the trained and reloaded adapter answers `VIOLET-731`. The same snapshot
+also verifies that teacher/student KL on the held-out paraphrase falls sharply.
+The teacher-system file is deliberately external: for a real article, put both
+the instructions and article text there. Training prompts remain separate and
+are never shown the privileged context.
+
+`--adapter-path` also loads trained adapters in the existing scoring and
+sampling modes. When teacher mode is used with a same-base adapter, the student
+uses LoRA while the teacher pass automatically disables it.
+
 ## Development
 
 ```sh
@@ -93,5 +127,4 @@ uv run pytest -m model       # integration tests (needs cached Qwen3.5-0.8B-4bit
 UPDATE_SNAPSHOTS=1 uv run pytest   # regenerate on-disk snapshots
 ```
 
-See [DESIGN.md](DESIGN.md) for architecture and future direction (on-policy
-distillation training on the teacher/student KL signal).
+See [DESIGN.md](DESIGN.md) for the scoring and training architecture.

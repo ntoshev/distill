@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+from distil.adapters import lora_disabled
+
 _MODEL_ONLY_OFFSET = (-1, -1)
 
 
@@ -60,6 +62,17 @@ class ScoreResult:
     def mean_kl(self) -> float:
         s = [t for t in self.scored if t.kl is not None]
         return sum(t.kl for t in s) / len(s) if s else float("nan")
+
+
+@dataclass
+class AlignedTokens:
+    """Token sequences plus aligned generated-token positions."""
+
+    student_ids: list[int]
+    student_offsets: list[tuple[int, int]]
+    teacher_ids: list[int]
+    teacher_offsets: list[tuple[int, int]]
+    pairs: list[tuple[int, int]]
 
 
 def tokenize_with_offsets(tokenizer, text: str) -> tuple[list[int], list[tuple[int, int]]]:
@@ -191,6 +204,33 @@ def _scored_positions(ids: list[int], offsets: list[tuple[int, int]], spans) -> 
     return [t for t in range(1, len(ids)) if in_span(*offsets[t])]
 
 
+def align_scored_tokens(
+    student_tokenizer,
+    built_student,
+    teacher_tokenizer,
+    built_teacher,
+) -> AlignedTokens:
+    """Strictly align generated tokens under student and teacher contexts."""
+    ids_s, offsets_s = _tokenize_for_scoring(student_tokenizer, built_student.text)
+    ids_t, offsets_t = _tokenize_for_scoring(teacher_tokenizer, built_teacher.text)
+    scored_s = _scored_positions(ids_s, offsets_s, built_student.spans)
+    scored_t = _scored_positions(ids_t, offsets_t, built_teacher.spans)
+    if [ids_s[p] for p in scored_s] != [ids_t[p] for p in scored_t]:
+        raise ValueError(
+            "teacher and student scored tokens do not align "
+            f"({len(scored_s)} student vs {len(scored_t)} teacher); the teacher "
+            "context changes how the completion tokenizes (incompatible "
+            "tokenizer, or a template edge case)"
+        )
+    return AlignedTokens(
+        student_ids=ids_s,
+        student_offsets=offsets_s,
+        teacher_ids=ids_t,
+        teacher_offsets=offsets_t,
+        pairs=list(zip(scored_s, scored_t)),
+    )
+
+
 def kl_pair_ids(
     student_model,
     student_ids: list[int],
@@ -199,6 +239,7 @@ def kl_pair_ids(
     pairs: list[tuple[int, int]],
     top_k: int = 3,
     chunk_size: int = 128,
+    teacher_without_adapter: bool = False,
 ) -> tuple[dict, dict, dict, dict, dict]:
     """One forward pass per model; exact per-position KL over the full vocabulary.
 
@@ -209,7 +250,15 @@ def kl_pair_ids(
     teacher logprob, KL(teacher ‖ student), and top_k alternatives of each.
     """
     logits_s = student_model(mx.array(student_ids)[None])[0]
-    logits_t = teacher_model(mx.array(teacher_ids)[None])[0]
+    if teacher_without_adapter:
+        # Force the student graph before mutating LoRA scales for the shared
+        # model's teacher pass. This is required because MLX arrays are lazy.
+        mx.eval(logits_s)
+        with lora_disabled(teacher_model):
+            logits_t = teacher_model(mx.array(teacher_ids)[None])[0]
+            mx.eval(logits_t)
+    else:
+        logits_t = teacher_model(mx.array(teacher_ids)[None])[0]
     # distinct weights may pad the vocabulary differently; KL is over the overlap
     vocab = min(logits_s.shape[-1], logits_t.shape[-1])
 
@@ -257,6 +306,7 @@ def score_text_pair(
     model_name: str = "",
     teacher_name: str = "",
     top_k: int = 3,
+    teacher_without_adapter: bool = False,
 ) -> ScoreResult:
     """Score the same completion under two contexts and attach exact per-token
     KL(teacher ‖ student).
@@ -270,24 +320,23 @@ def score_text_pair(
     warnings = list(built_student.warnings)
     warnings += [f"teacher: {w}" for w in built_teacher.warnings if w not in built_student.warnings]
 
-    ids_s, offsets_s = _tokenize_for_scoring(student_tokenizer, built_student.text)
-    ids_t, offsets_t = _tokenize_for_scoring(teacher_tokenizer, built_teacher.text)
+    aligned = align_scored_tokens(
+        student_tokenizer, built_student, teacher_tokenizer, built_teacher
+    )
+    ids_s, offsets_s = aligned.student_ids, aligned.student_offsets
     if student_tokenizer.decode(_visible_ids(ids_s, offsets_s)) != built_student.text:
         warnings.append("tokenization does not round-trip the rendered text; offsets may be off")
 
-    scored_s = _scored_positions(ids_s, offsets_s, built_student.spans)
-    scored_t = _scored_positions(ids_t, offsets_t, built_teacher.spans)
-    if [ids_s[p] for p in scored_s] != [ids_t[p] for p in scored_t]:
-        raise ValueError(
-            "teacher and student scored tokens do not align "
-            f"({len(scored_s)} student vs {len(scored_t)} teacher); the teacher "
-            "context changes how the completion tokenizes (incompatible "
-            "tokenizer, or a template edge case)"
-        )
-    pairs = list(zip(scored_s, scored_t))
+    scored_s = [student_pos for student_pos, _ in aligned.pairs]
 
     lp_s, lp_t, kls, alts_s, alts_t = kl_pair_ids(
-        student_model, ids_s, teacher_model, ids_t, pairs, top_k=top_k
+        student_model,
+        ids_s,
+        teacher_model,
+        aligned.teacher_ids,
+        aligned.pairs,
+        top_k=top_k,
+        teacher_without_adapter=teacher_without_adapter,
     )
 
     def decode_alts(alts):

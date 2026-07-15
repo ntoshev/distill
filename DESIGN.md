@@ -173,12 +173,22 @@ width/truecolor recording console so ANSI snapshots are byte-stable.
   - Predictable text must outscore shuffled text; offsets must tile the
     rendered text exactly.
 
-## Future direction: on-policy distillation training
+## On-policy distillation training
 
-The visualization now computes exactly the training signal: student generates
-(`sample_completion`), teacher scores the student's tokens under privileged
-conditioning (`score_text_pair`), and the per-token KL is what a distillation
-loss would minimize. What's missing to close the loop is batched sampling and
-scoring (many rollouts per step rather than one `--index` at a time) and an
-optimizer step on the student — the scoring/alignment core would be reused
-unchanged.
+`--train PATH` closes the loop with one on-policy rollout and one optimizer
+update per iteration. Each non-empty line in `PATH` is a student prompt. The
+student samples with its current LoRA adapter and no privileged context; the
+teacher evaluates the same generated tokens under `--teacher-system` with LoRA
+disabled. Training minimizes the full-vocabulary `KL(teacher ‖ student)` and
+updates only LoRA weights.
+
+`training.py` owns the loop and standard mlx-lm adapter serialization;
+`adapters.py` owns LoRA setup and the temporary adapter disable used by both
+training and same-base teacher scoring. The strict token-alignment helper is
+shared with `score_text_pair`, so visualization and training use the same
+definition of generated positions.
+
+The model integration snapshot distills the synthetic fact `VIOLET-731` in 20
+updates, verifies an unseen paraphrase, reloads the saved adapter, and checks
+that the teacher/student KL decreases. Batching, alternate divergences, and
+automatic prompt generation remain future extensions.

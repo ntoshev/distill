@@ -16,6 +16,7 @@ from distil.rollout import load_rollout, save_rollout
 from distil.sample import sample_completion
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
+from distil.training import train_lora
 
 from conftest import FIXTURE_DIR, MODEL
 
@@ -228,3 +229,103 @@ def test_sample_then_teacher_scores_align(model, tokenizer):
     assert result.scored
     assert all(t.kl is not None and t.teacher_logprob is not None for t in result.scored)
     assert result.mean_kl > -1e-4
+
+
+def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot):
+    """A tiny synthetic fact should be quickly internalized and survive reload."""
+    from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
+
+    target = "VIOLET-731"
+    train_prompt = "What is Project Lumen's launch code? Answer with the code only."
+    heldout_prompt = (
+        "Give the launch code assigned to Project Lumen. Answer with the code only."
+    )
+    teacher_system = (
+        "Private reference: Project Lumen's launch code is VIOLET-731. "
+        "Answer related questions with the code only."
+    )
+    adapter_path = tmp_path / "lumen-adapter"
+
+    def answer():
+        return sample_completion(
+            model,
+            tokenizer,
+            [{"role": "user", "content": heldout_prompt}],
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+        ).content.strip()
+
+    def fact_kl(teacher_without_adapter=False):
+        messages = [
+            {"role": "user", "content": heldout_prompt},
+            {"role": "assistant", "content": target},
+        ]
+        built_student = build_chat(
+            tokenizer, heldout_prompt, target, enable_thinking=False
+        )
+        built_teacher = build_rollout(
+            tokenizer,
+            apply_teacher_context(messages, system=teacher_system),
+            enable_thinking=False,
+        )
+        return score_text_pair(
+            model,
+            tokenizer,
+            built_student,
+            model,
+            tokenizer,
+            built_teacher,
+            top_k=0,
+            teacher_without_adapter=teacher_without_adapter,
+        ).mean_kl
+
+    before = answer()
+    kl_before = fact_kl()
+    try:
+        trained = train_lora(
+            model,
+            tokenizer,
+            [train_prompt],
+            teacher_system,
+            adapter_path,
+            model_name=MODEL,
+            iters=20,
+            learning_rate=1e-4,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+        )
+        after = answer()
+        kl_after = fact_kl(teacher_without_adapter=True)
+
+        assert target not in before
+        assert after == target
+        assert kl_after < kl_before / 5
+        assert trained.adapter_file.exists()
+        assert (adapter_path / "adapter_config.json").exists()
+
+        # Prove the standard mlx-lm adapter files reload into a clean base model.
+        remove_lora_layers(model)
+        load_adapters(model, str(adapter_path))
+        reloaded = answer()
+        assert reloaded == target
+
+        payload = {
+            "target": target,
+            "before": before,
+            "after": after,
+            "reloaded": reloaded,
+            "kl_reduced_more_than_5x": kl_after < kl_before / 5,
+            "updates": len(trained.steps),
+        }
+        snapshot(
+            "distillation_internalization.json",
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        )
+    finally:
+        remove_lora_layers(model)
+        model.eval()

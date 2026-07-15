@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from rich.console import Console
 
@@ -28,11 +29,11 @@ def _read_input(value: str | None) -> str | None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="distil",
-        description="Visualize per-token likelihood of a text/rollout according to an LLM "
-        "(green = likely, red = surprising). Values support @file and '-' for stdin.",
+        description="Visualize per-token likelihood or train a LoRA by on-policy context "
+        "distillation. Values support @file and '-' for stdin.",
     )
     p.add_argument("--model", required=True, help="mlx model path or HF repo id (the student)")
-    src = p.add_argument_group("input (prompt/completion, rollout, or sample)")
+    src = p.add_argument_group("input (prompt/completion, rollout, sample, or training)")
     src.add_argument("--system", help="optional system prompt")
     src.add_argument("--prompt", help="prompt / context (not scored)")
     src.add_argument("--completion", help="text to score")
@@ -44,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     src.add_argument("--rollout", help="verifiers/prime-rl results.jsonl")
     src.add_argument("--index", type=int, default=0, help="rollout row (default 0)")
+    src.add_argument("--train", metavar="PATH", help="train LoRA from one prompt per line")
     tch = p.add_argument_group("teacher (two-pass KL scoring; any flag enables it)")
     tch.add_argument("--teacher-model", help="teacher weights (default: same as --model)")
     tch.add_argument("--teacher-system", help="teacher's system prompt, replacing the student's")
@@ -54,8 +56,19 @@ def build_parser() -> argparse.ArgumentParser:
     smp.add_argument("--temperature", type=float, help="sampling temperature (default 1.0)")
     smp.add_argument("--seed", type=int, help="random seed for sampling")
     smp.add_argument(
-        "--save-rollout", metavar="PATH", help="append the sample to PATH as results.jsonl"
+        "--save-rollout",
+        metavar="PATH",
+        help="append sampled or training rollouts to PATH as results.jsonl",
     )
+    trn = p.add_argument_group("LoRA adapter / training")
+    trn.add_argument(
+        "--adapter-path",
+        metavar="PATH",
+        help="save a trained adapter, or load one for scoring/sampling",
+    )
+    trn.add_argument("--iters", type=int, help="successful training updates (default 100)")
+    trn.add_argument("--learning-rate", type=float, help="training learning rate (default 1e-5)")
+    trn.add_argument("--lora-rank", type=int, help="LoRA rank (default 16)")
     out = p.add_argument_group("output")
     out.add_argument(
         "--metric",
@@ -90,8 +103,9 @@ def main(argv: list[str] | None = None) -> int:
     teacher_mode = bool(
         args.teacher_model or args.teacher_system is not None or args.teacher_prompt is not None
     )
-    if sum([bool(args.rollout), args.completion is not None, args.sample]) != 1:
-        return fail("provide exactly one of --completion, --rollout or --sample")
+    training = args.train is not None
+    if sum([bool(args.rollout), args.completion is not None, args.sample, training]) != 1:
+        return fail("provide exactly one of --completion, --rollout, --sample or --train")
     if args.sample and not args.prompt:
         return fail("--sample requires --prompt")
     for value, name in (
@@ -100,9 +114,37 @@ def main(argv: list[str] | None = None) -> int:
         (args.seed, "--seed"),
         (args.save_rollout, "--save-rollout"),
     ):
-        if value is not None and not args.sample:
-            return fail(f"{name} only combines with --sample")
-    if args.raw and (args.system or args.rollout or args.sample or teacher_mode or args.no_thinking):
+        if value is not None and not (args.sample or training):
+            return fail(f"{name} only combines with --sample or --train")
+    for value, name in (
+        (args.iters, "--iters"),
+        (args.learning_rate, "--learning-rate"),
+        (args.lora_rank, "--lora-rank"),
+    ):
+        if value is not None and not training:
+            return fail(f"{name} only combines with --train")
+    if training:
+        if args.teacher_system is None:
+            return fail("--train requires --teacher-system with privileged context")
+        if not args.adapter_path:
+            return fail("--train requires --adapter-path")
+        if args.teacher_prompt is not None:
+            return fail("--teacher-prompt does not combine with --train")
+        if args.prompt is not None:
+            return fail("--prompt does not combine with --train; put prompts in the training file")
+        if args.raw:
+            return fail("--raw does not combine with --train")
+        if args.metric or args.stats or args.worst or args.hide_context or args.json:
+            return fail("scoring output flags do not combine with --train")
+        if args.iters is not None and args.iters <= 0:
+            return fail("--iters must be positive")
+        if args.learning_rate is not None and args.learning_rate <= 0:
+            return fail("--learning-rate must be positive")
+        if args.lora_rank is not None and args.lora_rank <= 0:
+            return fail("--lora-rank must be positive")
+    if args.raw and (
+        args.system or args.rollout or args.sample or training or teacher_mode or args.no_thinking
+    ):
         return fail(
             "--raw only combines with --prompt/--completion "
             "(no system, teacher, sampling or chat-template options)"
@@ -112,7 +154,18 @@ def main(argv: list[str] | None = None) -> int:
     metric = args.metric or ("kl" if teacher_mode else "logprob")
 
     meta = {}
-    if args.rollout:
+    prompts = None
+    if training:
+        from distil.training import load_prompts
+
+        try:
+            prompts = load_prompts(args.train)
+        except (FileNotFoundError, ValueError) as e:
+            return fail(str(e))
+        completion = None
+        prompt = ""
+        system = _read_input(args.system)
+    elif args.rollout:
         try:
             rollout = load_rollout(args.rollout, args.index)
         except (FileNotFoundError, IndexError, ValueError) as e:
@@ -127,7 +180,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from mlx_lm import load  # deferred: slow import
 
-    model, tokenizer = load(args.model)
+    if args.adapter_path and not training and not Path(args.adapter_path).exists():
+        return fail(f"adapter path not found: {args.adapter_path}")
+    model, tokenizer = load(
+        args.model,
+        adapter_path=None if training else args.adapter_path,
+    )
     teacher_name = args.teacher_model or args.model
     if teacher_mode and teacher_name != args.model:
         teacher_model, teacher_tokenizer = load(teacher_name)
@@ -137,6 +195,47 @@ def main(argv: list[str] | None = None) -> int:
     max_tokens = args.max_tokens if args.max_tokens is not None else 512
     temperature = args.temperature if args.temperature is not None else 1.0
     enable_thinking = False if args.no_thinking else None
+
+    if training:
+        from distil.training import train_lora
+
+        def report(step):
+            errcon.print(
+                f"iter {step.iteration}: loss={step.loss:.4f}  "
+                f"tokens={step.num_tokens}  finish={step.finish_reason}",
+                style="grey50",
+            )
+
+        try:
+            trained = train_lora(
+                model,
+                tokenizer,
+                prompts,
+                teacher_system,
+                args.adapter_path,
+                model_name=args.model,
+                student_system=system,
+                teacher_model=teacher_model,
+                teacher_tokenizer=teacher_tokenizer,
+                iters=args.iters if args.iters is not None else 100,
+                learning_rate=(
+                    args.learning_rate if args.learning_rate is not None else 1e-5
+                ),
+                lora_rank=args.lora_rank if args.lora_rank is not None else 16,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=args.seed if args.seed is not None else 0,
+                enable_thinking=enable_thinking,
+                save_rollout_path=args.save_rollout,
+                report=report,
+                warn=lambda message: errcon.print(
+                    f"[yellow]warning:[/yellow] {message}"
+                ),
+            )
+        except (OSError, RuntimeError, ValueError) as e:
+            return fail(str(e))
+        errcon.print(f"saved adapter to {trained.adapter_file}", style="grey50")
+        return 0
 
     sample = None
     if args.rollout:
@@ -202,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                 model, tokenizer, built,
                 teacher_model, teacher_tokenizer, built_teacher,
                 model_name=args.model, teacher_name=teacher_name, top_k=args.top_k,
+                teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
             )
         except ValueError as e:
             errcon.print(f"[red]error:[/red] {e}")
