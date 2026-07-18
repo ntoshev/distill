@@ -1,13 +1,19 @@
-"""Render a ScoreResult to the terminal with rich, and to JSON."""
+"""Render scores and checkpoint progress to the terminal, and scores to JSON."""
+
+from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 from distil.scoring import ScoreResult, TokenScore
+
+if TYPE_CHECKING:
+    from distil.progress import ProgressResult
 
 # Color stops for the likelihood gradient. Hex literals are intentional: many
 # editors show inline color previews for them.
@@ -118,6 +124,69 @@ class RenderOptions:
     hide_context: bool = False
     stats: bool = False  # legend + summary line
     worst: int = 0  # rows in the most-surprising-tokens / disagreements table (0 disables)
+
+
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _downsample(values: list[float], width: int) -> list[float]:
+    if len(values) <= width:
+        return values
+    sampled = []
+    for column in range(width):
+        start = column * len(values) // width
+        end = (column + 1) * len(values) // width
+        sampled.append(sum(values[start:end]) / (end - start))
+    return sampled
+
+
+def render_progress(result: ProgressResult, console: Console) -> None:
+    """Render mean token probability over checkpoints as colored sparklines."""
+    label_width = min(30, max(len(probe.name) for probe in result.probes))
+    chart_width = min(len(result.steps), max(12, console.width - label_width - 40))
+    console.print(
+        f"steps [bold]{result.steps[0]}[/bold] → [bold]{result.steps[-1]}[/bold]  "
+        f"({len(result.steps)} checkpoints including base)"
+    )
+    console.print("geometric-mean token probability of each fixed completion", style="grey50")
+    console.print()
+
+    for probe in result.probes:
+        points = result.series[probe.name]
+        values = [point.mean_probability for point in points]
+        chart_values = _downsample(values, chart_width)
+        line = Text(f"{probe.name[:label_width]:<{label_width}}  ")
+        for probability in chart_values:
+            index = min(len(_SPARK_CHARS) - 1, int(probability * len(_SPARK_CHARS)))
+            logprob = math.log(max(probability, 1e-300))
+            line.append(_SPARK_CHARS[index], style=color_for(logprob, "prob"))
+        peak_index = max(range(len(values)), key=values.__getitem__)
+        line.append(
+            f"  {values[0]:6.1%} → {values[-1]:6.1%}  "
+            f"max {values[peak_index]:6.1%}@{result.steps[peak_index]}"
+        )
+        console.print(line)
+
+
+def render_progress_tokens(
+    result: ProgressResult, console: Console, metric: str = "prob"
+) -> None:
+    """Render one fixed completion token-by-token at every checkpoint."""
+    if len(result.probes) != 1:
+        raise ValueError("token progress rendering requires exactly one probe")
+    probe = result.probes[0]
+    points = result.series[probe.name]
+    label_width = max(4, len(f"step-{result.steps[-1]:04d}"))
+    console.print("token probability within the fixed completion", style="grey50")
+    console.print()
+
+    for point in points:
+        label = "base" if point.step == 0 else f"step-{point.step:04d}"
+        line = Text(f"{label:<{label_width}}  ")
+        for token in point.tokens:
+            line.append(token["text"], style=style_for(token["logprob"], metric))
+        line.append(f"  {point.mean_probability:6.1%}", style="grey50")
+        console.print(line)
 
 
 def _token_value(tok: TokenScore, metric: str) -> float | None:

@@ -1,130 +1,166 @@
 # distil
 
-Visualize the per-token likelihood of a text/rollout according to an LLM, using a
-single forward pass with [mlx-lm](https://github.com/ml-explore/mlx-lm).
+`distil` is a small MLX command-line tool for:
 
-Tokens are colored on a red→orange→yellow→green gradient by their log-probability
-under the model: green = the model finds the token likely, red = surprising. The
-palette lives in `src/distil/render.py` as hex color literals so editors can show
-inline swatches. The far tail below logprob \(-7.5\), roughly probability
-\(e^{-7.5} \approx 0.06\%\), is bold and underlined so near-impossible tokens
-remain visually distinct.
+- visualizing token likelihood and teacher/student KL;
+- sampling and saving model rollouts;
+- distilling privileged context into a LoRA adapter;
+- inspecting learning and contamination across saved checkpoints.
 
-## Usage
+The current single-fact experiment learns `VIOLET-731`, but still exhibits
+model collapse. A lower learning rate, per-step checkpoints, contamination
+canaries, and progress visualization make the trade-off visible and allow
+useful early stopping; they do not eliminate forgetting. See
+[EXPERIMENTS.md](EXPERIMENTS.md) for the measurements and
+[DESIGN.md](DESIGN.md) for implementation details.
 
-```sh
-# score a completion given a prompt (model chat template applied)
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --prompt "What is 2+2?" --completion "2+2 equals 5."
-
-# optional system prompt; @file reads inputs from disk, "-" reads stdin
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --system @system.txt --prompt @prompt.txt --completion -
-
-# raw mode: no chat template, completion scored as continuation of prompt
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
-
-# score a verifiers / prime-rl rollout (results.jsonl from `prime eval run`)
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --rollout examples/verifiers/gsm8k-results.jsonl --index 1
-
-# score a generated multi-turn Qwen3.5-9B-6bit Wordle rollout
-uv run distil --model mlx-community/Qwen3.5-9B-6bit \
-    --rollout examples/verifiers/wordle-qwen3.5-9b-6bit-results.jsonl --index 0
-```
-
-The example rollouts are copied from or generated with real verifiers evals:
-GSM8K for a single-turn task and Wordle for multi-turn environments. For your
-own eval runs, point `--rollout` at the generated `results.jsonl`; `...` is
-accepted as a recursive wildcard path segment when it matches exactly one file,
-e.g. `outputs/evals/.../results.jsonl`.
-
-By default the output is just the text, gradient-colored (context in dim grey).
-Useful flags: `--stats` (color legend + mean logprob/perplexity), `--worst N`
-(table of most surprising tokens with top-k alternatives), `--metric logprob|prob|kl`
-(color scale), `--json` (machine-readable output), `--hide-context` (omit the
-uncolored prompt/context), `--no-thinking` (pass `enable_thinking=False` to
-Qwen-style chat templates), `--color always|never|auto`.
-
-## Teacher/student KL
-
-Any `--teacher-*` flag switches to two-pass scoring: the same completion is
-scored under two contexts — the student sees the plain conversation, the
-teacher (typically the *same weights*, loaded once) sees privileged
-conditioning — and each token is colored by its exact full-vocabulary
-`KL(teacher ‖ student)` in nats: green = the two distributions agree, red =
-strong disagreement. `--worst N` becomes a table of the largest disagreements
-showing what each model preferred.
+## Setup
 
 ```sh
-# teacher = same weights + a system prompt that reveals the answer
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit     --rollout examples/verifiers/gsm8k-results.jsonl --index 1     --teacher-system "You are grading a solution. The correct answer is 3."     --stats --worst 10
-
-# different teacher weights (must share the student's tokenizer)
-uv run distil --model mlx-community/Qwen3.5-0.8B-8bit     --teacher-model mlx-community/Qwen3.5-9B-6bit  --system "Respond with one number only, the final answer"   --prompt "What is 189+67?" --sample --no-thinking --worst 3 --temperature 0
+uv sync
 ```
 
-`--teacher-system` replaces the system message (or inserts one) for the teacher
-pass only; `--teacher-prompt` replaces the first user message. With a teacher,
-`--metric` defaults to `kl`; pass `--metric logprob` to color by the student's
-likelihood instead.
+Examples below use `mlx-community/Qwen3.5-0.8B-4bit`.
 
-## Sampling from the student
-
-`--sample` generates the completion from `--model` instead of reading one, then
-scores it — with a teacher, that is the on-policy-distillation loop: student
-generates, teacher scores the student's tokens. `--save-rollout` appends the
-sample to a `results.jsonl` (the save format is the load format, so saved
-samples can be re-scored later with `--rollout`).
+## Score and visualize text
 
 ```sh
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit     --prompt "What is 7 times 8?"     --sample --temperature 0.7 --seed 0 --max-tokens 256     --teacher-system "The user is quizzing you; the correct answer is 56." --stats    --save-rollout samples.jsonl
+# Apply the model's chat template and score only the completion.
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --prompt "What is 2+2?" \
+  --completion "2+2 equals 5."
+
+# Raw continuation scoring without a chat template.
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
+
+# Score one rollout from verifiers/prime-rl results.jsonl.
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --rollout examples/verifiers/gsm8k-results.jsonl --index 1
 ```
 
-Sampling flags: `--max-tokens` (default 512), `--temperature` (default 1.0,
-`0` = greedy), `--seed`.
+Inputs accept inline text, `@file`, or `-` for stdin. Tokens are colored from
+red (surprising) to green (likely). Useful output flags are:
 
-## LoRA context distillation
+- `--metric logprob|prob|kl`;
+- `--stats` for summary statistics and a legend;
+- `--worst N` for the least likely tokens or largest KL disagreements;
+- `--hide-context`, `--json`, and `--color auto|always|never`;
+- `--no-thinking` for chat templates supporting `enable_thinking=False`.
 
-`--train` runs on-policy self-distillation over a plain-text file containing
-one prompt per non-empty line. The student samples without privileged context;
-the frozen teacher is the same base model with `--teacher-system`. Only a LoRA
-adapter is updated, using full-vocabulary `KL(teacher ‖ student)`.
+## Compare teacher and student contexts
 
-This small synthetic example is intended as a fast end-to-end check:
+Any `--teacher-*` flag enables two-pass scoring. The completion is unchanged;
+only the teacher's context differs. The default display metric becomes exact
+full-vocabulary `KL(teacher || student)`.
 
 ```sh
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --train examples/distillation/lumen-questions.txt \
-    --teacher-system @examples/distillation/lumen-teacher.txt \
-    --adapter-path adapters/lumen-test \
-    --iters 20 --learning-rate 1e-4 --lora-rank 4 \
-    --max-tokens 16 --temperature 0 --seed 0 --no-thinking
-
-uv run distil --model mlx-community/Qwen3.5-0.8B-4bit \
-    --adapter-path adapters/lumen-test \
-    --prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
-    --sample --temperature 0 --max-tokens 16 --seed 0 --no-thinking
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --rollout examples/verifiers/gsm8k-results.jsonl --index 1 \
+  --teacher-system "The correct answer is 3." \
+  --stats --worst 10
 ```
 
-The base model answers `PL-001` in the pinned integration test; after 20
-updates the trained and reloaded adapter answers `VIOLET-731`. The same snapshot
-also verifies that teacher/student KL on the held-out paraphrase falls sharply.
-The teacher-system file is deliberately external: for a real article, put both
-the instructions and article text there. Training prompts remain separate and
-are never shown the privileged context.
+`--teacher-system` replaces or inserts the teacher's system message.
+`--teacher-prompt` replaces its first user message. A separate
+`--teacher-model` must use the same tokenizer vocabulary as the student.
 
-`--adapter-path` also loads trained adapters in the existing scoring and
-sampling modes. When teacher mode is used with a same-base adapter, the student
-uses LoRA while the teacher pass automatically disables it.
+## Sample from the student
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --prompt "What is 7 times 8?" \
+  --sample --temperature 0.7 --seed 0 --max-tokens 256 \
+  --teacher-system "The correct answer is 56." \
+  --stats --save-rollout samples.jsonl
+```
+
+`--save-rollout` writes the same `results.jsonl` format accepted by
+`--rollout`. The sample is saved before scoring so a later scoring error does
+not discard it.
+
+## Train a LoRA by context distillation
+
+`--train` reads one question per non-empty line. The student samples without
+the privileged context; the frozen teacher scores those same generated tokens
+with `--teacher-system`. Only LoRA parameters update.
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --train examples/distillation/lumen-questions.txt \
+  --teacher-system @examples/distillation/lumen-teacher.txt \
+  --adapter-path adapters/lumen-test \
+  --iters 32 --learning-rate 2e-6 --lora-rank 4 \
+  --max-tokens 16 --temperature 0 --seed 0 --no-thinking \
+  --checkpoint-every 1 \
+  --canaries examples/distillation/contamination-canaries.txt \
+  --contamination-regex '^\s*VIO'
+```
+
+The adapter is saved in standard mlx-lm format and can be sampled directly:
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --adapter-path adapters/lumen-test \
+  --prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
+  --sample --temperature 0 --max-tokens 16 --seed 0 --no-thinking
+```
+
+Training writes:
+
+- `ADAPTER_PATH/adapters.safetensors` and `adapter_config.json`;
+- `ADAPTER_PATH/checkpoints/step-NNNN/` at the requested interval;
+- `ADAPTER_PATH/training_metrics.jsonl` with loss, timing, rollout, checkpoint,
+  and optional canary results.
+
+Canaries compare each checkpoint's greedy output against the frozen-base
+answer. `--contamination-regex` adds a task-specific leakage signal.
+
+## Inspect checkpoint progress
+
+Render one fixed target at every checkpoint. Each token is colored by its own
+probability; the trailing percentage is geometric-mean token probability.
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --progress outputs/lr-sweep-v014/lr-2e-6 \
+  --prompt "What is Project Lumen's launch code? Answer with the code only." \
+  --completion "VIOLET-731" --metric prob --no-thinking
+```
+
+Compare several targets and canaries as compact sparklines:
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --progress outputs/lr-sweep-v014/lr-2e-6 \
+  --probes examples/distillation/lumen-probes.jsonl \
+  --no-thinking --width 140
+```
+
+Probe files contain one JSON object per line with `name`, `prompt`, and
+`completion`, plus an optional `system`. `--json` emits all checkpoint and
+per-token values. Progress mode performs inference over saved checkpoints but
+does not retrain.
+
+The example progress commands require the local sweep artifacts. Recreate them
+with the commands in [EXPERIMENTS.md](EXPERIMENTS.md); generated sweep folders
+are intentionally ignored because they contain large adapter checkpoints.
 
 ## Development
 
 ```sh
-uv run pytest                # unit + snapshot tests (fast ones need no model)
-uv run pytest -m model       # integration tests (needs cached Qwen3.5-0.8B-4bit)
-UPDATE_SNAPSHOTS=1 uv run pytest   # regenerate on-disk snapshots
+uv run pytest
+UPDATE_SNAPSHOTS=1 uv run pytest
 ```
 
-See [DESIGN.md](DESIGN.md) for the scoring and training architecture.
+The full suite includes cached-model integration tests for Qwen3.5-0.8B-4bit.
+Fast unit-only runs can exclude them with `uv run pytest -m 'not model'`.

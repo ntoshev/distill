@@ -40,14 +40,18 @@ def test_chat_score_json_snapshot(chat_result, snapshot):
 
 
 def test_chat_render_snapshot(chat_result, snapshot):
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=100)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=100, height=25
+    )
     render(chat_result, console, RenderOptions(stats=True, worst=5))
     snapshot("chat_render.ansi", console.export_text(styles=True))
 
 
 def test_chat_render_default_snapshot(chat_result, snapshot):
     """Default output: nothing but the gradient-colored text."""
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=100)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=100, height=25
+    )
     render(chat_result, console)
     snapshot("chat_render_default.ansi", console.export_text(styles=True))
 
@@ -291,8 +295,8 @@ def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot
             teacher_system,
             adapter_path,
             model_name=MODEL,
-            iters=20,
-            learning_rate=1e-4,
+            iters=32,
+            learning_rate=2e-6,
             lora_rank=4,
             max_tokens=16,
             temperature=0.0,
@@ -306,7 +310,11 @@ def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot
         assert after == target
         assert kl_after < kl_before / 5
         assert trained.adapter_file.exists()
+        assert trained.metrics_file.exists()
         assert (adapter_path / "adapter_config.json").exists()
+        assert (
+            adapter_path / "checkpoints" / "step-0032" / "adapters.safetensors"
+        ).exists()
 
         # Prove the standard mlx-lm adapter files reload into a clean base model.
         remove_lora_layers(model)

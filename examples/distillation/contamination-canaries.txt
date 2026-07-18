@@ -1,0 +1,4 @@
+What is 7 plus 5? Answer with the number only.
+What is the capital of France? Answer with the city only.
+What is the opposite of hot? Answer with one word only.
+What color is grass usually? Answer with the color only.

@@ -2,12 +2,19 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 from rich.console import Console
 
-from distil.render import RenderOptions, render, to_json_dict
+from distil.render import (
+    RenderOptions,
+    render,
+    render_progress,
+    render_progress_tokens,
+    to_json_dict,
+)
 from distil.rollout import load_rollout, save_rollout
 from distil.sample import sample_completion
 from distil.scoring import score_text, score_text_pair
@@ -33,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
         "distillation. Values support @file and '-' for stdin.",
     )
     p.add_argument("--model", required=True, help="mlx model path or HF repo id (the student)")
-    src = p.add_argument_group("input (prompt/completion, rollout, sample, or training)")
+    src = p.add_argument_group(
+        "input (prompt/completion, rollout, sample, training, or checkpoint progress)"
+    )
     src.add_argument("--system", help="optional system prompt")
     src.add_argument("--prompt", help="prompt / context (not scored)")
     src.add_argument("--completion", help="text to score")
@@ -46,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--rollout", help="verifiers/prime-rl results.jsonl")
     src.add_argument("--index", type=int, default=0, help="rollout row (default 0)")
     src.add_argument("--train", metavar="PATH", help="train LoRA from one prompt per line")
+    src.add_argument(
+        "--progress",
+        metavar="PATH",
+        help="visualize a completion or probe set over PATH/checkpoints/step-*",
+    )
+    src.add_argument("--probes", metavar="PATH", help="optional JSONL probe set for --progress")
     tch = p.add_argument_group("teacher (two-pass KL scoring; any flag enables it)")
     tch.add_argument("--teacher-model", help="teacher weights (default: same as --model)")
     tch.add_argument("--teacher-system", help="teacher's system prompt, replacing the student's")
@@ -67,8 +82,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="save a trained adapter, or load one for scoring/sampling",
     )
     trn.add_argument("--iters", type=int, help="successful training updates (default 100)")
-    trn.add_argument("--learning-rate", type=float, help="training learning rate (default 1e-5)")
+    trn.add_argument("--learning-rate", type=float, help="training learning rate (default 2e-6)")
     trn.add_argument("--lora-rank", type=int, help="LoRA rank (default 16)")
+    trn.add_argument(
+        "--checkpoint-every",
+        type=int,
+        help="save a numbered adapter checkpoint every N updates (default 1)",
+    )
+    trn.add_argument(
+        "--canaries",
+        metavar="PATH",
+        help="unrelated prompts to sample after every update, one per line",
+    )
+    trn.add_argument(
+        "--canary-max-tokens",
+        type=int,
+        help="maximum generated tokens for each contamination canary (default 32)",
+    )
+    trn.add_argument(
+        "--contamination-regex",
+        help="case-insensitive regex marking a canary output as contaminated",
+    )
     out = p.add_argument_group("output")
     out.add_argument(
         "--metric",
@@ -93,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         no_color=args.color == "never",
         color_system=None if args.color == "never" else "truecolor",
         width=args.width,
+        height=25 if args.width is not None else None,
     )
     errcon = Console(stderr=True)
 
@@ -104,8 +139,12 @@ def main(argv: list[str] | None = None) -> int:
         args.teacher_model or args.teacher_system is not None or args.teacher_prompt is not None
     )
     training = args.train is not None
-    if sum([bool(args.rollout), args.completion is not None, args.sample, training]) != 1:
-        return fail("provide exactly one of --completion, --rollout, --sample or --train")
+    progress = args.progress is not None
+    standalone_completion = args.completion is not None and not progress
+    if sum([bool(args.rollout), standalone_completion, args.sample, training, progress]) != 1:
+        return fail(
+            "provide exactly one of --completion, --rollout, --sample, --train or --progress"
+        )
     if args.sample and not args.prompt:
         return fail("--sample requires --prompt")
     for value, name in (
@@ -120,9 +159,15 @@ def main(argv: list[str] | None = None) -> int:
         (args.iters, "--iters"),
         (args.learning_rate, "--learning-rate"),
         (args.lora_rank, "--lora-rank"),
+        (args.checkpoint_every, "--checkpoint-every"),
+        (args.canaries, "--canaries"),
+        (args.canary_max_tokens, "--canary-max-tokens"),
+        (args.contamination_regex, "--contamination-regex"),
     ):
         if value is not None and not training:
             return fail(f"{name} only combines with --train")
+    if args.probes is not None and not progress:
+        return fail("--probes only combines with --progress")
     if training:
         if args.teacher_system is None:
             return fail("--train requires --teacher-system with privileged context")
@@ -142,6 +187,32 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--learning-rate must be positive")
         if args.lora_rank is not None and args.lora_rank <= 0:
             return fail("--lora-rank must be positive")
+        if args.checkpoint_every is not None and args.checkpoint_every <= 0:
+            return fail("--checkpoint-every must be positive")
+        if args.canary_max_tokens is not None and args.canary_max_tokens <= 0:
+            return fail("--canary-max-tokens must be positive")
+        if args.contamination_regex is not None and args.canaries is None:
+            return fail("--contamination-regex requires --canaries")
+        if args.contamination_regex is not None:
+            try:
+                re.compile(args.contamination_regex)
+            except re.error as error:
+                return fail(f"invalid --contamination-regex: {error}")
+    if progress:
+        target_progress = args.completion is not None
+        if target_progress == (args.probes is not None):
+            return fail("--progress requires exactly one of --completion or --probes")
+        if args.adapter_path:
+            return fail("--adapter-path does not combine with --progress")
+        if teacher_mode or args.raw:
+            return fail("teacher and raw modes do not combine with --progress")
+        if args.stats or args.worst or args.hide_context:
+            return fail("--stats, --worst and --hide-context do not combine with --progress")
+        if args.probes is not None:
+            if args.system or args.prompt is not None:
+                return fail("--progress with --probes takes context from each probe")
+            if args.metric:
+                return fail("--metric only combines with single-completion --progress")
     if args.raw and (
         args.system or args.rollout or args.sample or training or teacher_mode or args.no_thinking
     ):
@@ -155,11 +226,30 @@ def main(argv: list[str] | None = None) -> int:
 
     meta = {}
     prompts = None
-    if training:
+    if progress:
+        from distil.progress import Probe, load_probes
+
+        if target_progress:
+            completion = _read_input(args.completion)
+            prompt = _read_input(args.prompt) or ""
+            system = _read_input(args.system)
+            if not completion:
+                return fail("--completion must not be empty")
+            probes = [Probe("target", prompt, completion, system)]
+        else:
+            try:
+                probes = load_probes(args.probes)
+            except (FileNotFoundError, ValueError) as e:
+                return fail(str(e))
+            completion = None
+            prompt = ""
+            system = None
+    elif training:
         from distil.training import load_prompts
 
         try:
             prompts = load_prompts(args.train)
+            canary_prompts = load_prompts(args.canaries) if args.canaries else []
         except (FileNotFoundError, ValueError) as e:
             return fail(str(e))
         completion = None
@@ -177,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
         system = _read_input(args.system)
     teacher_system = _read_input(args.teacher_system)
     teacher_prompt = _read_input(args.teacher_prompt)
+
+    if progress:
+        from huggingface_hub.utils import disable_progress_bars
+
+        disable_progress_bars()
 
     from mlx_lm import load  # deferred: slow import
 
@@ -196,15 +291,45 @@ def main(argv: list[str] | None = None) -> int:
     temperature = args.temperature if args.temperature is not None else 1.0
     enable_thinking = False if args.no_thinking else None
 
+    if progress:
+        from distil.progress import progress_to_json, score_progress
+
+        try:
+            progress_result = score_progress(
+                model,
+                tokenizer,
+                args.progress,
+                probes,
+                enable_thinking=enable_thinking,
+            )
+        except (FileNotFoundError, OSError, RuntimeError, ValueError) as e:
+            return fail(str(e))
+        if args.json:
+            print(json.dumps(progress_to_json(progress_result), ensure_ascii=False, indent=2))
+        elif target_progress:
+            render_progress_tokens(progress_result, console, metric=args.metric or "prob")
+        else:
+            render_progress(progress_result, console)
+        return 0
+
     if training:
         from distil.training import train_lora
 
         def report(step):
-            errcon.print(
+            line = (
                 f"iter {step.iteration}: loss={step.loss:.4f}  "
-                f"tokens={step.num_tokens}  finish={step.finish_reason}",
-                style="grey50",
+                f"tokens={step.num_tokens}  finish={step.finish_reason}  "
+                f"train={step.train_seconds:.2f}s  checkpoint={step.checkpoint_seconds:.2f}s"
             )
+            if step.canaries:
+                changed = sum(result.changed for result in step.canaries)
+                contaminated = sum(result.contaminated for result in step.canaries)
+                line += (
+                    f"  canaries={step.canary_seconds:.2f}s  "
+                    f"changed={changed}/{len(step.canaries)}  "
+                    f"contaminated={contaminated}/{len(step.canaries)}"
+                )
+            errcon.print(line, style="grey50")
 
         try:
             trained = train_lora(
@@ -219,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
                 teacher_tokenizer=teacher_tokenizer,
                 iters=args.iters if args.iters is not None else 100,
                 learning_rate=(
-                    args.learning_rate if args.learning_rate is not None else 1e-5
+                    args.learning_rate if args.learning_rate is not None else 2e-6
                 ),
                 lora_rank=args.lora_rank if args.lora_rank is not None else 16,
                 max_tokens=max_tokens,
@@ -227,6 +352,14 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed if args.seed is not None else 0,
                 enable_thinking=enable_thinking,
                 save_rollout_path=args.save_rollout,
+                checkpoint_every=(
+                    args.checkpoint_every if args.checkpoint_every is not None else 1
+                ),
+                canary_prompts=canary_prompts,
+                canary_max_tokens=(
+                    args.canary_max_tokens if args.canary_max_tokens is not None else 32
+                ),
+                contamination_regex=args.contamination_regex,
                 report=report,
                 warn=lambda message: errcon.print(
                     f"[yellow]warning:[/yellow] {message}"
@@ -235,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, RuntimeError, ValueError) as e:
             return fail(str(e))
         errcon.print(f"saved adapter to {trained.adapter_file}", style="grey50")
+        errcon.print(f"saved metrics to {trained.metrics_file}", style="grey50")
         return 0
 
     sample = None
@@ -287,7 +421,9 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as e:
             return fail(str(e))
         if args.sample:
-            template_kwargs = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+            template_kwargs = (
+                {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+            )
             teacher_prompt_text = teacher_tokenizer.apply_chat_template(
                 teacher_messages, tokenize=False, add_generation_prompt=True, **template_kwargs
             )

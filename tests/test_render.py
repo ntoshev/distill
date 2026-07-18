@@ -2,9 +2,19 @@
 
 import json
 
+import pytest
 from rich.console import Console
 
-from distil.render import RenderOptions, color_for, render, style_for, to_json_dict
+from distil.progress import Probe, ProbePoint, ProgressResult
+from distil.render import (
+    RenderOptions,
+    color_for,
+    render,
+    render_progress,
+    render_progress_tokens,
+    style_for,
+    to_json_dict,
+)
 from distil.scoring import ScoreResult, TokenScore, TopToken
 
 
@@ -88,20 +98,26 @@ def test_color_monotonic():
 
 
 def test_render_snapshot(snapshot):
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=80, height=25
+    )
     render(make_result(), console, RenderOptions(stats=True, worst=3))
     snapshot("render_synthetic.ansi", console.export_text(styles=True))
 
 
 def test_render_default_is_body_only():
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=80, height=25
+    )
     render(make_result(), console)
     out = console.export_text()
     assert out == "The prompt. A very likely sentence!\n"
 
 
 def test_render_hide_context():
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=80, height=25
+    )
     render(make_result(), console, RenderOptions(hide_context=True))
     assert "The prompt." not in console.export_text()
 
@@ -141,7 +157,9 @@ def test_extreme_kl_style_is_emphasized():
 
 
 def test_teacher_render_snapshot(snapshot):
-    console = Console(record=True, force_terminal=True, color_system="truecolor", width=100)
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=100, height=25
+    )
     render(make_teacher_result(), console, RenderOptions(metric="kl", stats=True, worst=3))
     snapshot("render_teacher_kl.ansi", console.export_text(styles=True))
 
@@ -155,3 +173,50 @@ def test_teacher_json_dict():
     assert tok["kl"] == 0.01 and tok["teacher_logprob"] == -0.04
     assert tok["teacher_top"] == [[" indeed", -0.2]]
     json.dumps(d)  # serializable
+
+
+def test_render_progress():
+    probe = Probe("lumen/fact", "Code?", "VIOLET-731")
+    points = [
+        ProbePoint(0, -4.0, 0.02, -8.0, 0.0, []),
+        ProbePoint(1, -1.0, 0.37, -2.0, 0.14, []),
+        ProbePoint(2, -0.1, 0.90, -0.2, 0.82, []),
+    ]
+    result = ProgressResult("run", [0, 1, 2], [probe], {probe.name: points})
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=100, height=25
+    )
+    render_progress(result, console)
+    output = console.export_text()
+    assert "lumen/fact" in output
+    assert "2.0% →  90.0%" in output
+    assert "max  90.0%@2" in output
+
+
+def test_render_progress_tokens():
+    probe = Probe("target", "Code?", "VIOLET-731")
+    points = [
+        ProbePoint(0, -2.0, 0.14, -4.0, 0.02, [
+            {"text": "VIOLET", "logprob": -3.0, "probability": 0.05},
+            {"text": "-731", "logprob": -1.0, "probability": 0.37},
+        ]),
+        ProbePoint(1, -0.1, 0.90, -0.2, 0.82, [
+            {"text": "VIOLET", "logprob": -0.1, "probability": 0.90},
+            {"text": "-731", "logprob": -0.1, "probability": 0.90},
+        ]),
+    ]
+    result = ProgressResult("run", [0, 1], [probe], {probe.name: points})
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=80, height=25
+    )
+    render_progress_tokens(result, console)
+    output = console.export_text()
+    assert "base       VIOLET-731   14.0%" in output
+    assert "step-0001  VIOLET-731   90.0%" in output
+
+
+def test_render_progress_tokens_requires_one_probe():
+    result = ProgressResult("run", [], [], {})
+    console = Console(record=True)
+    with pytest.raises(ValueError, match="exactly one probe"):
+        render_progress_tokens(result, console)

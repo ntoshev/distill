@@ -1,4 +1,10 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
+.DS_Store
+
+# Sweep checkpoints are large, reproducible experiment artifacts. Keep the
+# report and scripts in git; keep generated adapters and metrics local.
+outputs/lr-sweep-*/

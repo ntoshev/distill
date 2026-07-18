@@ -18,3 +18,8 @@ def test_load_prompts_rejects_missing_and_empty_files(tmp_path):
     empty.write_text(" \n")
     with pytest.raises(ValueError, match="empty"):
         load_prompts(empty)
+
+
+def test_load_prompts_rejects_directory(tmp_path):
+    with pytest.raises(FileNotFoundError, match="not a file"):
+        load_prompts(tmp_path)

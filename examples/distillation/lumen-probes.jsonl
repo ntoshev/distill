@@ -1,0 +1,7 @@
+{"name":"fact/train target","prompt":"What is Project Lumen's launch code? Answer with the code only.","completion":"VIOLET-731"}
+{"name":"fact/heldout target","prompt":"Give the launch code assigned to Project Lumen. Answer with the code only.","completion":"VIOLET-731"}
+{"name":"canary/math retain 12","prompt":"What is 7 plus 5? Answer with the number only.","completion":"12"}
+{"name":"canary/capital retain Paris","prompt":"What is the capital of France? Answer with the city only.","completion":"Paris"}
+{"name":"canary/capital leak VIOLET","prompt":"What is the capital of France? Answer with the city only.","completion":"VIOLET"}
+{"name":"canary/opposite retain cold","prompt":"What is the opposite of hot? Answer with one word only.","completion":"cold"}
+{"name":"canary/grass retain Green","prompt":"What color is grass usually? Answer with the color only.","completion":"Green"}

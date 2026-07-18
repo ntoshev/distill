@@ -1,7 +1,7 @@
 [project]
 name = "distil"
 version = "0.1.0"
-description = "Visualize per-token likelihood of a text/rollout according to an LLM (mlx-lm)"
+description = "Visualize token likelihood and distill context into MLX LoRA adapters"
 readme = "README.md"
 authors = [
     { name = "Nikola Toshev", email = "312759+ntoshev@users.noreply.github.com" }
