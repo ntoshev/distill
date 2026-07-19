@@ -103,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--contamination-regex",
         help="case-insensitive regex marking a canary output as contaminated",
     )
+    trn.add_argument(
+        "--speculative-top-k",
+        type=int,
+        help="use interleaved Speculative KD; replace proposals outside teacher top K",
+    )
     out = p.add_argument_group("output")
     out.add_argument(
         "--metric",
@@ -163,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.canaries, "--canaries"),
         (args.canary_max_tokens, "--canary-max-tokens"),
         (args.contamination_regex, "--contamination-regex"),
+        (args.speculative_top_k, "--speculative-top-k"),
     ):
         if value is not None and not training:
             return fail(f"{name} only combines with --train")
@@ -191,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--checkpoint-every must be positive")
         if args.canary_max_tokens is not None and args.canary_max_tokens <= 0:
             return fail("--canary-max-tokens must be positive")
+        if args.speculative_top_k is not None and args.speculative_top_k <= 0:
+            return fail("--speculative-top-k must be positive")
         if args.contamination_regex is not None and args.canaries is None:
             return fail("--contamination-regex requires --canaries")
         if args.contamination_regex is not None:
@@ -321,6 +329,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"tokens={step.num_tokens}  finish={step.finish_reason}  "
                 f"train={step.train_seconds:.2f}s  checkpoint={step.checkpoint_seconds:.2f}s"
             )
+            if step.speculative_top_k is not None:
+                line += (
+                    f"  skd@{step.speculative_top_k}="
+                    f"{step.accepted_tokens}/{step.num_tokens} accepted"
+                )
             if step.canaries:
                 changed = sum(result.changed for result in step.canaries)
                 contaminated = sum(result.contaminated for result in step.canaries)
@@ -360,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.canary_max_tokens if args.canary_max_tokens is not None else 32
                 ),
                 contamination_regex=args.contamination_regex,
+                speculative_top_k=args.speculative_top_k,
                 report=report,
                 warn=lambda message: errcon.print(
                     f"[yellow]warning:[/yellow] {message}"

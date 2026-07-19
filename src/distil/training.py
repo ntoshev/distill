@@ -16,7 +16,7 @@ from mlx_lm.tuner.losses import kl_div_loss
 
 from distil.adapters import add_lora, lora_disabled, save_lora_adapter
 from distil.rollout import save_rollout
-from distil.sample import Sample, sample_completion
+from distil.sample import Sample, sample_completion, sample_speculative_completion
 from distil.scoring import align_scored_tokens
 from distil.templating import apply_teacher_context, build_raw
 
@@ -35,6 +35,9 @@ class TrainStep:
     total_seconds: float = 0.0
     checkpoint_file: Path | None = None
     canaries: list["CanaryResult"] | None = None
+    speculative_top_k: int | None = None
+    accepted_tokens: int | None = None
+    replaced_tokens: int | None = None
 
 
 @dataclass
@@ -137,6 +140,19 @@ def _step_payload(step: TrainStep) -> dict:
         "num_tokens": step.num_tokens,
         "finish_reason": step.finish_reason,
         "content": step.content,
+        "sampling": {
+            "policy": "speculative" if step.speculative_top_k is not None else "student",
+            "top_k": step.speculative_top_k,
+            "accepted_tokens": step.accepted_tokens,
+            "replaced_tokens": step.replaced_tokens,
+            "acceptance_rate": (
+                step.accepted_tokens / (step.accepted_tokens + step.replaced_tokens)
+                if step.accepted_tokens is not None
+                and step.replaced_tokens is not None
+                and step.accepted_tokens + step.replaced_tokens > 0
+                else None
+            ),
+        },
         "timing": {
             "train_seconds": step.train_seconds,
             "checkpoint_seconds": step.checkpoint_seconds,
@@ -187,13 +203,16 @@ def train_lora(
     canary_prompts: list[str] | None = None,
     canary_max_tokens: int = 32,
     contamination_regex: str | None = None,
+    speculative_top_k: int | None = None,
     report: Callable[[TrainStep], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> TrainResult:
     """Train a LoRA student against a frozen, privileged-context teacher.
 
-    Sampling is on-policy under the current adapter. With self-distillation,
-    the teacher is the same model evaluated with LoRA disabled.
+    Sampling is on-policy under the current adapter unless
+    ``speculative_top_k`` enables teacher-corrected interleaving. With
+    self-distillation, the teacher is the same model evaluated with LoRA
+    disabled.
     """
     if not prompts:
         raise ValueError("training needs at least one prompt")
@@ -209,6 +228,8 @@ def train_lora(
         raise ValueError("--checkpoint-every must be positive")
     if canary_max_tokens <= 0:
         raise ValueError("--canary-max-tokens must be positive")
+    if speculative_top_k is not None and speculative_top_k <= 0:
+        raise ValueError("--speculative-top-k must be positive")
 
     try:
         contamination_pattern = (
@@ -271,22 +292,38 @@ def train_lora(
         prompt = order[attempts % len(order)]
         attempts += 1
         messages = _messages(prompt, student_system)
+        teacher_messages = apply_teacher_context(messages, system=teacher_system)
 
         model.eval()
-        sample: Sample = sample_completion(
-            model,
-            tokenizer,
-            messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            seed=None,
-            enable_thinking=enable_thinking,
-        )
+        if speculative_top_k is None:
+            sample: Sample = sample_completion(
+                model,
+                tokenizer,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=None,
+                enable_thinking=enable_thinking,
+            )
+        else:
+            sample = sample_speculative_completion(
+                model,
+                tokenizer,
+                messages,
+                teacher_model,
+                teacher_tokenizer,
+                teacher_messages,
+                top_k=speculative_top_k,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=None,
+                enable_thinking=enable_thinking,
+                teacher_without_adapter=self_teacher,
+            )
         if sample.num_tokens == 0:
             continue
 
         built_student = build_raw(sample.prompt_text, sample.completion_text)
-        teacher_messages = apply_teacher_context(messages, system=teacher_system)
         template_kwargs = (
             {} if enable_thinking is None else {"enable_thinking": enable_thinking}
         )
@@ -368,6 +405,9 @@ def train_lora(
             total_seconds=perf_counter() - step_started,
             checkpoint_file=checkpoint_file,
             canaries=canary_results,
+            speculative_top_k=sample.speculative_top_k,
+            accepted_tokens=sample.accepted_tokens,
+            replaced_tokens=sample.replaced_tokens,
         )
         steps.append(step)
         with metrics_file.open("a") as f:
@@ -385,6 +425,9 @@ def train_lora(
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "seed": seed,
+                    "speculative_top_k": sample.speculative_top_k,
+                    "accepted_tokens": sample.accepted_tokens,
+                    "replaced_tokens": sample.replaced_tokens,
                     "is_truncated": sample.finish_reason != "stop",
                 },
             )

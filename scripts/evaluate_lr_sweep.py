@@ -96,6 +96,7 @@ def main() -> int:
 
                 metric = metrics[iteration]
                 canaries = metric["canaries"]
+                sampling = metric.get("sampling", {})
                 row = {
                     "iteration": iteration,
                     "learning_rate": learning_rate,
@@ -108,6 +109,9 @@ def main() -> int:
                     "canary_contaminated": sum(
                         item["contaminated"] for item in canaries
                     ),
+                    "accepted_tokens": sampling.get("accepted_tokens"),
+                    "replaced_tokens": sampling.get("replaced_tokens"),
+                    "acceptance_rate": sampling.get("acceptance_rate"),
                     "evaluation_seconds": perf_counter() - started,
                     "train_seconds": metric["timing"]["train_seconds"],
                     "checkpoint_seconds": metric["timing"]["checkpoint_seconds"],
@@ -117,6 +121,17 @@ def main() -> int:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
         best = select_best_checkpoint(rows)
+        accepted = [
+            row["accepted_tokens"]
+            for row in rows
+            if row["accepted_tokens"] is not None
+        ]
+        replaced = [
+            row["replaced_tokens"]
+            for row in rows
+            if row["replaced_tokens"] is not None
+        ]
+        total_interleaved = sum(accepted) + sum(replaced)
         summaries.append(
             {
                 "label": label,
@@ -134,6 +149,9 @@ def main() -> int:
                     rows, lambda row: row["canary_contaminated"] > 0
                 ),
                 "best_learned_checkpoint": best,
+                "mean_acceptance_rate": (
+                    sum(accepted) / total_interleaved if total_interleaved else None
+                ),
                 "mean_train_seconds": sum(row["train_seconds"] for row in rows) / len(rows),
                 "mean_checkpoint_seconds": (
                     sum(row["checkpoint_seconds"] for row in rows) / len(rows)
@@ -144,7 +162,13 @@ def main() -> int:
             }
         )
 
-    output = {"model": model_name, "target": TARGET, "baseline": baseline, "runs": summaries}
+    output = {
+        "model": model_name,
+        "target": TARGET,
+        "baseline": baseline,
+        "sampling": manifest.get("sampling", {"policy": "student", "top_k": None}),
+        "runs": summaries,
+    }
     (args.sweep / "summary.json").write_text(
         json.dumps(output, indent=2, ensure_ascii=False) + "\n"
     )

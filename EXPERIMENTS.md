@@ -110,3 +110,76 @@ uv run distil \
 Generated artifacts include `manifest.json`, `summary.json`, per-run
 `training_metrics.jsonl`, per-checkpoint fact generations, numbered adapters,
 and the fixed GSM8K evaluations.
+
+## Speculative KD top-5 collapse checkpoint
+
+Date: 2026-07-18
+
+Model: `mlx-community/Qwen3.5-0.8B-4bit`
+
+The learning-rate sweep above was repeated unchanged except for rollout
+generation. At each token, the student proposes a token; the proposal is kept
+if it is in the privileged teacher's top 5, otherwise a teacher-policy token
+replaces it. Both policies continue from the selected token, and the same
+forward teacher-to-student KL is trained over the resulting mixed trajectory.
+
+### Comparison with pure on-policy rollout generation
+
+| Learning rate | On-policy first exact | On-policy first contamination | Top-5 first exact | Top-5 first contamination | Top-5 contaminated canaries at exact |
+|---:|---:|---:|---:|---:|---:|
+| `1e-4` | 8 | 2 | 6 | 3 | 4/4 |
+| `2e-5` | 9 | 4 | 6 | 8 | 0/4 |
+| `1e-5` | 12 | 6 | 9 | 9 | 1/4 |
+| `5e-6` | 19 | 8 | 14 | 15 | 0/4 |
+| `2e-6` | 32 | 17 | 28 | 29 | 0/4 |
+
+`first exact` is the first checkpoint where both the training and held-out
+questions greedily produce `VIOLET-731`. With pure on-policy generation, every
+rate contaminated at least one canary before learning the fact. With top-5
+interleaving, four of five rates learn before contamination; `1e-5` learns on
+the same step that its first canary is contaminated.
+
+The clearest checkpoint is `2e-6` at step 28:
+
+- both fact prompts answer exactly;
+- all four canaries equal their frozen-base answers;
+- contamination begins at step 29, versus step 17 for pure on-policy;
+- the one affected canary recovers at step 48, and all four remain clean
+  through step 100;
+- the fixed 10-example GSM8K slice is 3/10 at both steps 28 and 100, equal to
+  the old on-policy step-32/60/100 result and below the 4/10 base score.
+
+This is a meaningful locality improvement on the measured canaries, not a
+general solution to catastrophic forgetting. The small capability diagnostic
+does not improve, and its sample size is too small to establish equivalence.
+Top-5 interleaving creates an early-stopping window where the fact is learned
+before visible answer contamination; it does not restore the base model's
+GSM8K result.
+
+Teacher intervention is concentrated early. Through each run's first exact
+checkpoint, 77% to 86% of selected tokens are accepted student proposals. The
+first update accepts only 1 of 4 proposals, while the selected low-rate
+checkpoint at step 28 accepts all 8. Intuitively, teacher replacements expose
+the suffix after the first unknown token; once that suffix has been learned,
+the rollout becomes fully student-generated again.
+
+### Reproduction
+
+```sh
+uv run python scripts/run_lr_sweep.py \
+  --output outputs/lr-sweep-skd-k5-v015 \
+  --speculative-top-k 5
+uv run python scripts/evaluate_lr_sweep.py \
+  --sweep outputs/lr-sweep-skd-k5-v015
+```
+
+Run the capability diagnostic at the selected and final low-rate checkpoints:
+
+```sh
+uv run python scripts/eval_adapter_gsm8k.py \
+  --adapter outputs/lr-sweep-skd-k5-v015/lr-2e-6/checkpoints/step-0028 \
+  --output outputs/lr-sweep-skd-k5-v015/gsm8k-lr-2e-6-step-0028
+uv run python scripts/eval_adapter_gsm8k.py \
+  --adapter outputs/lr-sweep-skd-k5-v015/lr-2e-6/checkpoints/step-0100 \
+  --output outputs/lr-sweep-skd-k5-v015/gsm8k-lr-2e-6-step-0100
+```

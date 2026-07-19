@@ -1,7 +1,9 @@
 """Fast training helpers that do not load a model."""
 
 import pytest
+import mlx.core as mx
 
+from distil.sample import _select_interleaved_token
 from distil.training import load_prompts
 
 
@@ -23,3 +25,27 @@ def test_load_prompts_rejects_missing_and_empty_files(tmp_path):
 def test_load_prompts_rejects_directory(tmp_path):
     with pytest.raises(FileNotFoundError, match="not a file"):
         load_prompts(tmp_path)
+
+
+def test_interleaved_token_accepts_only_inside_teacher_top_k():
+    greedy = lambda values: mx.argmax(values, axis=-1)
+    student = mx.array([0.0, 10.0, 1.0])
+    teacher = mx.array([10.0, 9.0, 0.0])
+
+    token, accepted = _select_interleaved_token(
+        student,
+        teacher,
+        top_k=1,
+        student_sampler=greedy,
+        teacher_sampler=greedy,
+    )
+    assert (token, accepted) == (0, False)
+
+    token, accepted = _select_interleaved_token(
+        student,
+        teacher,
+        top_k=2,
+        student_sampler=greedy,
+        teacher_sampler=greedy,
+    )
+    assert (token, accepted) == (1, True)

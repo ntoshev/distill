@@ -7,10 +7,12 @@
 - distilling privileged context into a LoRA adapter;
 - inspecting learning and contamination across saved checkpoints.
 
-The current single-fact experiment learns `VIOLET-731`, but still exhibits
-model collapse. A lower learning rate, per-step checkpoints, contamination
-canaries, and progress visualization make the trade-off visible and allow
-useful early stopping; they do not eliminate forgetting. See
+The current single-fact experiment learns `VIOLET-731`. Top-5 Speculative KD
+creates a checkpoint where the fact is learned before any measured canary
+contamination, but a small GSM8K diagnostic remains below the frozen base.
+Per-step checkpoints, contamination canaries, and progress visualization make
+the trade-off visible and allow useful early stopping; they do not establish
+that forgetting is eliminated. See
 [EXPERIMENTS.md](EXPERIMENTS.md) for the measurements and
 [DESIGN.md](DESIGN.md) for implementation details.
 
@@ -89,6 +91,11 @@ not discard it.
 `--train` reads one question per non-empty line. The student samples without
 the privileged context; the frozen teacher scores those same generated tokens
 with `--teacher-system`. Only LoRA parameters update.
+
+Add `--speculative-top-k 5` to use Speculative Knowledge Distillation: the
+student proposes each next token, the proposal is kept when it is in the
+teacher's top 5, and otherwise a teacher-policy token replaces it before both
+models continue from the corrected prefix.
 
 ```sh
 uv run distil \

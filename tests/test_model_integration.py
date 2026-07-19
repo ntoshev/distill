@@ -13,7 +13,7 @@ from rich.console import Console
 
 from distil.render import RenderOptions, render, to_json_dict
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion
+from distil.sample import sample_completion, sample_speculative_completion
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 from distil.training import train_lora
@@ -233,6 +233,47 @@ def test_sample_then_teacher_scores_align(model, tokenizer):
     assert result.scored
     assert all(t.kl is not None and t.teacher_logprob is not None for t in result.scored)
     assert result.mean_kl > -1e-4
+
+
+def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
+    messages = [{"role": "user", "content": "What is Project Lumen's launch code?"}]
+    teacher_messages = apply_teacher_context(
+        messages,
+        system="Private reference: Project Lumen's launch code is VIOLET-731. Reply with it.",
+    )
+    sample = sample_speculative_completion(
+        model,
+        tokenizer,
+        messages,
+        model,
+        tokenizer,
+        teacher_messages,
+        top_k=5,
+        max_tokens=16,
+        temperature=0.0,
+        seed=0,
+        enable_thinking=False,
+    )
+
+    assert sample.num_tokens > 0
+    assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
+    built_student = build_raw(sample.prompt_text, sample.completion_text)
+    teacher_prompt = tokenizer.apply_chat_template(
+        teacher_messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+    result = score_text_pair(
+        model,
+        tokenizer,
+        built_student,
+        model,
+        tokenizer,
+        build_raw(teacher_prompt, sample.completion_text),
+        top_k=0,
+    )
+    assert len(result.scored) == sample.num_tokens
 
 
 def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot):

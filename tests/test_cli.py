@@ -68,6 +68,7 @@ def test_training_flags_require_train(capsys):
         ["--canaries", "canaries.txt"],
         ["--canary-max-tokens", "8"],
         ["--contamination-regex", "VIO"],
+        ["--speculative-top-k", "5"],
     ):
         assert main(["--model", "m", "--completion", "x", *flag]) == 2
 
@@ -85,6 +86,7 @@ def test_training_rejects_nonpositive_settings(tmp_path):
         ["--lora-rank", "0"],
         ["--checkpoint-every", "0"],
         ["--canary-max-tokens", "0"],
+        ["--speculative-top-k", "0"],
     ):
         assert main([*base, *flag]) == 2
 

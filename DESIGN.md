@@ -93,6 +93,14 @@ The teacher does not generate a replacement answer. It supplies dense
 next-token targets along the student's own sampled trajectory. `--iters` counts
 successful aligned updates; failed alignments are skipped with a warning.
 
+With `--speculative-top-k K`, rollout generation instead follows the
+token-interleaved policy from Speculative Knowledge Distillation. At each
+prefix, the student proposes (z_t \sim p_S). If (z_t) is among the teacher's
+top-(K) tokens, it is accepted; otherwise the rollout uses a replacement
+(z_t \sim p_T). Both policies then continue from the selected token. The loss
+remains forward teacher-to-student KL on every aligned position of this mixed
+trajectory. Metrics record accepted and replaced token counts per update.
+
 Training writes:
 
 ```text

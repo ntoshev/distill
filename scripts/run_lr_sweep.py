@@ -48,12 +48,19 @@ def main() -> int:
         type=Path,
         default=Path("examples/distillation/contamination-canaries.txt"),
     )
+    parser.add_argument(
+        "--speculative-top-k",
+        type=int,
+        help="run the sweep with interleaved Speculative KD at this K",
+    )
     args = parser.parse_args()
 
     try:
         specs = parse_specs(args.specs)
     except ValueError as error:
         parser.error(str(error))
+    if args.speculative_top_k is not None and args.speculative_top_k <= 0:
+        parser.error("--speculative-top-k must be positive")
 
     from mlx_lm import load
     from mlx_lm.tuner.utils import remove_lora_layers
@@ -85,6 +92,10 @@ def main() -> int:
         "prompts": str(args.prompts),
         "teacher": str(args.teacher),
         "canaries": str(args.canaries),
+        "sampling": {
+            "policy": "speculative" if args.speculative_top_k is not None else "student",
+            "top_k": args.speculative_top_k,
+        },
         "runs": [],
     }
 
@@ -102,7 +113,12 @@ def main() -> int:
                 f"checkpoint={step.checkpoint_seconds:.3f}s "
                 f"canaries={step.canary_seconds:.3f}s "
                 f"changed={changed}/{len(canary_results)} "
-                f"contaminated={contaminated}/{len(canary_results)}",
+                f"contaminated={contaminated}/{len(canary_results)}"
+                + (
+                    f" accepted={step.accepted_tokens}/{step.num_tokens}"
+                    if step.speculative_top_k is not None
+                    else ""
+                ),
                 flush=True,
             )
 
@@ -125,6 +141,7 @@ def main() -> int:
                 canary_prompts=canaries,
                 canary_max_tokens=16,
                 contamination_regex=r"^\s*VIO",
+                speculative_top_k=args.speculative_top_k,
                 report=report,
             )
             manifest["runs"].append(
