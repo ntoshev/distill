@@ -15,4 +15,5 @@
 - Keep the grid visually tight: small text, minimal token padding, narrow gaps, and no secondary output lines unless needed for correctness.
 - Start with the target and the canary that changed. Add other canaries, plots, controls, cards, or narrative only when requested.
 - Use real checkpoint data. Do not invent or interpolate token probabilities.
-- For an inline Codex view, resolve the active thread ID from request metadata before writing to its thread-scoped visualization directory; do not infer it from the newest directory.
+- For an inline Codex view, resolve the active thread ID from request metadata before writing; do not infer it from the newest directory.
+- Read `CODEX_THREAD_ID` and write the fragment directly to the global thread-scoped directory `/Users/nik/.codex/visualizations/YYYY/MM/DD/$CODEX_THREAD_ID/`. Never write inline visualizations to the project's local `.codex/visualizations/` directory, because the Codex host will not resolve them there.
