@@ -108,6 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="use interleaved Speculative KD; replace proposals outside teacher top K",
     )
+    trn.add_argument(
+        "--kl-direction",
+        choices=["forward", "reverse"],
+        help="KL objective direction (default: forward, teacher || student)",
+    )
     out = p.add_argument_group("output")
     out.add_argument(
         "--metric",
@@ -169,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.canary_max_tokens, "--canary-max-tokens"),
         (args.contamination_regex, "--contamination-regex"),
         (args.speculative_top_k, "--speculative-top-k"),
+        (args.kl_direction, "--kl-direction"),
     ):
         if value is not None and not training:
             return fail(f"{name} only combines with --train")
@@ -374,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 contamination_regex=args.contamination_regex,
                 speculative_top_k=args.speculative_top_k,
+                kl_direction=args.kl_direction or "forward",
                 report=report,
                 warn=lambda message: errcon.print(
                     f"[yellow]warning:[/yellow] {message}"

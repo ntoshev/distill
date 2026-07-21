@@ -69,6 +69,7 @@ def test_training_flags_require_train(capsys):
         ["--canary-max-tokens", "8"],
         ["--contamination-regex", "VIO"],
         ["--speculative-top-k", "5"],
+        ["--kl-direction", "reverse"],
     ):
         assert main(["--model", "m", "--completion", "x", *flag]) == 2
 

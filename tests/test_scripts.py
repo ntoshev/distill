@@ -3,13 +3,21 @@
 import pytest
 
 from scripts.evaluate_lr_sweep import select_best_checkpoint
-from scripts.run_lr_sweep import parse_specs
+from scripts.run_lr_sweep import DEFAULT_SPECS, parse_specs
 
 
 def test_parse_specs():
     assert parse_specs("1e-4:20,2e-6:100") == [
         ("1e-4", 1e-4, 20),
         ("2e-6", 2e-6, 100),
+    ]
+
+
+def test_default_sweep_covers_low_learning_rate_range():
+    assert parse_specs(DEFAULT_SPECS) == [
+        ("2e-6", 2e-6, 100),
+        ("1e-6", 1e-6, 200),
+        ("5e-7", 5e-7, 400),
     ]
 
 

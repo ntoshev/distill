@@ -3,6 +3,87 @@
 This file records empirical results. [DESIGN.md](DESIGN.md) is the canonical
 description of the implementation and its guarantees.
 
+## Learning-rate range for future sweeps
+
+Date: 2026-07-21
+
+For Project Lumen experiments, the useful learning-rate range is
+`5e-7` through `2e-6`. Future sweeps should default to:
+
+| Learning rate | Step budget |
+|---:|---:|
+| `2e-6` | 100 |
+| `1e-6` | 200 |
+| `5e-7` | 400 |
+
+The budgets keep the maximum cumulative learning rate near `2e-4`. Rates above
+this range learn faster but obscure the clean early-stopping window through
+earlier canary drift. The sweep script's default specs now encode this range.
+
+The new pure on-policy forward-KL `5e-7` run learns both fact prompts exactly
+at step 108 with all four canaries unchanged. Its first canary change is not
+until step 341 and its first regex-marked contamination is step 398. This is a
+substantially wider clean window than the old `2e-6` forward run, which first
+contaminated at step 17 and learned at step 32.
+
+Reverse KL does not gain the same locality benefit. At `1e-6`, it learns at
+step 129 after contamination begins at step 70, with 3/4 canaries contaminated
+at the selected checkpoint. At `5e-7`, it learns at step 253 after
+contamination begins at step 124; 3/4 canaries have changed and 2/4 are
+contaminated at the selected checkpoint.
+
+Reproduce the low-rate additions:
+
+```sh
+uv run python scripts/run_lr_sweep.py \
+  --output outputs/lr-sweep-reverse-kl-low-v020 \
+  --specs '1e-6:200,5e-7:400' --kl-direction reverse
+uv run python scripts/evaluate_lr_sweep.py \
+  --sweep outputs/lr-sweep-reverse-kl-low-v020
+
+uv run python scripts/run_lr_sweep.py \
+  --output outputs/lr-sweep-forward-kl-5e-7-v020 \
+  --specs '5e-7:400' --kl-direction forward
+uv run python scripts/evaluate_lr_sweep.py \
+  --sweep outputs/lr-sweep-forward-kl-5e-7-v020
+```
+
+## Reverse-KL learning-rate sweep
+
+Date: 2026-07-20
+Model: `mlx-community/Qwen3.5-0.8B-4bit`
+
+The original on-policy sweep was repeated with
+`KL(student || teacher)` in place of `KL(teacher || student)`, keeping the
+learning rates, step budgets, prompts, rank, rollout settings, and canaries
+unchanged.
+
+| Learning rate | Steps | First exact both | First contamination | Contaminated canaries at exact |
+|---:|---:|---:|---:|---:|
+| `1e-4` | 20 | never | never | n/a |
+| `2e-5` | 30 | 15 | 10 | 4/4 |
+| `1e-5` | 40 | 21 | 17 | 2/4 |
+| `5e-6` | 60 | 39 | 26 | 4/4 |
+| `2e-6` | 100 | 87 | 44 | 3/4 |
+| `1e-6` | 200 | 129 | 70 | 3/4 |
+| `5e-7` | 400 | 253 | 124 | 2/4 |
+
+The lowest reverse-KL rate reduces explicit contamination at the learned
+checkpoint from three canaries to two, but it does not create a clean learning
+window: canary drift still starts well before exact recall. Forward KL at
+`5e-7`, by contrast, learns with no measured canary drift. Reverse KL is
+therefore slower to learn and less local throughout the expanded range.
+
+Reproduce the reverse sweep and evaluation:
+
+```sh
+uv run python scripts/run_lr_sweep.py \
+  --output outputs/lr-sweep-reverse-kl-v019 \
+  --kl-direction reverse
+uv run python scripts/evaluate_lr_sweep.py \
+  --sweep outputs/lr-sweep-reverse-kl-v019
+```
+
 ## Project Lumen collapse checkpoint
 
 Date: 2026-07-16  

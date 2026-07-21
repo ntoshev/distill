@@ -4,7 +4,25 @@ import pytest
 import mlx.core as mx
 
 from distil.sample import _select_interleaved_token
-from distil.training import load_prompts
+from distil.training import _kl_loss, load_prompts
+
+
+def test_kl_loss_directions_match_manual_distributions():
+    student = mx.array([[2.0, 0.0, -1.0]])
+    teacher = mx.array([[0.0, 1.0, 0.0]])
+    student_logp = student - mx.logsumexp(student, axis=-1, keepdims=True)
+    teacher_logp = teacher - mx.logsumexp(teacher, axis=-1, keepdims=True)
+    forward = (mx.exp(teacher_logp) * (teacher_logp - student_logp)).sum(axis=-1)
+    reverse = (mx.exp(student_logp) * (student_logp - teacher_logp)).sum(axis=-1)
+
+    assert mx.allclose(_kl_loss(student, teacher, "forward"), forward).item()
+    assert mx.allclose(_kl_loss(student, teacher, "reverse"), reverse).item()
+    assert not mx.allclose(forward, reverse).item()
+
+
+def test_kl_loss_rejects_unknown_direction():
+    with pytest.raises(ValueError, match="unknown KL direction"):
+        _kl_loss(mx.zeros((1, 2)), mx.zeros((1, 2)), "sideways")
 
 
 def test_load_prompts_uses_nonempty_lines(tmp_path):

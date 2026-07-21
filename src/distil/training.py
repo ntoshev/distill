@@ -38,6 +38,7 @@ class TrainStep:
     speculative_top_k: int | None = None
     accepted_tokens: int | None = None
     replaced_tokens: int | None = None
+    kl_direction: str = "forward"
 
 
 @dataclass
@@ -68,12 +69,31 @@ def load_prompts(path: str | Path) -> list[str]:
     return prompts
 
 
-def _distillation_loss(model, student_ids, student_rows, teacher_rows):
+def _kl_loss(student_logits, teacher_logits, direction: str):
+    """Per-token KL in the requested direction, with teacher logits fixed."""
+    if direction == "forward":
+        return kl_div_loss(student_logits, teacher_logits)
+    if direction == "reverse":
+        student_logprobs = student_logits - mx.logsumexp(
+            student_logits, axis=-1, keepdims=True
+        )
+        teacher_logprobs = teacher_logits - mx.logsumexp(
+            teacher_logits, axis=-1, keepdims=True
+        )
+        return (
+            mx.exp(student_logprobs) * (student_logprobs - teacher_logprobs)
+        ).sum(axis=-1)
+    raise ValueError(f"unknown KL direction: {direction}")
+
+
+def _distillation_loss(
+    model, student_ids, student_rows, teacher_rows, kl_direction="forward"
+):
     logits = model(student_ids[None])[0]
     vocab = min(logits.shape[-1], teacher_rows.shape[-1])
     student = logits[student_rows, :vocab].astype(mx.float32)
     teacher = teacher_rows[:, :vocab]
-    return kl_div_loss(student, teacher).mean()
+    return _kl_loss(student, teacher, kl_direction).mean()
 
 
 def _teacher_rows(model, ids: list[int], rows: list[int], disable_adapter: bool):
@@ -140,6 +160,7 @@ def _step_payload(step: TrainStep) -> dict:
         "num_tokens": step.num_tokens,
         "finish_reason": step.finish_reason,
         "content": step.content,
+        "kl_direction": step.kl_direction,
         "sampling": {
             "policy": "speculative" if step.speculative_top_k is not None else "student",
             "top_k": step.speculative_top_k,
@@ -204,6 +225,7 @@ def train_lora(
     canary_max_tokens: int = 32,
     contamination_regex: str | None = None,
     speculative_top_k: int | None = None,
+    kl_direction: str = "forward",
     report: Callable[[TrainStep], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> TrainResult:
@@ -230,6 +252,8 @@ def train_lora(
         raise ValueError("--canary-max-tokens must be positive")
     if speculative_top_k is not None and speculative_top_k <= 0:
         raise ValueError("--speculative-top-k must be positive")
+    if kl_direction not in {"forward", "reverse"}:
+        raise ValueError("--kl-direction must be 'forward' or 'reverse'")
 
     try:
         contamination_pattern = (
@@ -246,8 +270,14 @@ def train_lora(
 
     config = add_lora(model, lora_rank)
     config["model"] = model_name
+    config["kl_direction"] = kl_direction
     optimizer = optim.AdamW(learning_rate=learning_rate)
-    loss_and_grad = nn.value_and_grad(model, _distillation_loss)
+    loss_and_grad = nn.value_and_grad(
+        model,
+        lambda model, student_ids, student_rows, teacher_rows: _distillation_loss(
+            model, student_ids, student_rows, teacher_rows, kl_direction
+        ),
+    )
 
     adapter_path = Path(adapter_path)
     adapter_path.mkdir(parents=True, exist_ok=True)
@@ -408,6 +438,7 @@ def train_lora(
             speculative_top_k=sample.speculative_top_k,
             accepted_tokens=sample.accepted_tokens,
             replaced_tokens=sample.replaced_tokens,
+            kl_direction=kl_direction,
         )
         steps.append(step)
         with metrics_file.open("a") as f:
@@ -428,6 +459,7 @@ def train_lora(
                     "speculative_top_k": sample.speculative_top_k,
                     "accepted_tokens": sample.accepted_tokens,
                     "replaced_tokens": sample.replaced_tokens,
+                    "kl_direction": kl_direction,
                     "is_truncated": sample.finish_reason != "stop",
                 },
             )

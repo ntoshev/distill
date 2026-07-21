@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from time import perf_counter
 
-DEFAULT_SPECS = "1e-4:20,2e-5:30,1e-5:40,5e-6:60,2e-6:100"
+# The useful transition window for this task is below the original sweep.
+# Keep approximately constant cumulative LR while resolving the low-rate range.
+DEFAULT_SPECS = "2e-6:100,1e-6:200,5e-7:400"
 
 
 def parse_specs(value: str) -> list[tuple[str, float, int]]:
@@ -53,6 +55,12 @@ def main() -> int:
         type=int,
         help="run the sweep with interleaved Speculative KD at this K",
     )
+    parser.add_argument(
+        "--kl-direction",
+        choices=["forward", "reverse"],
+        default="forward",
+        help="KL objective direction (default: forward)",
+    )
     args = parser.parse_args()
 
     try:
@@ -92,6 +100,7 @@ def main() -> int:
         "prompts": str(args.prompts),
         "teacher": str(args.teacher),
         "canaries": str(args.canaries),
+        "kl_direction": args.kl_direction,
         "sampling": {
             "policy": "speculative" if args.speculative_top_k is not None else "student",
             "top_k": args.speculative_top_k,
@@ -142,6 +151,7 @@ def main() -> int:
                 canary_max_tokens=16,
                 contamination_regex=r"^\s*VIO",
                 speculative_top_k=args.speculative_top_k,
+                kl_direction=args.kl_direction,
                 report=report,
             )
             manifest["runs"].append(

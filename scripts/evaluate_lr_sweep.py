@@ -167,6 +167,7 @@ def main() -> int:
         "target": TARGET,
         "baseline": baseline,
         "sampling": manifest.get("sampling", {"policy": "student", "top_k": None}),
+        "kl_direction": manifest.get("kl_direction", "forward"),
         "runs": summaries,
     }
     (args.sweep / "summary.json").write_text(

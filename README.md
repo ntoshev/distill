@@ -97,6 +97,9 @@ student proposes each next token, the proposal is kept when it is in the
 teacher's top 5, and otherwise a teacher-policy token replaces it before both
 models continue from the corrected prefix.
 
+Training minimizes forward KL, `KL(teacher || student)`, by default. Pass
+`--kl-direction reverse` to instead minimize `KL(student || teacher)`.
+
 ```sh
 uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
@@ -129,6 +132,10 @@ Training writes:
 
 Canaries compare each checkpoint's greedy output against the frozen-base
 answer. `--contamination-regex` adds a task-specific leakage signal.
+
+For the Project Lumen setup, the default sweep range is `2e-6:100`,
+`1e-6:200`, and `5e-7:400`. These low rates resolve the useful early-stopping
+window; see `EXPERIMENTS.md` for the measured forward- and reverse-KL results.
 
 ## Inspect checkpoint progress
 

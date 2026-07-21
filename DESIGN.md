@@ -93,6 +93,18 @@ The teacher does not generate a replacement answer. It supplies dense
 next-token targets along the student's own sampled trajectory. `--iters` counts
 successful aligned updates; failed alignments are skipped with a warning.
 
+With `--kl-direction reverse`, the per-token objective swaps the distributions:
+
+\[
+D_{\mathrm{KL}}\!\left(
+p_{S,\phi}(\cdot\mid x,\hat y_{<t})\,\|\,
+p_T(\cdot\mid c,x,\hat y_{<t})
+\right).
+\]
+
+The teacher logits remain fixed; gradients flow only through the student
+distribution. Forward KL is the default for backward compatibility.
+
 With `--speculative-top-k K`, rollout generation instead follows the
 token-interleaved policy from Speculative Knowledge Distillation. At each
 prefix, the student proposes (z_t \sim p_S). If (z_t) is among the teacher's
