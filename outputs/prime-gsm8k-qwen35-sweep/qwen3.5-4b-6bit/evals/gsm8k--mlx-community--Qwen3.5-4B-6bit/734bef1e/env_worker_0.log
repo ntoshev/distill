@@ -1,0 +1,16 @@
+2026-07-21 14:29:36 - verifiers.utils.env_utils - INFO - Loading environment: gsm8k
+2026-07-21 14:29:36 - verifiers.utils.env_utils - INFO - Using default args: num_train_examples=-1, num_eval_examples=-1, system_prompt='Please reason step by step, and put your final answer within \\boxed{}.'
+2026-07-21 14:29:36 - verifiers.utils.env_utils - INFO - Successfully loaded environment 'gsm8k'
+2026-07-21 14:29:36 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4685336656=1)
+2026-07-21 14:29:36 - verifiers.serve.server.env_worker.EnvWorker - INFO - Initialized worker gsm8k-0 on ipc:///tmp/vf-d86ba4754386-gsm8k-0
+2026-07-21 14:29:36 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4685336656=4)
+2026-07-21 14:29:36 - verifiers.serve.server.env_worker.EnvWorker - INFO - Starting worker gsm8k-0
+2026-07-21 14:29:51 - verifiers.utils.env_utils - INFO - Loading environment: gsm8k
+2026-07-21 14:29:51 - verifiers.utils.env_utils - INFO - Using default args: num_eval_examples=-1, num_train_examples=-1, system_prompt='Please reason step by step, and put your final answer within \\boxed{}.'
+2026-07-21 14:29:51 - verifiers.utils.env_utils - INFO - Successfully loaded environment 'gsm8k'
+2026-07-21 14:29:51 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4775158736=1)
+2026-07-21 14:29:51 - verifiers.serve.server.env_worker.EnvWorker - INFO - Initialized worker gsm8k-0 on ipc:///tmp/vf-d86ba4754386-gsm8k-0
+2026-07-21 14:29:51 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4775158736=4)
+2026-07-21 14:29:51 - verifiers.serve.server.env_worker.EnvWorker - INFO - Starting worker gsm8k-0
+2026-07-21 14:36:24 - verifiers.utils.process_utils - INFO - Death pipe closed — parent is gone, sending SIGTERM to self
+2026-07-21 14:36:24 - verifiers.serve.server.env_worker.EnvWorker - INFO - Shut down worker gsm8k-0

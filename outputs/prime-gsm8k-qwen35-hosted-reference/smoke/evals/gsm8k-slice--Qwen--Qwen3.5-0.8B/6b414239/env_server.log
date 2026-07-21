@@ -1,0 +1,6 @@
+2026-07-21 15:53:41 - verifiers.serve.server.env_server.ZMQEnvServer - INFO - Initializing ZMQEnvServer to serve gsm8k-slice (env_args={'eval_start': 0, 'num_eval_examples': 3}, extra_env_kwargs={'concurrency': 3}, num_workers=1)
+2026-07-21 15:53:41 - verifiers.serve.server.env_server.ZMQEnvServer - INFO - ZMQEnvServer started on tcp://127.0.0.1:54652
+2026-07-21 15:53:41 - verifiers.serve.server.env_router.EnvRouter - INFO - Started worker (id=0, name=gsm8k-slice-0, address=ipc:///tmp/vf-32811241fac7-gsm8k-slice-0, pid=21528)
+2026-07-21 15:53:46 - verifiers.utils.process_utils - INFO - Death pipe closed — parent is gone, sending SIGTERM to self
+2026-07-21 15:53:46 - verifiers.serve.server.env_router.EnvRouter - INFO - Router shut down
+2026-07-21 15:53:46 - verifiers.serve.server.env_server.ZMQEnvServer - INFO - ZMQEnvServer shut down

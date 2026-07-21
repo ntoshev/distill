@@ -1,0 +1,13 @@
+2026-07-21 16:02:06 - verifiers.utils.env_utils - INFO - Loading environment: gsm8k-slice
+2026-07-21 16:02:06 - verifiers.utils.env_utils - INFO - Using provided args: num_eval_examples=3, eval_start=0
+2026-07-21 16:02:06 - verifiers.utils.env_utils - INFO - Using default args: system_prompt='Please reason step by step, and put your final answer within \\boxed{}.', num_train_examples=-1
+2026-07-21 16:02:06 - verifiers.utils.env_utils - INFO - Successfully loaded environment 'gsm8k-slice'
+2026-07-21 16:02:06 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4682306064=1)
+2026-07-21 16:02:06 - verifiers.serve.server.env_worker.EnvWorker - INFO - Initialized worker gsm8k-slice-0 on ipc:///tmp/vf-281b43f25845-gsm8k-slice-0
+2026-07-21 16:02:06 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4682306064=4)
+2026-07-21 16:02:06 - verifiers.serve.server.env_worker.EnvWorker - INFO - Starting worker gsm8k-slice-0
+2026-07-21 16:02:08 - verifiers.envs.environment.SingleTurnEnv - ERROR - Aborted rollout due to ModelError() -> BadRequestError("Error code: 400 - {'error': {'message': 'Invalid request.', 'type': 'server_error', 'param': None, 'code': 'invalid_request_error'}, 'request_id': 'a1ea65f31db5fea5-SOF', 'inference_id': 'req_4921f2a9ee844669b848c00b4fb079b2'}")
+2026-07-21 16:02:08 - verifiers.envs.environment.SingleTurnEnv - ERROR - Aborted rollout due to ModelError() -> BadRequestError("Error code: 400 - {'error': {'message': 'Invalid request.', 'type': 'server_error', 'param': None, 'code': 'invalid_request_error'}, 'request_id': 'a1ea65f31c21d103-SOF', 'inference_id': 'req_71f056145f09415e8aad4a94face2690'}")
+2026-07-21 16:02:08 - verifiers.envs.environment.SingleTurnEnv - ERROR - Aborted rollout due to ModelError() -> BadRequestError("Error code: 400 - {'error': {'message': 'Invalid request.', 'type': 'server_error', 'param': None, 'code': 'invalid_request_error'}, 'request_id': 'a1ea65f31f48d0c7-SOF', 'inference_id': 'req_8c603c434cca4bc5b650e97e08c5e784'}")
+2026-07-21 16:02:10 - verifiers.utils.process_utils - INFO - Death pipe closed — parent is gone, sending SIGTERM to self
+2026-07-21 16:02:10 - verifiers.serve.server.env_worker.EnvWorker - INFO - Shut down worker gsm8k-slice-0

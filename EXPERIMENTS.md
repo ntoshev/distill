@@ -3,6 +3,159 @@
 This file records empirical results. [DESIGN.md](DESIGN.md) is the canonical
 description of the implementation and its guarantees.
 
+## Local Prime GSM8K Qwen3.5 sweep
+
+Date: 2026-07-21
+
+Prime evaluated the first 128 examples of the GSM8K test split with one
+rollout per example, no shuffle, concurrency 32, greedy decoding, and a
+1024-token completion limit. The MLX server used
+`enable_thinking=false`; with the default thinking template, the 0.8B model
+looped until both the 512- and 1024-token limits in the smoke tests.
+
+| Model | Correct | Mean reward | Truncated | Eval time |
+|---|---:|---:|---:|---:|
+| `mlx-community/Qwen3.5-0.8B-4bit` | 57/128 | 0.4453125 | 12/128 | 128.0 s |
+| `mlx-community/Qwen3.5-0.8B-6bit` | 71/128 | 0.5546875 | 12/128 | 138.5 s |
+| `mlx-community/Qwen3.5-0.8B-8bit` | 63/128 | 0.4921875 | 17/128 | 133.6 s |
+| `mlx-community/Qwen3.5-2B-6bit` | 93/128 | 0.7265625 | 8/128 | 173.4 s |
+| `mlx-community/Qwen3.5-4B-6bit` | 120/128 | 0.9375 | 5/128 | 408.1 s |
+
+All five runs contain 128 completed traces and zero rollout errors. The
+selected example IDs and prompts are identical across models. Every truncated
+completion received reward 0. The 4B run's local environment worker restarted
+once during startup, then completed all 128 traces without recorded errors.
+
+The requested source path `../gepa/config/endpoints.toml` did not exist; the
+available registry was `../gepa/configs/endpoints.toml`. It was copied to
+`configs/endpoints.toml`, and the missing
+`mlx-community/Qwen3.5-0.8B-6bit` endpoint was added. Prime 0.6.17 resolves
+this registry by endpoint alias, so `--model` uses aliases such as
+`mlx-qwen3.5-0.8b-4bit`; the saved results contain the full model IDs above.
+
+For each model, start the local server:
+
+```sh
+MLX_LM_API_KEY=local mlx_lm.server \
+  --model MODEL_ID \
+  --host 127.0.0.1 --port 8080 \
+  --decode-concurrency 32 --prompt-concurrency 32 \
+  --max-tokens 512 \
+  --chat-template-args '{"enable_thinking":false}'
+```
+
+Then run the corresponding endpoint alias through Prime. The request-level
+1024-token limit overrides the server's 512-token default:
+
+```sh
+PRIME_DISABLE_VERSION_CHECK=1 MLX_LM_API_KEY=local \
+prime eval run gsm8k \
+  --endpoints-path configs/endpoints.toml \
+  --model ENDPOINT_ALIAS \
+  --num-examples 128 --rollouts-per-example 1 \
+  --max-concurrent 32 --max-tokens 1024 \
+  --output-dir outputs/prime-gsm8k-qwen35-sweep/RUN_NAME \
+  --save-results --disable-tui --abbreviated-summary --skip-upload
+```
+
+Full logs and result JSONL files are under
+`outputs/prime-gsm8k-qwen35-sweep/`.
+
+### Disjoint 256-example extension for the 0.8B models
+
+The three 0.8B quantizations were evaluated again on GSM8K test examples
+128 through 383. This slice is disjoint from the original examples 0 through
+127. The decoding and evaluation settings were unchanged: one rollout per
+example, concurrency 32, greedy decoding, `enable_thinking=false`, and a
+1024-token completion limit.
+
+| Model | Original 0–127 | New 128–383 | Combined 0–383 | Combined truncated |
+|---|---:|---:|---:|---:|
+| `mlx-community/Qwen3.5-0.8B-4bit` | 57/128 = 0.4453125 | 118/256 = 0.4609375 | 175/384 = 0.4557292 | 38/384 |
+| `mlx-community/Qwen3.5-0.8B-6bit` | 71/128 = 0.5546875 | 140/256 = 0.5468750 | 211/384 = 0.5494792 | 46/384 |
+| `mlx-community/Qwen3.5-0.8B-8bit` | 63/128 = 0.4921875 | 136/256 = 0.5312500 | 199/384 = 0.5182292 | 39/384 |
+
+Each new run contains 256 completed traces, 256 unique example IDs, and zero
+rollout errors. The prompts and IDs are identical across the three models,
+and none of the new prompts occurs in the original 128-example set. The 6-bit
+and 8-bit MLX servers each stopped once; Prime resumed from the saved traces,
+and the final files contain no missing or duplicate examples.
+
+The local `gsm8k-slice` environment preserves the official GSM8K prompts,
+`MathRubric`, and boxed-answer system prompt while adding an explicit test-set
+offset. Reproduce one extension run after starting the corresponding MLX
+server as above:
+
+```sh
+PRIME_DISABLE_VERSION_CHECK=1 MLX_LM_API_KEY=local \
+prime eval run gsm8k-slice \
+  --env-dir-path environments \
+  --env-args '{"eval_start":128,"num_eval_examples":256}' \
+  --endpoints-path configs/endpoints.toml \
+  --model ENDPOINT_ALIAS \
+  --num-examples 256 --rollouts-per-example 1 \
+  --max-concurrent 32 --max-tokens 1024 \
+  --output-dir outputs/prime-gsm8k-qwen35-sweep-next256/RUN_NAME \
+  --save-results --disable-tui --abbreviated-summary --skip-upload
+```
+
+Full extension logs and result JSONL files are under
+`outputs/prime-gsm8k-qwen35-sweep-next256/`.
+
+### Prime-hosted Qwen3.5-0.8B reference
+
+The same GSM8K examples 0 through 383 were evaluated against Prime
+Inference's `Qwen/Qwen3.5-0.8B` endpoint. Prime's model listing does not
+declare the serving dtype, so this is a hosted reference rather than a proven
+unquantized control. It also uses a different inference backend from MLX.
+
+| Model | Original 0–127 | Extension 128–383 | Combined 0–383 | Truncated |
+|---|---:|---:|---:|---:|
+| Prime-hosted `Qwen/Qwen3.5-0.8B` | 65/128 = 0.5078125 | 137/256 = 0.5351562 | 202/384 = 0.5260417 | 47/384 |
+| MLX 6-bit | 71/128 = 0.5546875 | 140/256 = 0.5468750 | 211/384 = 0.5494792 | 46/384 |
+| MLX 8-bit | 63/128 = 0.4921875 | 136/256 = 0.5312500 | 199/384 = 0.5182292 | 39/384 |
+
+All 384 hosted traces completed with unique IDs and zero errors. The prompts
+are identical to the local runs. The hosted run cost `$0.0156`.
+
+The hosted correctness pattern is closer to 8-bit despite 6-bit's higher
+aggregate reward:
+
+| Comparison with hosted | Both correct | Hosted only | Quantized only | Both wrong | Agreement |
+|---|---:|---:|---:|---:|---:|
+| MLX 6-bit | 172 | 30 | 39 | 143 | 315/384 = 82.03% |
+| MLX 8-bit | 172 | 30 | 27 | 155 | 327/384 = 85.16% |
+
+On the 82 examples where 6-bit and 8-bit disagree, the hosted model aligns
+with 6-bit's correctness outcome on 35 and with 8-bit's on 47. This supports
+the interpretation that 8-bit is behaviorally closer to the hosted reference,
+while the 6-bit perturbation happens to improve GSM8K reward on this sample.
+The differences remain statistically weak: the paired exact p-values are
+0.224 for 6-bit versus 8-bit, 0.336 for hosted versus 6-bit, and 0.791 for
+hosted versus 8-bit.
+
+The hosted route returned HTTP 400 for explicit
+`--sampling-args '{"enable_thinking":false}'` in two separate three-example
+smoke tests. The successful run therefore omitted that field, used
+`--temperature 0`, and produced no `<think>` blocks in its completions. One
+request hung after the other 383 completed; resuming the saved run completed
+that missing example without duplication.
+
+```sh
+PRIME_DISABLE_VERSION_CHECK=1 prime eval run gsm8k-slice \
+  --env-dir-path environments \
+  --env-args '{"eval_start":0,"num_eval_examples":384}' \
+  --provider prime --model Qwen/Qwen3.5-0.8B \
+  --num-examples 384 --rollouts-per-example 1 \
+  --max-concurrent 32 --max-tokens 1024 --temperature 0 \
+  --max-retries 3 \
+  --output-dir outputs/prime-gsm8k-qwen35-hosted-reference/full384 \
+  --save-results --disable-tui --abbreviated-summary --skip-upload
+```
+
+Logs and result JSONL files are under
+`outputs/prime-gsm8k-qwen35-hosted-reference/`.
+
 ## Learning-rate range for future sweeps
 
 Date: 2026-07-21

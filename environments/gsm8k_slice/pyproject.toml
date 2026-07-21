@@ -1,0 +1,19 @@
+[project]
+name = "gsm8k-slice"
+version = "0.1.0"
+description = "GSM8K environment with an explicit contiguous eval slice"
+requires-python = ">=3.10"
+dependencies = [
+    "verifiers>=0.1.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["gsm8k_slice.py", "pyproject.toml"]
+
+[tool.verifiers.eval]
+num_examples = 256
+rollouts_per_example = 1

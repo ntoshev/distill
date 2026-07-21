@@ -1,0 +1,113 @@
+[[endpoint]]
+endpoint_id = "lmstudio-qwen3.5-0.8b"
+model = "qwen3.5-0.8b"
+url = "http://localhost:1234/v1"
+key = "LMSTUDIO_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "lmstudio-qwen3.5-2b"
+model = "qwen3.5-2b"
+url = "http://localhost:1234/v1"
+key = "LMSTUDIO_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "lmstudio-qwen3.5-4b"
+model = "qwen3.5-4b"
+url = "http://localhost:1234/v1"
+key = "LMSTUDIO_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "lmstudio-qwen3.5-9b"
+model = "qwen3.5-9b"
+url = "http://localhost:1234/v1"
+key = "LMSTUDIO_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-0.8b-4bit"
+model = "mlx-community/Qwen3.5-0.8B-4bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-0.8b-6bit"
+model = "mlx-community/Qwen3.5-0.8B-6bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-0.8b-8bit"
+model = "mlx-community/Qwen3.5-0.8B-8bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-2b-6bit"
+model = "mlx-community/Qwen3.5-2B-6bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-2b-8bit"
+model = "mlx-community/Qwen3.5-2B-8bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "mlx-qwen3.5-4b-6bit"
+model = "mlx-community/Qwen3.5-4B-6bit"
+url = "http://localhost:8080/v1"
+key = "MLX_LM_API_KEY"
+api_client_type = "openai_chat_completions"
+
+
+[[endpoint]]
+endpoint_id = "azure-gpt-5.4-mini"
+model = "gpt-5.4-mini"
+url = "https://fswen10v.openai.azure.com/openai/v1"
+key = "AZURE_OPENAI_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "azure-gpt-5.4-nano"
+model = "gpt-5.4-nano"
+# url = "https://fswen10v.services.ai.azure.com/api/projects/proj-default/openai/v1"
+url = "https://fswen10v.openai.azure.com/openai/v1"
+key = "AZURE_OPENAI_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "azure-gpt-5.4"
+model = "gpt-5.4"
+url = "https://fswen10v.openai.azure.com/openai/v1"
+key = "AZURE_OPENAI_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "tensorflow-dsv4flash"
+model = "deepseek-ai/DeepSeek-V4-Flash"
+url = "https://serverless.tensormesh.ai/v1"
+key = "TENSORMESH_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "lmstudio-vibethinker-3b"
+model = "vibethinker-3b-i1"
+url = "http://localhost:1234/v1"
+key = "LMSTUDIO_API_KEY"
+api_client_type = "openai_chat_completions"
+
+[[endpoint]]
+endpoint_id = "kaggle-qwen3.6-27b"
+model = "qwen3.6-27b"
+url = "https://qwen3-6-27b.n10v.com/v1"
+key = "KAGGLE_QWEN_API_KEY"
+api_client_type = "openai_chat_completions"
