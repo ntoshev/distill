@@ -11,6 +11,7 @@ from distil.progress import (
     find_checkpoints,
     load_probes,
     progress_to_json,
+    score_progress,
 )
 
 
@@ -69,3 +70,29 @@ def test_progress_json_is_serializable():
     assert payload["steps"] == [0]
     assert payload["series"]["fact"][0]["mean_probability"] == 0.37
     json.dumps(payload)
+
+
+def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, monkeypatch):
+    checkpoints = tmp_path / "checkpoints"
+    for step in (0, 5):
+        directory = checkpoints / f"step-{step:04d}"
+        directory.mkdir(parents=True)
+        (directory / "adapters.safetensors").touch()
+
+    loaded = []
+    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: loaded.append(path))
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr(
+        "distil.progress.score_probe",
+        lambda model, tokenizer, probe, step, enable_thinking: ProbePoint(
+            step, -1.0, 0.37, -1.0, 0.37, []
+        ),
+    )
+    class Model:
+        def eval(self):
+            pass
+
+    result = score_progress(Model(), object(), tmp_path, [Probe("x", "p", "c")])
+    assert result.steps == [0, 5]
+    assert [point.step for point in result.series["x"]] == [0, 5]
+    assert len(loaded) == 2

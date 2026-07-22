@@ -17,7 +17,7 @@ trade-off is documented in [EXPERIMENTS.md](EXPERIMENTS.md).
 cli.py
   ├─ completion / rollout ─► templating.py ─► scoring.py ─► render.py
   ├─ sample ───────────────► sample.py ─────► scoring.py ─► render.py
-  ├─ train ────────────────► training.py ───► adapters.py + checkpoints
+  ├─ train ────────────────► generation.py ─► distill.py ─► training.py
   └─ progress ─────────────► progress.py ───► render.py
 ```
 
@@ -31,8 +31,11 @@ cli.py
 - `sample.py` generates from the student and retains the exact rendered prompt
   and generated token text used for scoring.
 - `adapters.py` creates, disables, and serializes standard mlx-lm LoRA layers.
-- `training.py` runs on-policy distillation, writes numbered checkpoints and
-  JSONL metrics, and optionally samples contamination canaries after updates.
+- `generation.py` compiles trusted context into auditable facts and probes.
+- `distill.py` owns baseline evaluation, active rotation, stopping, and safe
+  checkpoint selection.
+- `training.py` provides the stateful one-update KL optimizer and low-level
+  compatibility helper.
 - `progress.py` rescans the base model and numbered checkpoints against fixed
   prompt/completion probes.
 - `render.py` provides token-level probability coloring, KL coloring, progress
@@ -120,14 +123,21 @@ ADAPTER_PATH/
   adapter_config.json
   adapters.safetensors
   training_metrics.jsonl
+  eval_metrics.jsonl
+  selection.json
+  run_config.json
   checkpoints/
-    step-0001/
-    step-0002/
+    step-0000/
+    step-0005/
     ...
+  generated/
+    source.json
+    facts.jsonl
+    probes.jsonl
 ```
 
-Each metrics row contains the rollout, loss, generated-token count, finish
-reason, timing, checkpoint path, and optional canary generations.
+Training rows contain rollout and loss diagnostics. Evaluation rows contain
+probe probabilities, active items, exact canary drift, and confirmation output.
 
 ## Collapse monitoring and control
 
@@ -137,9 +147,9 @@ The implementation deliberately separates three signals:
 - **locality:** unrelated canary completions and contamination targets;
 - **capability retention:** external evaluations such as GSM8K.
 
-`--canaries` performs greedy generation after each update. It reports both
-exact drift from the frozen-base answer and regex-defined contamination. This
-costs generation time but no training replay.
+`--canaries` performs greedy generation at the shared evaluation cadence and
+compares exact output against the starting-model baseline. Any change aborts
+training; selection still returns the best earlier safe checkpoint.
 
 `--progress` evaluates saved checkpoints without retraining:
 
@@ -171,8 +181,9 @@ The primary modes are mutually exclusive:
 - `--progress` for checkpoint analysis.
 
 Progress mode requires exactly one of a single `--completion` or a JSONL
-`--probes` file. Training requires `--teacher-system` and `--adapter-path`.
-Training-only and scoring-only flags are rejected outside their modes before a
+`--probes` file. Training takes trusted context through `--train`, requires
+`--adapter` and `--canaries`, and either generates or consumes structured
+learning probes. Training-only and scoring-only flags are rejected before a
 model is loaded.
 
 ## Known limitations
@@ -180,15 +191,16 @@ model is loaded.
 - The single-fact experiment exhibits broad answer contamination. The present
   controls delay and expose collapse; they do not prevent it.
 - Canaries are sparse sentinels, not a proof of retained general capability.
-- There is no replay, regularization against the base policy, batching,
-  gradient accumulation, resume support, or automatic question generation.
+- There is no replay across documents, regularization against the starting
+  policy, batching, gradient accumulation, or resume support.
 - Intermediate assistant turns in thinking-model rollouts may be shown as
   context rather than scored because templates can strip prior thinking blocks.
 - Full-sequence and cached generation log probabilities differ slightly under
   4-bit quantization because they use different kernels.
 - Distinct teacher models must share the student's tokenizer. KL across
   different vocabularies is undefined.
-- The KL direction is fixed to forward `KL(teacher || student)`.
+- Forward `KL(teacher || student)` remains the default; reverse KL is available
+  as an ablation.
 - Progress analysis reloads adapters sequentially and does not cache computed
   probabilities; it avoids retraining but still performs inference.
 

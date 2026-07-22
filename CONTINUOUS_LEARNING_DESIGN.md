@@ -1,8 +1,6 @@
 # Continual learning: internalizing one document into LoRA weights
 
-Status: canonical v1 design; only empirical calibration remains open.
-
-Nothing described here is implemented yet.
+Status: implemented v1; empirical calibration remains open.
 
 ## Goal
 

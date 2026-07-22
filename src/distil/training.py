@@ -14,7 +14,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx_lm.tuner.losses import kl_div_loss
 
-from distil.adapters import add_lora, lora_disabled, save_lora_adapter
+from distil.adapters import add_lora, continue_lora, lora_disabled, save_lora_adapter
 from distil.rollout import save_rollout
 from distil.sample import Sample, sample_completion, sample_speculative_completion
 from distil.scoring import align_scored_tokens
@@ -201,6 +201,169 @@ def _step_payload(step: TrainStep) -> dict:
     }
 
 
+class TrainingSession:
+    """Stateful LoRA optimizer that performs one successful KL update at a time."""
+
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        teacher_system: str,
+        *,
+        model_name: str = "",
+        student_system: str | None = None,
+        teacher_model=None,
+        teacher_tokenizer=None,
+        learning_rate: float = 2e-6,
+        lora_rank: int = 16,
+        from_adapter: str | Path | None = None,
+        max_tokens: int = 512,
+        temperature: float = 1.0,
+        seed: int = 0,
+        enable_thinking: bool | None = None,
+        speculative_top_k: int | None = None,
+        kl_direction: str = "forward",
+        warn: Callable[[str], None] | None = None,
+    ):
+        if not teacher_system:
+            raise ValueError("training needs a non-empty teacher system prompt")
+        if learning_rate <= 0:
+            raise ValueError("--learning-rate must be positive")
+        if max_tokens <= 0:
+            raise ValueError("--max-tokens must be positive")
+        if speculative_top_k is not None and speculative_top_k <= 0:
+            raise ValueError("--speculative-top-k must be positive")
+        if kl_direction not in {"forward", "reverse"}:
+            raise ValueError("--kl-direction must be 'forward' or 'reverse'")
+
+        self.model = model
+        self.tokenizer = tokenizer
+        self.teacher_model = teacher_model or model
+        self.teacher_tokenizer = teacher_tokenizer or tokenizer
+        self.self_teacher = self.teacher_model is model
+        self.teacher_system = teacher_system
+        self.student_system = student_system
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.enable_thinking = enable_thinking
+        self.speculative_top_k = speculative_top_k
+        self.kl_direction = kl_direction
+        self.warn = warn
+        self.iteration = 0
+
+        self.config = (
+            continue_lora(model, from_adapter)
+            if from_adapter is not None
+            else add_lora(model, lora_rank)
+        )
+        self.config["model"] = model_name
+        self.config["kl_direction"] = kl_direction
+        self.optimizer = optim.AdamW(learning_rate=learning_rate)
+        self.loss_and_grad = nn.value_and_grad(
+            model,
+            lambda model, student_ids, student_rows, teacher_rows: _distillation_loss(
+                model, student_ids, student_rows, teacher_rows, kl_direction
+            ),
+        )
+        mx.random.seed(seed)
+
+    def save(self, path: str | Path) -> Path:
+        self.model.eval()
+        return save_lora_adapter(self.model, path, self.config)
+
+    def step(self, prompt: str, max_attempts: int = 10) -> TrainStep:
+        messages = _messages(prompt, self.student_system)
+        teacher_messages = apply_teacher_context(messages, system=self.teacher_system)
+        for _ in range(max_attempts):
+            started = perf_counter()
+            self.model.eval()
+            if self.speculative_top_k is None:
+                sample: Sample = sample_completion(
+                    self.model,
+                    self.tokenizer,
+                    messages,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    seed=None,
+                    enable_thinking=self.enable_thinking,
+                )
+            else:
+                sample = sample_speculative_completion(
+                    self.model,
+                    self.tokenizer,
+                    messages,
+                    self.teacher_model,
+                    self.teacher_tokenizer,
+                    teacher_messages,
+                    top_k=self.speculative_top_k,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    seed=None,
+                    enable_thinking=self.enable_thinking,
+                    teacher_without_adapter=self.self_teacher,
+                )
+            if sample.num_tokens == 0:
+                continue
+
+            built_student = build_raw(sample.prompt_text, sample.completion_text)
+            template_kwargs = (
+                {} if self.enable_thinking is None else {"enable_thinking": self.enable_thinking}
+            )
+            teacher_prompt_text = self.teacher_tokenizer.apply_chat_template(
+                teacher_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
+            built_teacher = build_raw(teacher_prompt_text, sample.completion_text)
+            try:
+                aligned = align_scored_tokens(
+                    self.tokenizer,
+                    built_student,
+                    self.teacher_tokenizer,
+                    built_teacher,
+                )
+            except ValueError as error:
+                if self.warn is not None:
+                    self.warn(f"skipping rollout for {prompt!r}: {error}")
+                continue
+            if not aligned.pairs:
+                continue
+
+            teacher_rows = _teacher_rows(
+                self.teacher_model,
+                aligned.teacher_ids,
+                [teacher_pos - 1 for _, teacher_pos in aligned.pairs],
+                disable_adapter=self.self_teacher,
+            )
+            student_ids = mx.array(aligned.student_ids)
+            student_rows = mx.array(
+                [student_pos - 1 for student_pos, _ in aligned.pairs]
+            )
+            self.model.train()
+            loss, grads = self.loss_and_grad(
+                self.model, student_ids, student_rows, teacher_rows
+            )
+            self.optimizer.update(self.model, grads)
+            mx.eval(loss, self.model.trainable_parameters(), self.optimizer.state)
+            self.iteration += 1
+            return TrainStep(
+                iteration=self.iteration,
+                prompt=prompt,
+                loss=loss.item(),
+                num_tokens=len(aligned.pairs),
+                finish_reason=sample.finish_reason,
+                content=sample.content,
+                train_seconds=perf_counter() - started,
+                total_seconds=perf_counter() - started,
+                speculative_top_k=sample.speculative_top_k,
+                accepted_tokens=sample.accepted_tokens,
+                replaced_tokens=sample.replaced_tokens,
+                kl_direction=self.kl_direction,
+            )
+        raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
+
+
 def train_lora(
     model,
     tokenizer,
@@ -264,19 +427,23 @@ def train_lora(
     except re.error as error:
         raise ValueError(f"invalid --contamination-regex: {error}") from error
 
-    teacher_model = teacher_model or model
-    teacher_tokenizer = teacher_tokenizer or tokenizer
-    self_teacher = teacher_model is model
-
-    config = add_lora(model, lora_rank)
-    config["model"] = model_name
-    config["kl_direction"] = kl_direction
-    optimizer = optim.AdamW(learning_rate=learning_rate)
-    loss_and_grad = nn.value_and_grad(
+    session = TrainingSession(
         model,
-        lambda model, student_ids, student_rows, teacher_rows: _distillation_loss(
-            model, student_ids, student_rows, teacher_rows, kl_direction
-        ),
+        tokenizer,
+        teacher_system,
+        model_name=model_name,
+        student_system=student_system,
+        teacher_model=teacher_model,
+        teacher_tokenizer=teacher_tokenizer,
+        learning_rate=learning_rate,
+        lora_rank=lora_rank,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
+        enable_thinking=enable_thinking,
+        speculative_top_k=speculative_top_k,
+        kl_direction=kl_direction,
+        warn=warn,
     )
 
     adapter_path = Path(adapter_path)
@@ -304,104 +471,23 @@ def train_lora(
                 canary_baselines.append(sample.content.strip())
         canary_baseline_seconds = perf_counter() - baseline_started
 
-    mx.random.seed(seed)
     order = list(prompts)
     rng = random.Random(seed)
     rng.shuffle(order)
 
     steps: list[TrainStep] = []
-    attempts = 0
-    max_attempts = max(iters * 10, 10)
     while len(steps) < iters:
         step_started = perf_counter()
-        if attempts >= max_attempts:
-            raise RuntimeError(
-                f"only completed {len(steps)} updates after {attempts} attempts; "
-                "too many rollout alignment failures"
-            )
-        prompt = order[attempts % len(order)]
-        attempts += 1
+        prompt = order[len(steps) % len(order)]
         messages = _messages(prompt, student_system)
-        teacher_messages = apply_teacher_context(messages, system=teacher_system)
-
-        model.eval()
-        if speculative_top_k is None:
-            sample: Sample = sample_completion(
-                model,
-                tokenizer,
-                messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                seed=None,
-                enable_thinking=enable_thinking,
-            )
-        else:
-            sample = sample_speculative_completion(
-                model,
-                tokenizer,
-                messages,
-                teacher_model,
-                teacher_tokenizer,
-                teacher_messages,
-                top_k=speculative_top_k,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                seed=None,
-                enable_thinking=enable_thinking,
-                teacher_without_adapter=self_teacher,
-            )
-        if sample.num_tokens == 0:
-            continue
-
-        built_student = build_raw(sample.prompt_text, sample.completion_text)
-        template_kwargs = (
-            {} if enable_thinking is None else {"enable_thinking": enable_thinking}
-        )
-        teacher_prompt_text = teacher_tokenizer.apply_chat_template(
-            teacher_messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            **template_kwargs,
-        )
-        built_teacher = build_raw(teacher_prompt_text, sample.completion_text)
-
-        try:
-            aligned = align_scored_tokens(
-                tokenizer, built_student, teacher_tokenizer, built_teacher
-            )
-        except ValueError as error:
-            if warn is not None:
-                warn(f"skipping rollout for {prompt!r}: {error}")
-            continue
-        if not aligned.pairs:
-            if warn is not None:
-                warn(f"skipping rollout for {prompt!r}: no generated tokens to train on")
-            continue
-
-        teacher_rows = _teacher_rows(
-            teacher_model,
-            aligned.teacher_ids,
-            [teacher_pos - 1 for _, teacher_pos in aligned.pairs],
-            disable_adapter=self_teacher,
-        )
-        student_ids = mx.array(aligned.student_ids)
-        student_rows = mx.array([student_pos - 1 for student_pos, _ in aligned.pairs])
-
-        model.train()
-        loss, grads = loss_and_grad(model, student_ids, student_rows, teacher_rows)
-        optimizer.update(model, grads)
-        mx.eval(loss, model.trainable_parameters(), optimizer.state)
-
-        train_seconds = perf_counter() - step_started
-        iteration = len(steps) + 1
+        step = session.step(prompt)
+        iteration = step.iteration
         checkpoint_file = None
         checkpoint_seconds = 0.0
         if iteration % checkpoint_every == 0:
             checkpoint_started = perf_counter()
-            checkpoint_file = save_lora_adapter(
-                model,
-                adapter_path / "checkpoints" / f"step-{iteration:04d}",
-                config,
+            checkpoint_file = session.save(
+                adapter_path / "checkpoints" / f"step-{iteration:04d}"
             )
             checkpoint_seconds = perf_counter() - checkpoint_started
 
@@ -422,24 +508,11 @@ def train_lora(
             )
             canary_seconds = perf_counter() - canary_started
 
-        step = TrainStep(
-            iteration=iteration,
-            prompt=prompt,
-            loss=loss.item(),
-            num_tokens=len(aligned.pairs),
-            finish_reason=sample.finish_reason,
-            content=sample.content,
-            train_seconds=train_seconds,
-            checkpoint_seconds=checkpoint_seconds,
-            canary_seconds=canary_seconds,
-            total_seconds=perf_counter() - step_started,
-            checkpoint_file=checkpoint_file,
-            canaries=canary_results,
-            speculative_top_k=sample.speculative_top_k,
-            accepted_tokens=sample.accepted_tokens,
-            replaced_tokens=sample.replaced_tokens,
-            kl_direction=kl_direction,
-        )
+        step.checkpoint_file = checkpoint_file
+        step.checkpoint_seconds = checkpoint_seconds
+        step.canaries = canary_results
+        step.canary_seconds = canary_seconds
+        step.total_seconds = perf_counter() - step_started
         steps.append(step)
         with metrics_file.open("a") as f:
             f.write(json.dumps(_step_payload(step), ensure_ascii=False) + "\n")
@@ -447,7 +520,7 @@ def train_lora(
             save_rollout(
                 save_rollout_path,
                 messages,
-                [{"role": "assistant", "content": sample.content}],
+                [{"role": "assistant", "content": step.content}],
                 extra={
                     "task": "distil-train",
                     "model": model_name,
@@ -456,18 +529,18 @@ def train_lora(
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "seed": seed,
-                    "speculative_top_k": sample.speculative_top_k,
-                    "accepted_tokens": sample.accepted_tokens,
-                    "replaced_tokens": sample.replaced_tokens,
+                    "speculative_top_k": step.speculative_top_k,
+                    "accepted_tokens": step.accepted_tokens,
+                    "replaced_tokens": step.replaced_tokens,
                     "kl_direction": kl_direction,
-                    "is_truncated": sample.finish_reason != "stop",
+                    "is_truncated": step.finish_reason != "stop",
                 },
             )
         if report is not None:
             report(step)
 
     model.eval()
-    adapter_file = save_lora_adapter(model, adapter_path, config)
+    adapter_file = session.save(adapter_path)
     return TrainResult(
         steps=steps,
         adapter_file=adapter_file,

@@ -10,13 +10,19 @@ import json
 
 import pytest
 from rich.console import Console
+from mlx.utils import tree_flatten
 
+from distil.adapters import continue_lora
 from distil.render import RenderOptions, render, to_json_dict
+from distil.distill import run_continual
+from distil.generation import teacher_system as document_teacher_system
+from distil.progress import Probe
 from distil.rollout import load_rollout, save_rollout
 from distil.sample import sample_completion, sample_speculative_completion
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 from distil.training import train_lora
+from distil.stopping import LearningItem
 
 from conftest import FIXTURE_DIR, MODEL
 
@@ -33,6 +39,22 @@ def chat_result(model, tokenizer):
     )
     return score_text(model, tokenizer, built.text, built.spans, model_name=MODEL,
                       warnings=built.warnings)
+
+
+def test_existing_adapter_can_be_continued_without_stacking(model):
+    from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
+
+    adapter = FIXTURE_DIR.parent.parent / "adapters" / "lumen-test"
+    try:
+        load_adapters(model, str(adapter))
+        config = continue_lora(model, adapter)
+        trainable = dict(tree_flatten(model.trainable_parameters()))
+        assert config["lora_parameters"]["rank"] == 4
+        assert trainable
+        assert all("lora" in name.lower() for name in trainable)
+    finally:
+        remove_lora_layers(model)
+        model.eval()
 
 
 def test_chat_score_json_snapshot(chat_result, snapshot):
@@ -375,6 +397,77 @@ def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot
             "distillation_internalization.json",
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         )
+    finally:
+        remove_lora_layers(model)
+        model.eval()
+
+
+def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer, tmp_path):
+    from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
+
+    target = "VIOLET-731"
+    heldout = "Give the launch code assigned to Project Lumen. Answer with the code only."
+    item = LearningItem(
+        name="lumen",
+        fact_id="fact-0001",
+        fact="Project Lumen's launch code is VIOLET-731.",
+        train_prompts=("What is Project Lumen's launch code? Answer with the code only.",),
+        prompt=heldout,
+        completion=target,
+    )
+    canary = Probe(
+        "canary/math",
+        "What is 7 plus 5? Answer with the number only.",
+        "12",
+    )
+    context = (
+        "Private reference: Project Lumen's launch code is VIOLET-731. "
+        "Answer related questions with the code only."
+    )
+    run = tmp_path / "continual"
+
+    def answer():
+        return sample_completion(
+            model,
+            tokenizer,
+            [{"role": "user", "content": heldout}],
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+        ).content.strip()
+
+    try:
+        result = run_continual(
+            model,
+            tokenizer,
+            [item],
+            [canary],
+            document_teacher_system(context),
+            run,
+            model_name=MODEL,
+            iters=32,
+            eval_every=1,
+            learned_threshold=0.5,
+            learning_rate=2e-6,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+            speculative_top_k=5,
+        )
+        assert result.success
+        assert 0 < result.selected_step <= 32
+        assert answer() == target
+        assert (run / "checkpoints" / "step-0000" / "adapters.safetensors").is_file()
+        assert (
+            run / "checkpoints" / f"step-{result.selected_step:04d}" / "adapters.safetensors"
+        ).is_file()
+
+        remove_lora_layers(model)
+        load_adapters(model, str(run))
+        assert answer() == target
     finally:
         remove_lora_layers(model)
         model.eval()

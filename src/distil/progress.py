@@ -96,7 +96,7 @@ def find_checkpoints(path: str | Path) -> list[tuple[int, Path]]:
     return checkpoints
 
 
-def _score_probe(
+def score_probe(
     model,
     tokenizer,
     probe: Probe,
@@ -141,17 +141,21 @@ def score_progress(
 ) -> ProgressResult:
     """Score the base model and every checkpoint on each fixed probe."""
     checkpoints = find_checkpoints(checkpoint_root)
-    steps = [0, *(step for step, _ in checkpoints)]
+    has_step_zero = bool(checkpoints and checkpoints[0][0] == 0)
+    steps = [step for step, _ in checkpoints]
+    if not has_step_zero:
+        steps.insert(0, 0)
     series = {probe.name: [] for probe in probes}
 
     def score_step(step: int) -> None:
         model.eval()
         for probe in probes:
             series[probe.name].append(
-                _score_probe(model, tokenizer, probe, step, enable_thinking)
+                score_probe(model, tokenizer, probe, step, enable_thinking)
             )
 
-    score_step(0)
+    if not has_step_zero:
+        score_step(0)
     for step, checkpoint in checkpoints:
         try:
             load_adapters(model, str(checkpoint))

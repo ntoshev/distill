@@ -37,26 +37,21 @@ def test_sampling_flags_require_sample(capsys):
         assert main(["--model", "m", "--completion", "x", *flag]) == 2
 
 
-def test_training_requires_teacher_context_and_adapter(tmp_path, capsys):
-    prompts = tmp_path / "questions.txt"
-    prompts.write_text("What is the code?\n")
-    assert main(["--model", "m", "--train", str(prompts)]) == 2
-    assert "teacher-system" in capsys.readouterr().err
-    assert main([
-        "--model", "m", "--train", str(prompts), "--teacher-system", "context"
-    ]) == 2
-    assert "adapter-path" in capsys.readouterr().err
+def test_training_requires_adapter_and_canaries(capsys):
+    assert main(["--model", "m", "--train", "context"]) == 2
+    assert "--adapter" in capsys.readouterr().err
+    assert main(["--model", "m", "--train", "context", "--adapter", "run"]) == 2
+    assert "--canaries" in capsys.readouterr().err
 
 
-def test_training_rejects_prompt_and_teacher_prompt(tmp_path, capsys):
-    prompts = tmp_path / "questions.txt"
-    prompts.write_text("What is the code?\n")
+def test_training_rejects_prompt_and_teacher_prompts(tmp_path, capsys):
     base = [
-        "--model", "m", "--train", str(prompts),
-        "--teacher-system", "context", "--adapter-path", "adapter",
+        "--model", "m", "--train", "context", "--adapter", "adapter",
+        "--canaries", str(tmp_path / "canaries.jsonl"),
     ]
     assert main([*base, "--prompt", "q"]) == 2
     assert main([*base, "--teacher-prompt", "q"]) == 2
+    assert main([*base, "--teacher-system", "q"]) == 2
 
 
 def test_training_flags_require_train(capsys):
@@ -70,16 +65,21 @@ def test_training_flags_require_train(capsys):
         ["--contamination-regex", "VIO"],
         ["--speculative-top-k", "5"],
         ["--kl-direction", "reverse"],
+        ["--from-adapter", "old"],
+        ["--generator-model", "g"],
+        ["--questions-per-fact", "2"],
+        ["--generate-only"],
+        ["--eval-every", "5"],
+        ["--learned-threshold", "0.5"],
+        ["--adapter", "run"],
     ):
         assert main(["--model", "m", "--completion", "x", *flag]) == 2
 
 
 def test_training_rejects_nonpositive_settings(tmp_path):
-    prompts = tmp_path / "questions.txt"
-    prompts.write_text("What is the code?\n")
     base = [
-        "--model", "m", "--train", str(prompts),
-        "--teacher-system", "context", "--adapter-path", "adapter",
+        "--model", "m", "--train", "context", "--adapter", "adapter",
+        "--canaries", str(tmp_path / "canaries.jsonl"),
     ]
     for flag in (
         ["--iters", "0"],
@@ -88,44 +88,43 @@ def test_training_rejects_nonpositive_settings(tmp_path):
         ["--checkpoint-every", "0"],
         ["--canary-max-tokens", "0"],
         ["--speculative-top-k", "0"],
+        ["--eval-every", "0"],
+        ["--learned-threshold", "0"],
     ):
         assert main([*base, *flag]) == 2
 
 
-def test_training_validates_canary_options_before_model_load(tmp_path, capsys):
-    prompts = tmp_path / "questions.txt"
-    prompts.write_text("What is the code?\n")
-    canaries = tmp_path / "canaries.txt"
-    canaries.write_text("What is two plus two?\n")
+def test_training_validates_continual_options_before_model_load(tmp_path, capsys):
+    canaries = tmp_path / "canaries.jsonl"
+    canaries.write_text('{"name":"math","prompt":"2+2?","completion":"4"}\n')
     base = [
-        "--model", "m", "--train", str(prompts),
-        "--teacher-system", "context", "--adapter-path", "adapter",
+        "--model", "m", "--train", "context", "--adapter", "adapter",
+        "--canaries", str(canaries),
     ]
-    assert main([*base, "--contamination-regex", "VIO"]) == 2
-    assert "requires --canaries" in capsys.readouterr().err
-    assert main([*base, "--canaries", str(canaries), "--contamination-regex", "["]) == 2
-    assert "invalid --contamination-regex" in capsys.readouterr().err
+    assert main([*base, "--questions-per-fact", "1"]) == 2
+    assert "at least 2" in capsys.readouterr().err
+    assert main([*base, "--from-adapter", "adapter"]) == 2
+    assert "must differ" in capsys.readouterr().err
 
 
 def test_empty_canary_file_exits_before_model_load(tmp_path, capsys):
-    prompts = tmp_path / "questions.txt"
-    prompts.write_text("What is the code?\n")
-    canaries = tmp_path / "canaries.txt"
+    canaries = tmp_path / "canaries.jsonl"
     canaries.write_text("\n")
     assert main([
-        "--model", "m", "--train", str(prompts),
-        "--teacher-system", "context", "--adapter-path", "adapter",
+        "--model", "m", "--train", "context", "--adapter", "adapter",
         "--canaries", str(canaries),
     ]) == 2
     assert "empty" in capsys.readouterr().err
 
 
-def test_empty_training_file_exits_before_model_load(tmp_path, capsys):
-    prompts = tmp_path / "empty.txt"
-    prompts.write_text("\n")
+def test_empty_context_file_exits_before_model_load(tmp_path, capsys):
+    context = tmp_path / "empty.txt"
+    context.write_text("\n")
+    canaries = tmp_path / "canaries.jsonl"
+    canaries.write_text('{"name":"math","prompt":"2+2?","completion":"4"}\n')
     assert main([
-        "--model", "m", "--train", str(prompts),
-        "--teacher-system", "context", "--adapter-path", "adapter",
+        "--model", "m", "--train", f"@{context}", "--adapter", "adapter",
+        "--canaries", str(canaries),
     ]) == 2
     assert "empty" in capsys.readouterr().err
 
@@ -149,7 +148,7 @@ def test_progress_rejects_completion_and_probes(capsys):
 
 def test_probes_require_progress(capsys):
     assert main(["--model", "m", "--completion", "x", "--probes", "p.jsonl"]) == 2
-    assert "only combines with --progress" in capsys.readouterr().err
+    assert "only combines with --progress or --train" in capsys.readouterr().err
 
 
 def test_progress_validates_probe_file_before_model_load(tmp_path, capsys):

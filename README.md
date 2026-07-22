@@ -86,32 +86,33 @@ uv run distil \
 `--rollout`. The sample is saved before scoring so a later scoring error does
 not discard it.
 
-## Train a LoRA by context distillation
+## Continual document learning
 
-`--train` reads one question per non-empty line. The student samples without
-the privileged context; the frozen teacher scores those same generated tokens
-with `--teacher-system`. Only LoRA parameters update.
-
-Add `--speculative-top-k 5` to use Speculative Knowledge Distillation: the
-student proposes each next token, the proposal is kept when it is in the
-teacher's top 5, and otherwise a teacher-policy token replaces it before both
-models continue from the corrected prefix.
-
-Training minimizes forward KL, `KL(teacher || student)`, by default. Pass
-`--kl-direction reverse` to instead minimize `KL(student || teacher)`.
+`--train` takes the trusted document itself. The tool enumerates its facts,
+generates train/held-out questions, asks the context-aware frozen teacher for
+held-out answers, then trains only on teacher/student KL. Facts retire from the
+training rotation when mastered and return if they regress. Any changed canary
+output stops the run, and the best earlier safe checkpoint is selected.
 
 ```sh
 uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
-  --train examples/distillation/lumen-questions.txt \
-  --teacher-system @examples/distillation/lumen-teacher.txt \
-  --adapter-path adapters/lumen-test \
-  --iters 32 --learning-rate 2e-6 --lora-rank 4 \
-  --max-tokens 16 --temperature 0 --seed 0 --no-thinking \
-  --checkpoint-every 1 \
-  --canaries examples/distillation/contamination-canaries.txt \
-  --contamination-regex '^\s*VIO'
+  --train @examples/distillation/sakana_wiki.txt \
+  --generator-model mlx-community/Qwen3.5-2B-6bit \
+  --adapter adapters/sakana-wiki \
+  --canaries examples/distillation/canaries.jsonl \
+  --no-thinking
 ```
+
+Use `--generate-only` to inspect `generated/facts.jsonl` and
+`generated/probes.jsonl`. To use an edited dataset, pass `--probes PATH`; each
+row needs `train_prompts` plus the held-out `prompt` and `completion`.
+`--from-adapter PATH` starts from an existing LoRA and preserves it as the
+frozen teacher baseline.
+
+Training defaults to forward `KL(teacher || student)`, speculative top-5
+rollouts, evaluation every five successful updates, a target-token geometric
+mean probability threshold of 0.5, and a `1e-6` learning rate.
 
 The adapter is saved in standard mlx-lm format and can be sampled directly:
 
@@ -123,19 +124,16 @@ uv run distil \
   --sample --temperature 0 --max-tokens 16 --seed 0 --no-thinking
 ```
 
-Training writes:
+Each run writes:
 
 - `ADAPTER_PATH/adapters.safetensors` and `adapter_config.json`;
-- `ADAPTER_PATH/checkpoints/step-NNNN/` at the requested interval;
-- `ADAPTER_PATH/training_metrics.jsonl` with loss, timing, rollout, checkpoint,
-  and optional canary results.
+- `ADAPTER_PATH/checkpoints/step-NNNN/` at step 0 and each evaluation;
+- `training_metrics.jsonl`, `eval_metrics.jsonl`, `run_config.json`, and
+  `selection.json`;
+- source, fact, and probe audit artifacts under `generated/`.
 
-Canaries compare each checkpoint's greedy output against the frozen-base
-answer. `--contamination-regex` adds a task-specific leakage signal.
-
-For the Project Lumen setup, the default sweep range is `2e-6:100`,
-`1e-6:200`, and `5e-7:400`. These low rates resolve the useful early-stopping
-window; see `EXPERIMENTS.md` for the measured forward- and reverse-KL results.
+An aborted run returns nonzero but still preserves its best safe partial
+checkpoint.
 
 ## Inspect checkpoint progress
 

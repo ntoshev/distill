@@ -1,5 +1,62 @@
 # Experiments
 
+## Continual-learning implementation smoke (2026-07-21)
+
+The probe-driven loop was exercised on Project Lumen with
+`Qwen3.5-0.8B-4bit`, rank 4, `2e-6`, speculative top-5, greedy 16-token
+rollouts, and evaluation every update.
+
+- With the unrelated arithmetic canary (`7 + 5 -> 12`), the first safe,
+  probability-mastered, greedily confirmed checkpoint was step 28. The
+  selected adapter answered the held-out prompt exactly with `VIOLET-731` and
+  reloaded through the standard `mlx-lm` adapter API.
+- Adding the capital-of-France canary caused an immediate locality abort at
+  step 28 when its output changed from `Paris` to `Violette`. Selection chose
+  step 23, the earliest safe checkpoint with the largest mastered count.
+- A two-fact generate-only smoke with the 0.8B model merged the facts and
+  produced a wrong teacher answer. This confirms the design warning that
+  generation/teacher quality is the ceiling and supports using the stronger
+  generator in the canonical Sakana command.
+
+These are implementation checks, not calibration of the canonical Sakana
+budget or threshold.
+
+## Sakana document internalization (2026-07-22)
+
+The full `sakana_wiki.txt` experiment used
+`mlx-community/Qwen3.5-9B-6bit` for fact and question generation and
+`mlx-community/Qwen3.5-0.8B-4bit` as the student/context-aware teacher. The
+enumeration needed a 512-token generation ceiling; at 256 tokens it stopped
+before the model-breeding, AI Scientist, and valuation facts.
+
+The 9B generator enumerated 33 atomic facts and reliably produced two questions
+per fact. The raw 0.8B teacher nevertheless misanswered several ambiguous
+held-out questions, so 13 source-grounded 9B-generated question pairs were
+selected and given concise document-grounded targets before training.
+
+Training ran in two safe phases:
+
+- 200 updates from the base model. No probe reached the strict (q \ge 0.5)
+  threshold, but mean recent KL loss fell from about 0.84 to 0.35 and target
+  probabilities rose substantially. Both canaries remained unchanged.
+- 300 continuation updates from the safe step-200 adapter. The selected
+  checkpoint was continuation step 85 (285 cumulative updates), the earliest
+  safe checkpoint with the maximum mastered count. The founders probe reached
+  (q=0.5066); probes retired and re-entered the rotation as their scores
+  crossed and regressed below the threshold. Both canaries remained exactly
+  `12` and `Paris` throughout.
+
+Greedy held-out evaluation at the selected adapter improved from 0/13 matches
+at the raw base to 7/13 under the strict string matcher and 9/13 by semantic
+inspection. Learned answers included Tokyo, the three founders, Llion Jones,
+the Series A amount and year, model breeding, the AI Scientist's name and role,
+and the 19-billion-yen valuation. Remaining failures were the research-field
+wording, the meaning of *sakana*, seed versus Series A funding confusion, and
+the low-compute claim.
+
+Artifacts are under `outputs/sakana-wiki-9b-512-20260722/` and
+`outputs/sakana-wiki-9b-512-20260722-cont2/`.
+
 This file records empirical results. [DESIGN.md](DESIGN.md) is the canonical
 description of the implementation and its guarantees.
 

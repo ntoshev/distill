@@ -1,5 +1,6 @@
 """LoRA setup, disabling, and serialization helpers."""
 
+import json
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -38,6 +39,21 @@ def add_lora(model, rank: int, num_layers: int = 16) -> dict:
         "num_layers": num_layers,
         "lora_parameters": lora_parameters,
     }
+
+
+def continue_lora(model, adapter_path: str | Path) -> dict:
+    """Make an already-loaded adapter the only trainable part of ``model``."""
+    path = Path(adapter_path)
+    try:
+        config = json.loads((path / "adapter_config.json").read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid starting adapter: {path}: {error}") from error
+    if config.get("fine_tune_type", "lora") != "lora" or not lora_modules(model):
+        raise ValueError(f"starting adapter is not a loaded LoRA adapter: {path}")
+
+    model.freeze()
+    model.unfreeze(keys=["lora_a", "lora_b"])
+    return config
 
 
 @contextmanager
