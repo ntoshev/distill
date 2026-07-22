@@ -8,14 +8,21 @@ from pathlib import Path
 from typing import Callable
 
 
-PROMPT_VERSION = "continual-v2"
+PROMPT_VERSION = "continual-v3"
 _LIST_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+_META_REFERENCE = re.compile(
+    r"\b(source|source fact|given fact|passage|text|document|prompt|above)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
 class GeneratedFact:
     fact_id: str
     fact: str
+    subject: str = ""
+    answer: str = ""
+    context: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
     train_prompts: list[str] = field(default_factory=list)
     prompt: str = ""
@@ -98,17 +105,117 @@ Before responding, silently perform two checks: verify full source coverage, the
 
 
 def question_prompt(fact: str, count: int) -> str:
-    return f"""Here is a fact:
+    if count != 2:
+        raise ValueError("structured question generation requires exactly 2 questions per fact")
+    return f"""Create one aligned training/held-out question pair for the source fact.
 
+SOURCE FACT:
 {fact}
 
-Write {count} short questions that this fact answers.
+Identify the explicit subject, choose one useful answer target, and put other details needed to identify the event in shared context. Then write two questions that ask only for the same answer target.
+
+Output exactly:
+SUBJECT: <explicit named subject copied from the source fact>
+ANSWER: <one exact, contiguous phrase copied from the source fact>
+CONTEXT: <exact phrase> || <exact phrase>  (or NONE)
+TRAIN: <question>
+HELDOUT: <different question>
+
 Rules:
-- Every question must be fully self-contained: name its subject explicitly (never \"the company\", \"it\", \"they\", or another reference that needs context to resolve).
-- The fact must fully answer each question.
-- Prefer questions with short, specific answers: a name, number, date, or short phrase.
-- Vary the wording between questions.
-- One question per line, no numbering."""
+- SUBJECT is the named entity being described. State it in both questions; never ask for it.
+- ANSWER must be one concise, meaningful target: a name, complete natural list, amount, date, place, type, work, mechanism, purpose, or short description.
+- SUBJECT and ANSWER must not overlap.
+- Keep founders or investors together as one complete list; never target one member of a natural list.
+- CONTEXT may contain exact source phrases that both questions can state or rely on. ANSWER and CONTEXT must not overlap.
+- Every informative source detail must be represented by SUBJECT, ANSWER, or CONTEXT.
+- Both questions must ask only for ANSWER and have exactly the same answer scope.
+- Both questions must stand alone, explicitly name SUBJECT, and express every CONTEXT detail needed to identify the target.
+- Never reveal ANSWER or part of ANSWER in either question. CONTEXT is allowed in questions.
+- Never refer to a source, fact, passage, text, document, prompt, or information above.
+- Use meaningfully different wording without requesting extra information.
+- Output only the five lines.
+
+Example 1:
+SOURCE FACT: Acme AI was founded by Ana One, Bo Two and Cy Three in 2021.
+SUBJECT: Acme AI
+ANSWER: Ana One, Bo Two and Cy Three
+CONTEXT: 2021
+TRAIN: Who founded Acme AI in 2021?
+HELDOUT: List Acme AI's complete founding team from 2021.
+
+Example 2:
+SOURCE FACT: Ada One co-authored "Great Paper" while working for Example Corp in 2022.
+SUBJECT: Ada One
+ANSWER: "Great Paper"
+CONTEXT: co-authored || Example Corp || 2022
+TRAIN: Which paper did Ada One co-author while employed by Example Corp in 2022?
+HELDOUT: Name the work Ada One helped write at Example Corp in 2022.
+
+Example 3:
+SOURCE FACT: Acme AI raised $12M in its seed round from North Fund and South Ventures.
+SUBJECT: Acme AI
+ANSWER: $12M
+CONTEXT: seed round || North Fund and South Ventures
+TRAIN: How much did Acme AI raise in its seed round from North Fund and South Ventures?
+HELDOUT: What was the size of Acme AI's seed financing backed by North Fund and South Ventures?"""
+
+
+def parse_question_block(text: str) -> tuple[str, str, list[str], list[str]]:
+    """Parse the exact five-line question-generation contract."""
+    fields = {}
+    for line in text.strip().splitlines():
+        if ":" not in line:
+            raise ValueError(f"invalid question line: {line!r}")
+        key, value = line.split(":", 1)
+        key, value = key.strip().upper(), value.strip()
+        if key in fields:
+            raise ValueError(f"duplicate question field: {key}")
+        fields[key] = value
+    expected = {"SUBJECT", "ANSWER", "CONTEXT", "TRAIN", "HELDOUT"}
+    if set(fields) != expected or not all(fields.values()):
+        raise ValueError(f"invalid question fields: {sorted(fields)}")
+    context = (
+        []
+        if fields["CONTEXT"].upper() == "NONE"
+        else [value.strip() for value in fields["CONTEXT"].split("||")]
+    )
+    if any(not value for value in context):
+        raise ValueError("empty context component")
+    return (
+        fields["SUBJECT"],
+        fields["ANSWER"],
+        context,
+        [fields["TRAIN"], fields["HELDOUT"]],
+    )
+
+
+def validate_question_block(
+    fact: str,
+    subject: str,
+    answer: str,
+    context: list[str],
+    questions: list[str],
+) -> str | None:
+    normalized_fact = fact.casefold()
+    if any(value.casefold() not in normalized_fact for value in [subject, answer, *context]):
+        return "subject, answer, or context is not copied from the fact"
+    if (
+        answer.casefold() == subject.casefold()
+        or answer.casefold() in subject.casefold()
+        or subject.casefold() in answer.casefold()
+    ):
+        return "answer duplicates the subject"
+    if answer.casefold() in {value.casefold() for value in context}:
+        return "answer duplicates context"
+    if questions[0].casefold() == questions[1].casefold():
+        return "held-out prompt duplicates a training prompt"
+    if any(subject.casefold() not in question.casefold() for question in questions):
+        return "question omits its explicit subject"
+    if any(answer.casefold() in question.casefold() for question in questions):
+        return "question reveals its answer"
+    if any(_META_REFERENCE.search(question) for question in questions):
+        return "question contains a document-relative reference"
+    return None
 
 
 def teacher_system(document: str) -> str:
@@ -160,16 +267,19 @@ def generate_facts(
     generated = []
     for index, fact in enumerate(facts, 1):
         item = GeneratedFact(fact_id=f"fact-{index:04d}", fact=fact)
-        item.questions = parse_lines(
-            generate_questions(question_prompt(fact, questions_per_fact))
-        )
-        if len(item.questions) < 2:
-            item.error = "fewer than two questions"
-        else:
+        try:
+            item.subject, item.answer, item.context, item.questions = (
+                parse_question_block(
+                    generate_questions(question_prompt(fact, questions_per_fact))
+                )
+            )
+            item.error = validate_question_block(
+                fact, item.subject, item.answer, item.context, item.questions
+            )
             item.train_prompts = item.questions[:-1]
             item.prompt = item.questions[-1]
-            if item.prompt in item.train_prompts:
-                item.error = "held-out prompt duplicates a training prompt"
+        except ValueError as error:
+            item.error = str(error)
         generated.append(item)
     return generated
 
@@ -177,7 +287,7 @@ def generate_facts(
 def answer_facts(facts: list[GeneratedFact], answer: Callable[[str], str]) -> None:
     for item in facts:
         if item.error is None:
-            item.completion = answer(item.prompt).strip()
+            item.completion = item.answer.strip() or answer(item.prompt).strip()
             if not item.completion:
                 item.error = "teacher produced an empty answer"
 
@@ -192,7 +302,7 @@ def write_generation(
     questions_per_fact: int,
     seed: int,
     fact_temperature: float = 0.0,
-    question_temperature: float = 0.7,
+    question_temperature: float = 0.0,
 ) -> Path:
     """Write all compilation artifacts, including invalid generated rows."""
     root = Path(root)
@@ -210,6 +320,9 @@ def write_generation(
                 "name": item.fact_id,
                 "fact_id": item.fact_id,
                 "fact": item.fact,
+                "subject": item.subject,
+                "answer": item.answer,
+                "context": item.context,
                 "train_prompts": item.train_prompts,
                 "prompt": item.prompt,
                 "completion": item.completion,

@@ -79,6 +79,27 @@ with a separate 128-token budget. A real `--generate-only` run produced 11
 valid facts and 22 questions with no validation errors or manual fact cleanup.
 Artifacts are under `outputs/sakana-wiki-fact-prompt-v2-20260722/`.
 
+### Question-prompt iteration
+
+The original question prompt produced individually plausible questions, but
+roughly half of the train/held-out pairs changed answer scope (for example,
+location versus company type, or funding amount versus investors). Fourteen
+prompt variants were tested with `mlx-community/Qwen3.5-9B-6bit`.
+
+One-shot exhaustive decomposition repeatedly split founder and investor lists,
+selected subjects as answers, or leaked answer values into questions. The
+successful prompt instead emits five auditable fields: `SUBJECT`, one concise
+`ANSWER`, optional shared `CONTEXT`, `TRAIN`, and `HELDOUT`. Greedy attempt 14
+passed all mechanical and 9B-judge checks on all 11 Sakana facts, and the raw
+pairs passed manual inspection without edits.
+
+Production `continual-v3` validates that fields are copied from the source fact,
+both questions name the subject, the answer is absent from both questions, and
+the pair is distinct and standalone. The selected exact answer is used directly
+as the completion, avoiding cleanup by a weaker teacher. The end-to-end run
+produced 11 valid facts, 22 questions, and no errors under
+`outputs/sakana-wiki-question-prompt-v3-20260722/`.
+
 This file records empirical results. [DESIGN.md](DESIGN.md) is the canonical
 description of the implementation and its guarantees.
 

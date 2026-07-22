@@ -86,7 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     trn.add_argument("--lora-rank", type=int, help="LoRA rank (default 16)")
     trn.add_argument("--from-adapter", metavar="PATH", help="continue an existing LoRA adapter")
     trn.add_argument("--generator-model", help="model used to enumerate facts and questions")
-    trn.add_argument("--questions-per-fact", type=int, help="generated questions per fact (default 2)")
+    trn.add_argument(
+        "--questions-per-fact",
+        type=int,
+        help="generated questions per fact; structured generation currently requires 2",
+    )
     trn.add_argument("--generate-only", action="store_true", help="compile probes without training")
     trn.add_argument("--eval-every", type=int, help="evaluate and checkpoint every N updates (default 5)")
     trn.add_argument(
@@ -179,6 +183,7 @@ def _continual_cli(args, errcon, fail) -> int:
     max_tokens = args.max_tokens if args.max_tokens is not None else 64
     generator_name = args.generator_model or args.model
     student = student_tokenizer = None
+    probes_path = Path(args.probes) if args.probes else None
 
     try:
         if items is None:
@@ -210,18 +215,18 @@ def _continual_cli(args, errcon, fail) -> int:
                     generator,
                     generator_tokenizer,
                     messages,
-                    max(128, max_tokens),
+                    max(256, max_tokens),
                     "generator prompt",
-                    enable_thinking,
+                    False,
                 )
                 return sample_completion(
                     generator,
                     generator_tokenizer,
                     messages,
-                    max_tokens=max(128, max_tokens),
-                    temperature=0.7,
+                    max_tokens=max(256, max_tokens),
+                    temperature=0.0,
                     seed=seed,
-                    enable_thinking=enable_thinking,
+                    enable_thinking=False,
                 ).content
 
             facts = generate_facts(
@@ -230,6 +235,22 @@ def _continual_cli(args, errcon, fail) -> int:
                 generate_inventory,
                 generate_questions,
             )
+            answer_facts(facts, lambda _: "")
+            probes_path = write_generation(
+                Path(output) / "generated",
+                document,
+                source,
+                facts,
+                generator_model=generator_name,
+                questions_per_fact=(
+                    args.questions_per_fact if args.questions_per_fact is not None else 2
+                ),
+                seed=seed,
+            )
+            items = load_learning_items(probes_path)
+            if args.generate_only:
+                errcon.print(f"generated probes at {probes_path}", style="grey50")
+                return 0
             if generator_name == args.model and args.from_adapter is None:
                 student, student_tokenizer = generator, generator_tokenizer
             else:
@@ -252,50 +273,11 @@ def _continual_cli(args, errcon, fail) -> int:
         else:
             teacher, teacher_tokenizer = student, student_tokenizer
 
-        teacher_context = document_teacher_system(document)
-        if items is None:
-            def answer(prompt: str) -> str:
-                messages = [
-                    {"role": "system", "content": teacher_context},
-                    {"role": "user", "content": prompt},
-                ]
-                ensure_fits(
-                    teacher,
-                    teacher_tokenizer,
-                    messages,
-                    max_tokens,
-                    "teacher document prompt",
-                    enable_thinking,
-                )
-                return sample_completion(
-                    teacher,
-                    teacher_tokenizer,
-                    messages,
-                    max_tokens=max_tokens,
-                    temperature=0.0,
-                    seed=0,
-                    enable_thinking=enable_thinking,
-                ).content
-
-            answer_facts(facts, answer)
-            probes_path = write_generation(
-                Path(output) / "generated",
-                document,
-                source,
-                facts,
-                generator_model=generator_name,
-                questions_per_fact=(
-                    args.questions_per_fact if args.questions_per_fact is not None else 2
-                ),
-                seed=seed,
-            )
-            items = load_learning_items(probes_path)
-        else:
-            probes_path = Path(args.probes)
-
         if args.generate_only:
             errcon.print(f"generated probes at {probes_path}", style="grey50")
             return 0
+
+        teacher_context = document_teacher_system(document)
 
         for item in items:
             for prompt in (*item.train_prompts, item.prompt):

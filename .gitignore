@@ -10,3 +10,4 @@ __pycache__/
 outputs/lr-sweep-*/
 outputs/sakana-wiki-*/
 outputs/fact-prompt-iterations*/
+outputs/question-prompt-iterations*/

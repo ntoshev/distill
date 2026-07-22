@@ -89,24 +89,26 @@ not discard it.
 ## Continual document learning
 
 `--train` takes the trusted document itself. The tool enumerates its facts,
-generates train/held-out questions, asks the context-aware frozen teacher for
-held-out answers, then trains only on teacher/student KL. Facts retire from the
-training rotation when mastered and return if they regress. Any changed canary
-output stops the run, and the best earlier safe checkpoint is selected.
+generates aligned train/held-out questions plus an exact source-grounded answer,
+then trains only on teacher/student KL. Facts retire from the training rotation
+when mastered and return if they regress. Any changed canary output stops the
+run, and the best earlier safe checkpoint is selected.
 
 ```sh
 uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
   --train @examples/distillation/sakana_wiki.txt \
-  --generator-model mlx-community/Qwen3.5-2B-6bit \
+  --generator-model mlx-community/Qwen3.5-9B-6bit \
   --adapter adapters/sakana-wiki \
   --canaries examples/distillation/canaries.jsonl \
   --no-thinking
 ```
 
 Use `--generate-only` to inspect `generated/facts.jsonl` and
-`generated/probes.jsonl`. To use an edited dataset, pass `--probes PATH`; each
-row needs `train_prompts` plus the held-out `prompt` and `completion`.
+`generated/probes.jsonl`. `facts.jsonl` preserves each selected subject,
+answer, shared context, and unedited question pair; `probes.jsonl` can be
+reloaded directly with `--probes PATH`. An edited probe row needs
+`train_prompts` plus the held-out `prompt` and `completion`.
 `--from-adapter PATH` starts from an existing LoRA and preserves it as the
 frozen teacher baseline.
 
