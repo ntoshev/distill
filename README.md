@@ -172,9 +172,29 @@ are intentionally ignored because they contain large adapter checkpoints.
 ## Development
 
 ```sh
-uv run pytest
-UPDATE_SNAPSHOTS=1 uv run pytest
+uv run python -m pytest
+UPDATE_SNAPSHOTS=1 uv run python -m pytest
 ```
 
-The full suite includes cached-model integration tests for Qwen3.5-0.8B-4bit.
-Fast unit-only runs can exclude them with `uv run pytest -m 'not model'`.
+The default suite includes cached-model integration tests for
+Qwen3.5-0.8B-4bit, but skips the long-running training tests. Include them
+with `uv run python -m pytest --run-slow`. Fast unit-only runs can exclude all
+model tests with
+`uv run python -m pytest -m 'not model'`.
+
+Timing regressions are opt-in because absolute runtimes are only comparable on
+the same hardware. Run the committed M3 Pro baseline with:
+
+```sh
+DISTIL_BENCHMARK_SYSTEM_ID=mac15-6-m3-pro-11cpu-14gpu-36gb \
+  uv run python -m pytest -m benchmark
+```
+
+Each benchmark warms up the model, measures seven rounds, and compares the
+median against `tests/timing_baselines.json`. To establish or intentionally
+replace a baseline for another machine:
+
+```sh
+DISTIL_BENCHMARK_SYSTEM_ID=my-system UPDATE_TIMING_BASELINES=1 \
+  uv run python -m pytest -m benchmark
+```

@@ -24,7 +24,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "benchmark: timing regression tests selected by a system-specific baseline",
     "model: tests that load the local mlx model (slow, needs cached weights)",
+    "slow: long-running tests excluded by default unless --run-slow is passed",
 ]
 filterwarnings = [
     "ignore:builtin type (SwigPyPacked|SwigPyObject|swigvarlink) has no __module__ attribute:DeprecationWarning",

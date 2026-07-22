@@ -41,7 +41,7 @@ def chat_result(model, tokenizer):
                       warnings=built.warnings)
 
 
-def test_existing_adapter_can_be_continued_without_stacking(model):
+def test_existing_adapter_can_be_continued(model):
     from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
     adapter = FIXTURE_DIR.parent.parent / "adapters" / "lumen-test"
@@ -298,6 +298,7 @@ def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
     assert len(result.scored) == sample.num_tokens
 
 
+@pytest.mark.slow
 def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot):
     """A tiny synthetic fact should be quickly internalized and survive reload."""
     from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
@@ -402,6 +403,7 @@ def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot
         model.eval()
 
 
+@pytest.mark.slow
 def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer, tmp_path):
     from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 

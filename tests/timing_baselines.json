@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "systems": {
+    "mac15-6-m3-pro-11cpu-14gpu-36gb": {
+      "description": "Mac15,6; Apple M3 Pro; 11-core CPU; 14-core GPU; 36 GB",
+      "benchmarks": {
+        "score_prompt_completion": {
+          "median_seconds": 0.41,
+          "regression_tolerance": 0.02
+        }
+      }
+    }
+  }
+}

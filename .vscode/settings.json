@@ -1,0 +1,10 @@
+{
+    "python.testing.pytestArgs": [
+        "tests",
+        "--run-slow",
+        "--timing-system-id=mac15-6-m3-pro-11cpu-14gpu-36gb"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    
+}
