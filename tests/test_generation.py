@@ -5,6 +5,7 @@ import pytest
 from distil.generation import (
     answer_facts,
     ensure_fits,
+    fact_prompt,
     generate_facts,
     parse_lines,
     resolve_context,
@@ -50,8 +51,37 @@ def test_parse_and_compile_use_last_question_as_heldout():
     assert facts[1].completion == "blue"
 
 
+def test_fact_and_question_generation_can_use_distinct_policies():
+    inventories = []
+    questions = []
+
+    def inventory(prompt):
+        inventories.append(prompt)
+        return "Alpha is red."
+
+    def question(prompt):
+        questions.append(prompt)
+        return "What color is Alpha?\nName Alpha's color."
+
+    facts = generate_facts("doc", 2, inventory, question)
+    assert len(inventories) == 1
+    assert len(questions) == 1
+    assert facts[0].train_prompts == ["What color is Alpha?"]
+
+
+def test_fact_prompt_requires_compact_standalone_event_facts():
+    prompt = fact_prompt("DOCUMENT")
+    assert "Keep lists intact" in prompt
+    assert "funding event's amount, round, year, investors" in prompt
+    assert "HARD STANDALONE-SUBJECT FORMAT" in prompt
+    assert 'No line may contain any of these context-dependent expressions' in prompt
+    assert "verify full source coverage" in prompt
+
+
 def test_generation_artifacts_record_validation_errors(tmp_path):
-    facts = generate_facts("doc", 2, lambda _: "A fact." if _.startswith("Here is a reference") else "Same?\nSame?")
+    facts = generate_facts(
+        "doc", 2, lambda _: "A fact.", lambda _: "Same?\nSame?"
+    )
     answer_facts(facts, lambda _: "answer")
     with pytest.raises(ValueError, match="duplicates"):
         write_generation(
@@ -65,7 +95,9 @@ def test_generation_artifacts_record_validation_errors(tmp_path):
         )
     row = json.loads((tmp_path / "facts.jsonl").read_text())
     assert row["error"]
-    assert (tmp_path / "generation.json").is_file()
+    generation = json.loads((tmp_path / "generation.json").read_text())
+    assert generation["fact_temperature"] == 0.0
+    assert generation["question_temperature"] == 0.7
 
 
 def test_context_overflow_is_rejected_without_truncation():

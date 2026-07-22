@@ -9,3 +9,4 @@ __pycache__/
 # report and scripts in git; keep generated adapters and metrics local.
 outputs/lr-sweep-*/
 outputs/sakana-wiki-*/
+outputs/fact-prompt-iterations*/

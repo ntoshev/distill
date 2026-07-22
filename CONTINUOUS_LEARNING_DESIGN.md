@@ -238,9 +238,10 @@ recommended: a preliminary local comparison found
 `mlx-community/Qwen3.5-2B-6bit` clearly better than 0.8B self-generation,
 which is why the canonical command passes it explicitly.
 
-For each enumerated fact, generate `--questions-per-fact` questions at a
-fixed moderate temperature (0.7) and fixed seed, both recorded in
-`generation.json`:
+Fact enumeration is greedy for stable coverage and uses a dedicated 512-token
+output budget. For each enumerated fact, generate `--questions-per-fact`
+questions at a fixed moderate temperature (0.7) and fixed seed. Both stage
+temperatures are recorded in `generation.json`:
 
 ```text
 Here is a fact:
@@ -330,7 +331,7 @@ ADAPTER/generated/
 ```
 
 `generation.json` records the generator model, prompt-template version,
-temperature, seed, and per-stage counts.
+fact/question temperatures, seed, and per-stage counts.
 
 `facts.jsonl` records each enumerated fact with its ID, generated question
 lines, and any validation error. It is an audit log, not a downstream input.

@@ -57,6 +57,28 @@ the low-compute claim.
 Artifacts are under `outputs/sakana-wiki-9b-512-20260722/` and
 `outputs/sakana-wiki-9b-512-20260722-cont2/`.
 
+### Fact-prompt iteration
+
+The original fact prompt produced 33 over-fragmented facts from the 9B model.
+A fixed Sakana rubric checked compactness, full clause coverage, grouped lists
+and events, explicit subjects, complete sentences, citations, and duplicates.
+
+Seven prompt variants were tested. The main progression was:
+
+- attempt 1: 33 facts; failed compactness and nine grouping/coverage checks;
+- attempt 2: 10 facts; failed only explicit standalone subjects;
+- attempt 3: passed at seed 0 but omitted the named collective-intelligence
+  interpretation at seed 1;
+- attempts 4 and 7: clause ledgers over-fragmented the inventory;
+- attempts 5 and 6: hard standalone-subject formatting restored compact facts;
+- attempt 6 with greedy decoding: 11 facts and all 18 checks passed.
+
+The production `continual-v2` prompt now uses attempt 6 with greedy 512-token
+fact extraction, while question generation remains sampled at temperature 0.7
+with a separate 128-token budget. A real `--generate-only` run produced 11
+valid facts and 22 questions with no validation errors or manual fact cleanup.
+Artifacts are under `outputs/sakana-wiki-fact-prompt-v2-20260722/`.
+
 This file records empirical results. [DESIGN.md](DESIGN.md) is the canonical
 description of the implementation and its guarantees.
 

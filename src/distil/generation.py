@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 
-PROMPT_VERSION = "continual-v1"
+PROMPT_VERSION = "continual-v2"
 _LIST_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
 
 
@@ -67,16 +67,34 @@ def parse_lines(text: str) -> list[str]:
 
 
 def fact_prompt(document: str) -> str:
-    return f"""Here is a reference document:
+    return f"""Extract a compact, exhaustive inventory of the facts stated in the reference document.
+
+Reference document:
 
 {document}
 
-List every distinct fact this document states.
-Rules:
-- One fact per line, no numbering.
-- Each fact must be a single short statement that names its subject explicitly (never \"the company\", \"it\", \"they\", or another reference that needs the text to resolve).
-- Only state facts that appear in the document.
-- Do not repeat the same fact in different words."""
+Return only the inventory, with one complete standalone sentence per line and no numbering.
+
+Group details that describe the same event or relationship:
+- Keep lists intact: all founders in one fact, all research fields in one fact, and all investors in one fact.
+- Keep each funding event's amount, round, year, investors, and qualifiers in one fact.
+- Keep a name's origin and meaning together.
+- When an example, image, or analogy represents a named concept, keep the example, mechanism, and named concept together.
+- Keep a person's paper, employer, and year together when stated together.
+- Keep a method's date, mechanism, motivation, and computational requirement together.
+- Prefer retaining a source sentence's tightly linked chain of clauses in one fact.
+- Split only claims that could vary independently and answer genuinely different questions.
+
+Preserve every stated relationship, exact name, date, amount, qualifier, reason, and interpretation. State only information directly supported by the document. Do not infer, explain, summarize, or repeat facts.
+
+HARD STANDALONE-SUBJECT FORMAT:
+- Every line must contain the explicit name of its subject copied from the document, even when adjacent lines discuss the same subject.
+- No line may contain any of these context-dependent expressions, case-insensitively: \"the company\", \"the company's\", \"this\", \"it\", \"they\", \"the paper\", \"this amount\", \"the process\".
+- Rewrite a draft such as \"The company's name comes from X\" as \"Organization Name's name comes from X\".
+- Rewrite a draft such as \"This method reduces cost\" as \"Organization Name's method reduces cost\".
+- A line that violates either rule is invalid and must not be emitted.
+
+Before responding, silently perform two checks: verify full source coverage, then scan each output line for the forbidden expressions and rewrite every violation with its explicit named subject. Cover the document from beginning to end, then stop."""
 
 
 def question_prompt(fact: str, count: int) -> str:
@@ -134,13 +152,17 @@ def ensure_fits(
 def generate_facts(
     document: str,
     questions_per_fact: int,
-    generate: Callable[[str], str],
+    generate_inventory: Callable[[str], str],
+    generate_questions: Callable[[str], str] | None = None,
 ) -> list[GeneratedFact]:
-    facts = parse_lines(generate(fact_prompt(document)))
+    generate_questions = generate_questions or generate_inventory
+    facts = parse_lines(generate_inventory(fact_prompt(document)))
     generated = []
     for index, fact in enumerate(facts, 1):
         item = GeneratedFact(fact_id=f"fact-{index:04d}", fact=fact)
-        item.questions = parse_lines(generate(question_prompt(fact, questions_per_fact)))
+        item.questions = parse_lines(
+            generate_questions(question_prompt(fact, questions_per_fact))
+        )
         if len(item.questions) < 2:
             item.error = "fewer than two questions"
         else:
@@ -169,7 +191,8 @@ def write_generation(
     generator_model: str,
     questions_per_fact: int,
     seed: int,
-    temperature: float = 0.7,
+    fact_temperature: float = 0.0,
+    question_temperature: float = 0.7,
 ) -> Path:
     """Write all compilation artifacts, including invalid generated rows."""
     root = Path(root)
@@ -198,7 +221,8 @@ def write_generation(
                 "prompt_version": PROMPT_VERSION,
                 "generator_model": generator_model,
                 "questions_per_fact": questions_per_fact,
-                "temperature": temperature,
+                "fact_temperature": fact_temperature,
+                "question_temperature": question_temperature,
                 "seed": seed,
                 "facts": len(facts),
                 "valid_facts": len(valid),

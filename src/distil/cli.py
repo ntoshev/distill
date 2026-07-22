@@ -184,13 +184,13 @@ def _continual_cli(args, errcon, fail) -> int:
         if items is None:
             generator, generator_tokenizer = load(generator_name)
 
-            def generate(prompt: str) -> str:
+            def generate_inventory(prompt: str) -> str:
                 messages = [{"role": "user", "content": prompt}]
                 ensure_fits(
                     generator,
                     generator_tokenizer,
                     messages,
-                    max(256, max_tokens),
+                    max(512, max_tokens),
                     "generator prompt",
                     enable_thinking,
                 )
@@ -198,7 +198,27 @@ def _continual_cli(args, errcon, fail) -> int:
                     generator,
                     generator_tokenizer,
                     messages,
-                    max_tokens=max(256, max_tokens),
+                    max_tokens=max(512, max_tokens),
+                    temperature=0.0,
+                    seed=seed,
+                    enable_thinking=enable_thinking,
+                ).content
+
+            def generate_questions(prompt: str) -> str:
+                messages = [{"role": "user", "content": prompt}]
+                ensure_fits(
+                    generator,
+                    generator_tokenizer,
+                    messages,
+                    max(128, max_tokens),
+                    "generator prompt",
+                    enable_thinking,
+                )
+                return sample_completion(
+                    generator,
+                    generator_tokenizer,
+                    messages,
+                    max_tokens=max(128, max_tokens),
                     temperature=0.7,
                     seed=seed,
                     enable_thinking=enable_thinking,
@@ -207,7 +227,8 @@ def _continual_cli(args, errcon, fail) -> int:
             facts = generate_facts(
                 document,
                 args.questions_per_fact if args.questions_per_fact is not None else 2,
-                generate,
+                generate_inventory,
+                generate_questions,
             )
             if generator_name == args.model and args.from_adapter is None:
                 student, student_tokenizer = generator, generator_tokenizer
