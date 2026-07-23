@@ -15,7 +15,12 @@ from distil.render import (
     to_json_dict,
 )
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion, sample_speculative_completion
+from distil.sample import (
+    sample_completion,
+    sample_speculative_completion,
+    sample_speculative_text,
+    sample_text,
+)
 from distil.scoring import score_text, score_text_pair
 from distil.templating import apply_teacher_context, build_raw, build_rollout
 
@@ -32,6 +37,13 @@ def _read_input(value: str | None) -> str | None:
     return value
 
 
+def _prompt_messages(system: str | None, prompt: str | None) -> list[dict]:
+    messages = [] if system is None else [{"role": "system", "content": system}]
+    if prompt is not None:
+        messages.append({"role": "user", "content": prompt})
+    return messages
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="distil",
@@ -45,7 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--system", help="optional system prompt")
     src.add_argument("--prompt", help="prompt / context (not scored)")
     src.add_argument("--completion", help="text to score")
-    src.add_argument("--raw", action="store_true", help="skip the chat template")
+    src.add_argument(
+        "--raw", action="store_true", help="skip the chat template when scoring or sampling"
+    )
     src.add_argument(
         "--no-thinking",
         action="store_true",
@@ -77,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     smp.add_argument(
         "--save-rollout",
         metavar="PATH",
-        help="append sampled or training rollouts to PATH as results.jsonl",
+        help="append sampled, supplied, or training completions as results.jsonl",
     )
     trn = p.add_argument_group("LoRA adapter / training")
     trn.add_argument("--adapter", metavar="PATH", help="output adapter/run directory for --train")
@@ -189,6 +203,13 @@ def _continual_cli(args, errcon, fail) -> int:
     student = student_tokenizer = None
     probes_path = Path(args.probes) if args.probes else None
 
+    def generated() -> int:
+        if args.json:
+            print(json.dumps({"generated_probes": str(probes_path)}, indent=2))
+        else:
+            errcon.print(f"generated probes at {probes_path}", style="grey50")
+        return 0
+
     try:
         if items is None:
             generator, generator_tokenizer = load(generator_name)
@@ -253,8 +274,7 @@ def _continual_cli(args, errcon, fail) -> int:
             )
             items = load_learning_items(probes_path)
             if args.generate_only:
-                errcon.print(f"generated probes at {probes_path}", style="grey50")
-                return 0
+                return generated()
             if generator_name == args.model and args.from_adapter is None:
                 student, student_tokenizer = generator, generator_tokenizer
             else:
@@ -278,8 +298,7 @@ def _continual_cli(args, errcon, fail) -> int:
             teacher, teacher_tokenizer = student, student_tokenizer
 
         if args.generate_only:
-            errcon.print(f"generated probes at {probes_path}", style="grey50")
-            return 0
+            return generated()
 
         teacher_context = document_teacher_system(document)
 
@@ -329,6 +348,9 @@ def _continual_cli(args, errcon, fail) -> int:
             ),
             lora_rank=args.lora_rank if args.lora_rank is not None else 16,
             max_tokens=max_tokens,
+            canary_max_tokens=(
+                args.canary_max_tokens if args.canary_max_tokens is not None else 32
+            ),
             temperature=args.temperature if args.temperature is not None else 1.0,
             seed=seed,
             enable_thinking=enable_thinking,
@@ -339,16 +361,28 @@ def _continual_cli(args, errcon, fail) -> int:
             source=source,
             probes_path=probes_path,
             canaries_path=args.canaries,
+            save_rollout_path=args.save_rollout,
             report=report,
             warn=lambda message: errcon.print(f"[yellow]warning:[/yellow] {message}"),
         )
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         return fail(str(error))
 
-    errcon.print(
-        f"selected step {result.selected_step} ({result.stop_reason}) at {result.adapter_file}",
-        style="grey50",
-    )
+    payload = {
+        "success": result.success,
+        "stop_reason": result.stop_reason,
+        "selected_step": result.selected_step,
+        "adapter_file": str(result.adapter_file),
+        "selection_file": str(result.selection_file),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        errcon.print(
+            f"selected step {result.selected_step} ({result.stop_reason}) "
+            f"at {result.adapter_file}",
+            style="grey50",
+        )
     return 0 if result.success else 1
 
 
@@ -382,8 +416,8 @@ def main(argv: list[str] | None = None) -> int:
         return fail("--index only combines with --rollout")
     if args.top_k is not None and args.top_k < 0:
         return fail("--top-k must be nonnegative")
-    if args.sample and not args.prompt:
-        return fail("--sample requires --prompt")
+    if args.sample and args.prompt is None and (args.raw or args.system is None):
+        return fail("--sample requires --prompt, or --system in chat mode")
     if args.speculative_top_k is not None:
         if not (args.sample or training):
             return fail("--speculative-top-k only combines with --sample or --train")
@@ -395,10 +429,11 @@ def main(argv: list[str] | None = None) -> int:
         (args.max_tokens, "--max-tokens"),
         (args.temperature, "--temperature"),
         (args.seed, "--seed"),
-        (args.save_rollout, "--save-rollout"),
     ):
         if value is not None and not (args.sample or training):
             return fail(f"{name} only combines with --sample or --train")
+    if args.save_rollout is not None and not (args.sample or training or standalone_completion):
+        return fail("--save-rollout only combines with --sample, --completion or --train")
     for value, name in (
         (args.iters, "--iters"),
         (args.learning_rate, "--learning-rate"),
@@ -434,10 +469,8 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--prompt does not combine with --train; put prompts in the training file")
         if args.raw:
             return fail("--raw does not combine with --train")
-        if args.metric or args.stats or args.worst or args.hide_context or args.json:
+        if args.metric or args.stats or args.worst or args.hide_context:
             return fail("scoring output flags do not combine with --train")
-        if args.save_rollout is not None:
-            return fail("--save-rollout does not combine with continual --train")
         if not args.generate_only and args.canaries is None:
             return fail("--train requires --canaries")
         if args.generate_only and args.probes is not None:
@@ -472,32 +505,31 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--learned-threshold must be in (0, 1]")
         if args.checkpoint_every is not None:
             return fail("--checkpoint-every was replaced by --eval-every")
-        if args.canary_max_tokens is not None or args.contamination_regex is not None:
-            return fail("--canary-max-tokens and --contamination-regex are not used in continual mode")
+        if args.contamination_regex is not None:
+            return fail("--contamination-regex is not used in continual mode")
     if progress:
         target_progress = args.completion is not None
         if target_progress == (args.probes is not None):
             return fail("--progress requires exactly one of --completion or --probes")
         if args.adapter_path:
             return fail("--adapter-path does not combine with --progress")
-        if teacher_mode or args.raw:
-            return fail("teacher and raw modes do not combine with --progress")
+        if args.raw:
+            return fail("--raw does not combine with --progress")
         if args.stats or args.worst or args.hide_context:
             return fail("--stats, --worst and --hide-context do not combine with --progress")
         if args.top_k is not None and not args.json:
             return fail("--top-k with --progress requires --json")
         if args.probes is not None:
-            if args.system or args.prompt is not None:
-                return fail("--progress with --probes takes context from each probe")
-            if args.metric:
-                return fail("--metric only combines with single-completion --progress")
-    if args.raw and (
-        args.system or args.rollout or args.sample or training or teacher_mode or args.no_thinking
-    ):
+            if args.prompt is not None:
+                return fail("--progress with --probes takes prompts from each probe")
+    if args.raw and (args.system or args.rollout or training or args.no_thinking):
         return fail(
-            "--raw only combines with --prompt/--completion "
-            "(no system, teacher, sampling or chat-template options)"
+            "--raw does not combine with system, rollout, training or chat-template options"
         )
+    if args.raw and args.teacher_system is not None:
+        return fail("--teacher-system does not combine with --raw; use --teacher-prompt")
+    if args.raw and args.save_rollout is not None:
+        return fail("--save-rollout does not combine with --raw")
     if args.metric == "kl" and not teacher_mode:
         return fail("--metric kl needs teacher-mode scoring (a --teacher-* flag)")
     metric = args.metric or ("kl" if teacher_mode else "logprob")
@@ -522,8 +554,8 @@ def main(argv: list[str] | None = None) -> int:
             except (FileNotFoundError, ValueError) as e:
                 return fail(str(e))
             completion = None
-            prompt = ""
-            system = None
+            prompt = None
+            system = _read_input(args.system)
     elif args.rollout:
         try:
             rollout = load_rollout(args.rollout, args.index if args.index is not None else 0)
@@ -534,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
         prompt = _read_input(args.prompt)
     else:
         completion = _read_input(args.completion)
-        prompt = _read_input(args.prompt) or ""
+        prompt = _read_input(args.prompt)
         system = _read_input(args.system)
     teacher_system = _read_input(args.teacher_system)
     teacher_prompt = _read_input(args.teacher_prompt)
@@ -574,19 +606,35 @@ def main(argv: list[str] | None = None) -> int:
                 probes,
                 enable_thinking=enable_thinking,
                 top_k=args.top_k if args.top_k is not None else 0,
+                default_system=system,
+                teacher_model=teacher_model if teacher_mode else None,
+                teacher_tokenizer=teacher_tokenizer if teacher_mode else None,
+                teacher_system=teacher_system,
+                teacher_prompt=teacher_prompt,
+                teacher_name=teacher_name if teacher_mode else None,
             )
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as e:
             return fail(str(e))
         if args.json:
             print(json.dumps(progress_to_json(progress_result), ensure_ascii=False, indent=2))
         elif target_progress:
-            render_progress_tokens(progress_result, console, metric=args.metric or "prob")
+            render_progress_tokens(
+                progress_result,
+                console,
+                metric=args.metric or ("kl" if teacher_mode else "prob"),
+            )
         else:
-            render_progress(progress_result, console)
+            render_progress(
+                progress_result,
+                console,
+                metric=args.metric or ("kl" if teacher_mode else "prob"),
+            )
         return 0
 
     sample = None
     teacher_messages = None
+    rollout_prompt = rollout_completion = None
+    rollout_extra = {}
     if args.rollout:
         try:
             messages = apply_teacher_context(rollout.messages, system=system, prompt=prompt)
@@ -594,17 +642,50 @@ def main(argv: list[str] | None = None) -> int:
             return fail(str(e).replace("--teacher-prompt", "--prompt"))
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
     elif args.sample:
-        messages = [] if system is None else [{"role": "system", "content": system}]
-        messages.append({"role": "user", "content": prompt})
-        if args.speculative_top_k is not None:
-            try:
-                teacher_messages = apply_teacher_context(
-                    messages, system=teacher_system, prompt=teacher_prompt
+        if args.raw:
+            if args.speculative_top_k is None:
+                sampler = lambda: sample_text(
+                    model,
+                    tokenizer,
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=args.seed,
                 )
-            except ValueError as e:
-                return fail(str(e))
-            try:
-                sample = sample_speculative_completion(
+            else:
+                sampler = lambda: sample_speculative_text(
+                    model,
+                    tokenizer,
+                    prompt,
+                    teacher_model,
+                    teacher_tokenizer,
+                    teacher_prompt if teacher_prompt is not None else prompt,
+                    top_k=args.speculative_top_k,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=args.seed,
+                    teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
+                )
+        else:
+            messages = _prompt_messages(system, prompt if prompt is not None else "")
+            if args.speculative_top_k is None:
+                sampler = lambda: sample_completion(
+                    model,
+                    tokenizer,
+                    messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=args.seed,
+                    enable_thinking=enable_thinking,
+                )
+            else:
+                try:
+                    teacher_messages = apply_teacher_context(
+                        messages, system=teacher_system, prompt=teacher_prompt
+                    )
+                except ValueError as e:
+                    return fail(str(e))
+                sampler = lambda: sample_speculative_completion(
                     model,
                     tokenizer,
                     messages,
@@ -618,80 +699,85 @@ def main(argv: list[str] | None = None) -> int:
                     enable_thinking=enable_thinking,
                     teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
                 )
-            except ValueError as e:
-                return fail(str(e))
-            errcon.print(
-                f"sampled {sample.num_tokens} tokens "
-                f"({sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; "
-                f"finish: {sample.finish_reason})",
-                style="grey50",
+        try:
+            sample = sampler()
+        except ValueError as e:
+            return fail(str(e))
+        detail = f"finish: {sample.finish_reason}"
+        if sample.speculative_top_k is not None:
+            detail = (
+                f"{sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; {detail}"
             )
-        else:
-            sample = sample_completion(
-                model, tokenizer, messages,
-                max_tokens=max_tokens, temperature=temperature, seed=args.seed,
-                enable_thinking=enable_thinking,
-            )
-            errcon.print(
-                f"sampled {sample.num_tokens} tokens (finish: {sample.finish_reason})",
-                style="grey50",
-            )
-        if args.save_rollout:
-            # saved before scoring, so a scoring failure never loses the sample
-            index = save_rollout(
-                args.save_rollout,
-                messages,
-                [{"role": "assistant", "content": sample.content}],
-                extra={
-                    "task": "distil-sample",
-                    "model": args.model,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    **({"seed": args.seed} if args.seed is not None else {}),
-                    **(
-                        {
-                            "speculative_top_k": sample.speculative_top_k,
-                            "accepted_tokens": sample.accepted_tokens,
-                            "replaced_tokens": sample.replaced_tokens,
-                        }
-                        if sample.speculative_top_k is not None
-                        else {}
-                    ),
-                    "is_truncated": sample.finish_reason != "stop",
-                },
-            )
-            errcon.print(f"saved sample to {args.save_rollout} as index {index}", style="grey50")
+        errcon.print(f"sampled {sample.num_tokens} tokens ({detail})", style="grey50")
         # the rendered generation prompt plus the generated text is already the
         # exact scored string; no re-templating round-trip
         built = build_raw(sample.prompt_text, sample.completion_text)
+        if not args.raw:
+            rollout_prompt = messages
+            rollout_completion = [{"role": "assistant", "content": sample.content}]
+            rollout_extra = {
+                "task": "distil-sample",
+                "model": args.model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                **({"seed": args.seed} if args.seed is not None else {}),
+                **(
+                    {
+                        "speculative_top_k": sample.speculative_top_k,
+                        "accepted_tokens": sample.accepted_tokens,
+                        "replaced_tokens": sample.replaced_tokens,
+                    }
+                    if sample.speculative_top_k is not None
+                    else {}
+                ),
+                "is_truncated": sample.finish_reason != "stop",
+            }
     elif args.raw:
-        built = build_raw(prompt, completion)
+        built = build_raw(prompt or "", completion)
     else:
-        messages = [] if system is None else [{"role": "system", "content": system}]
-        messages.append({"role": "user", "content": prompt})
+        messages = _prompt_messages(system, prompt if prompt is not None else "")
         messages.append({"role": "assistant", "content": completion})
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
+        rollout_prompt = messages[:-1]
+        rollout_completion = messages[-1:]
+        rollout_extra = {"task": "distil-completion", "model": args.model}
+
+    if args.save_rollout is not None:
+        # Save before scoring so a later scoring failure never loses the completion.
+        index = save_rollout(
+            args.save_rollout, rollout_prompt, rollout_completion, extra=rollout_extra
+        )
+        errcon.print(f"saved rollout to {args.save_rollout} as index {index}", style="grey50")
 
     if teacher_mode:
-        if teacher_messages is None:
-            try:
-                teacher_messages = apply_teacher_context(
-                    messages, system=teacher_system, prompt=teacher_prompt
-                )
-            except ValueError as e:
-                return fail(str(e))
-        if args.sample:
-            template_kwargs = (
-                {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+        if args.raw:
+            built_teacher = build_raw(
+                teacher_prompt if teacher_prompt is not None else (prompt or ""),
+                sample.completion_text if sample is not None else completion,
             )
-            teacher_prompt_text = teacher_tokenizer.apply_chat_template(
-                teacher_messages, tokenize=False, add_generation_prompt=True, **template_kwargs
-            )
-            built_teacher = build_raw(teacher_prompt_text, sample.completion_text)
         else:
-            built_teacher = build_rollout(
-                teacher_tokenizer, teacher_messages, enable_thinking=enable_thinking
-            )
+            if teacher_messages is None:
+                try:
+                    teacher_messages = apply_teacher_context(
+                        messages, system=teacher_system, prompt=teacher_prompt
+                    )
+                except ValueError as e:
+                    return fail(str(e))
+            if args.sample:
+                template_kwargs = (
+                    {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+                )
+                teacher_prompt_text = teacher_tokenizer.apply_chat_template(
+                    teacher_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    **template_kwargs,
+                )
+                built_teacher = build_raw(teacher_prompt_text, sample.completion_text)
+            else:
+                built_teacher = build_rollout(
+                    teacher_tokenizer, teacher_messages, enable_thinking=enable_thinking
+                )
         try:
             result = score_text_pair(
                 model, tokenizer, built,

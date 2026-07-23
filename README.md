@@ -38,6 +38,12 @@ uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
   --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
 
+# Save a supplied chat completion in rollout format.
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --prompt "What is 2+2?" --completion "4" \
+  --save-rollout samples.jsonl
+
 # Score one rollout from verifiers/prime-rl results.jsonl.
 uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
@@ -74,6 +80,7 @@ uv run distil \
 `--teacher-system` replaces or inserts the teacher's system message.
 `--teacher-prompt` replaces its first user message. A separate
 `--teacher-model` must use the same tokenizer vocabulary as the student.
+With `--raw`, use `--teacher-prompt` as the teacher's alternate raw prefix.
 
 ## Sample from the student
 
@@ -89,6 +96,10 @@ uv run distil \
 `--save-rollout` writes the same `results.jsonl` format accepted by
 `--rollout`. The sample is saved before scoring so a later scoring error does
 not discard it.
+
+`--sample --system TEXT` supports system-only chat generation by adding an
+empty user turn. Add `--raw` to sample directly from `--prompt` without applying
+a chat template.
 
 Add `--speculative-top-k K` with any `--teacher-*` flag to generate from an
 interleaved policy: each student proposal is accepted when it is in the
@@ -132,6 +143,9 @@ frozen teacher baseline.
 Training defaults to forward `KL(teacher || student)`, speculative top-5
 rollouts, evaluation every five successful updates, a target-token geometric
 mean probability threshold of 0.5, and a `1e-6` learning rate.
+`--canary-max-tokens` controls only retention-canary generation.
+`--save-rollout PATH` records every training sample, and `--json` emits the
+selected checkpoint and stop result for automation.
 
 The adapter is saved in standard mlx-lm format and can be sampled directly:
 
@@ -182,6 +196,10 @@ Probe files contain one JSON object per line with `name`, `prompt`, and
 per-token values. Add `--top-k K --json` to include each scored token's top-K
 alternatives. Progress mode performs inference over saved checkpoints but does
 not retrain.
+
+For probe sets, `--system` is the default for rows without their own `system`,
+and `--metric prob|logprob` selects the rendered summary. Teacher flags enable
+checkpoint-by-checkpoint KL scoring; its default metric is `kl`.
 
 The example progress commands require the local sweep artifacts. Recreate them
 with the commands in [EXPERIMENTS.md](EXPERIMENTS.md); generated sweep folders

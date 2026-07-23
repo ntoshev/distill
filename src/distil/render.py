@@ -140,30 +140,58 @@ def _downsample(values: list[float], width: int) -> list[float]:
     return sampled
 
 
-def render_progress(result: ProgressResult, console: Console) -> None:
-    """Render mean token probability over checkpoints as colored sparklines."""
+def _progress_value(point, metric: str) -> float:
+    if metric == "kl":
+        return point.mean_kl
+    if metric == "logprob":
+        return point.mean_logprob
+    return point.mean_probability
+
+
+def _progress_level(point, metric: str) -> float:
+    if metric == "kl":
+        return 1 - math.exp(-max(point.mean_kl, 0.0))
+    return point.mean_probability
+
+
+def _progress_text(value: float, metric: str) -> str:
+    return f"{value:6.1%}" if metric == "prob" else f"{value:7.3f}"
+
+
+def render_progress(
+    result: ProgressResult, console: Console, metric: str = "prob"
+) -> None:
+    """Render a checkpoint metric for several fixed completions."""
     label_width = min(30, max(len(probe.name) for probe in result.probes))
     chart_width = min(len(result.steps), max(12, console.width - label_width - 40))
     console.print(
         f"steps [bold]{result.steps[0]}[/bold] → [bold]{result.steps[-1]}[/bold]  "
         f"({len(result.steps)} checkpoints including base)"
     )
-    console.print("geometric-mean token probability of each fixed completion", style="grey50")
+    labels = {
+        "prob": "geometric-mean token probability",
+        "logprob": "mean token log probability",
+        "kl": "mean KL(teacher ‖ student)",
+    }
+    console.print(f"{labels[metric]} of each fixed completion", style="grey50")
     console.print()
 
     for probe in result.probes:
         points = result.series[probe.name]
-        values = [point.mean_probability for point in points]
-        chart_values = _downsample(values, chart_width)
+        values = [_progress_value(point, metric) for point in points]
+        levels = _downsample([_progress_level(point, metric) for point in points], chart_width)
+        colors = _downsample(
+            [point.mean_kl if metric == "kl" else point.mean_logprob for point in points],
+            chart_width,
+        )
         line = Text(f"{probe.name[:label_width]:<{label_width}}  ")
-        for probability in chart_values:
-            index = min(len(_SPARK_CHARS) - 1, int(probability * len(_SPARK_CHARS)))
-            logprob = math.log(max(probability, 1e-300))
-            line.append(_SPARK_CHARS[index], style=color_for(logprob, "prob"))
+        for level, color in zip(levels, colors):
+            index = min(len(_SPARK_CHARS) - 1, int(level * len(_SPARK_CHARS)))
+            line.append(_SPARK_CHARS[index], style=color_for(color, metric))
         peak_index = max(range(len(values)), key=values.__getitem__)
         line.append(
-            f"  {values[0]:6.1%} → {values[-1]:6.1%}  "
-            f"max {values[peak_index]:6.1%}@{result.steps[peak_index]}"
+            f"  {_progress_text(values[0], metric)} → {_progress_text(values[-1], metric)}  "
+            f"max {_progress_text(values[peak_index], metric)}@{result.steps[peak_index]}"
         )
         console.print(line)
 
@@ -177,15 +205,23 @@ def render_progress_tokens(
     probe = result.probes[0]
     points = result.series[probe.name]
     label_width = max(4, len(f"step-{result.steps[-1]:04d}"))
-    console.print("token probability within the fixed completion", style="grey50")
+    labels = {
+        "prob": "token probability",
+        "logprob": "token log probability",
+        "kl": "token KL(teacher ‖ student)",
+    }
+    console.print(f"{labels[metric]} within the fixed completion", style="grey50")
     console.print()
 
     for point in points:
         label = "base" if point.step == 0 else f"step-{point.step:04d}"
         line = Text(f"{label:<{label_width}}  ")
         for token in point.tokens:
-            line.append(token["text"], style=style_for(token["logprob"], metric))
-        line.append(f"  {point.mean_probability:6.1%}", style="grey50")
+            value = token["kl"] if metric == "kl" else token["logprob"]
+            line.append(token["text"], style=style_for(value, metric))
+        line.append(
+            f"  {_progress_text(_progress_value(point, metric), metric)}", style="grey50"
+        )
         console.print(line)
 
 

@@ -12,7 +12,9 @@ from distil.progress import (
     load_probes,
     progress_to_json,
     score_progress,
+    score_probe,
 )
+from distil.scoring import ScoreResult, TokenScore, TopToken
 
 
 def test_load_probes(tmp_path):
@@ -96,3 +98,44 @@ def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, mon
     assert result.steps == [0, 5]
     assert [point.step for point in result.series["x"]] == [0, 5]
     assert len(loaded) == 2
+
+
+def test_score_probe_applies_default_and_teacher_context(monkeypatch):
+    import distil.progress
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return "|".join(f"{m['role']}:{m['content']}" for m in messages) + "|assistant:"
+
+    captured = {}
+
+    def fake_pair(model, tokenizer, built, teacher_model, teacher_tokenizer, built_teacher, **kwargs):
+        captured["student"] = built.text
+        captured["teacher"] = built_teacher.text
+        token = TokenScore(
+            1, "A", 0, 1, True, -1.0,
+            [TopToken(1, "A", -1.0)],
+            teacher_logprob=-0.5,
+            kl=0.2,
+            teacher_top_k=[TopToken(2, "B", -0.3)],
+        )
+        return ScoreResult(built.text, [token], "student", [], "teacher")
+
+    monkeypatch.setattr(distil.progress, "score_text_pair", fake_pair)
+    point = score_probe(
+        object(),
+        Tokenizer(),
+        Probe("x", "question", "A"),
+        0,
+        None,
+        top_k=1,
+        default_system="student system",
+        teacher_model=object(),
+        teacher_tokenizer=Tokenizer(),
+        teacher_system="teacher system",
+    )
+    assert captured["student"].startswith("system:student system|user:question")
+    assert captured["teacher"].startswith("system:teacher system|user:question")
+    assert point.mean_teacher_logprob == -0.5
+    assert point.mean_kl == 0.2
+    assert point.tokens[0]["teacher_top"] == [["B", -0.3]]

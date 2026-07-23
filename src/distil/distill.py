@@ -15,7 +15,7 @@ from distil.stopping import (
     answer_matches,
     mastered,
 )
-from distil.training import TrainingSession, _step_payload
+from distil.training import TrainingSession, _step_payload, save_training_rollout
 
 
 @dataclass(frozen=True)
@@ -27,11 +27,16 @@ class ContinualResult:
     selection_file: Path
 
 
-def _messages(probe: Probe, default_system: str | None = None) -> list[dict]:
-    system = probe.system if probe.system is not None else default_system
+def _prompt_messages(prompt: str, system: str | None = None) -> list[dict]:
     messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": probe.prompt})
+    messages.append({"role": "user", "content": prompt})
     return messages
+
+
+def _messages(probe: Probe, default_system: str | None = None) -> list[dict]:
+    return _prompt_messages(
+        probe.prompt, probe.system if probe.system is not None else default_system
+    )
 
 
 def _answer(
@@ -83,6 +88,7 @@ def run_continual(
     learning_rate: float = 1e-6,
     lora_rank: int = 16,
     max_tokens: int = 64,
+    canary_max_tokens: int = 32,
     temperature: float = 1.0,
     seed: int = 0,
     enable_thinking: bool | None = None,
@@ -91,6 +97,7 @@ def run_continual(
     source: dict | None = None,
     probes_path: str | Path | None = None,
     canaries_path: str | Path | None = None,
+    save_rollout_path: str | Path | None = None,
     report: Callable[[dict], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> ContinualResult:
@@ -104,6 +111,8 @@ def run_continual(
         )
     if eval_every <= 0:
         raise ValueError("--eval-every must be positive")
+    if canary_max_tokens <= 0:
+        raise ValueError("--canary-max-tokens must be positive")
     if not 0 < learned_threshold <= 1:
         raise ValueError("--learned-threshold must be in (0, 1]")
 
@@ -126,7 +135,7 @@ def run_continual(
             model,
             tokenizer,
             probe,
-            max_tokens=max_tokens,
+            max_tokens=canary_max_tokens,
             enable_thinking=enable_thinking,
             default_system=student_system,
         )
@@ -175,12 +184,14 @@ def run_continual(
         "source": source,
         "probes": str(probes_path) if probes_path is not None else None,
         "canaries": str(canaries_path) if canaries_path is not None else None,
+        "rollouts": str(save_rollout_path) if save_rollout_path is not None else None,
         "eval_every": eval_every,
         "learned_threshold": learned_threshold,
         "iters": iters,
         "learning_rate": learning_rate,
         "lora_rank": None if from_adapter is not None else lora_rank,
         "max_tokens": max_tokens,
+        "canary_max_tokens": canary_max_tokens,
         "temperature": temperature,
         "seed": seed,
         "speculative_top_k": speculative_top_k,
@@ -214,7 +225,7 @@ def run_continual(
                 model,
                 tokenizer,
                 probe,
-                max_tokens=max_tokens,
+                max_tokens=canary_max_tokens,
                 enable_thinking=enable_thinking,
                 default_system=student_system,
             )
@@ -288,6 +299,17 @@ def run_continual(
             payload["item_id"] = item_id
             with metrics_file.open("a") as file:
                 file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            if save_rollout_path is not None:
+                save_training_rollout(
+                    save_rollout_path,
+                    _prompt_messages(prompt, student_system),
+                    step,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    seed=seed,
+                    item_id=item_id,
+                )
             if step.iteration % eval_every != 0:
                 continue
             checkpoint = checkpoints / f"step-{step.iteration:04d}"

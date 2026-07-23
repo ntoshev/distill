@@ -39,9 +39,74 @@ def test_index_requires_rollout(capsys):
 
 
 def test_sampling_flags_require_sample(capsys):
-    for flag in (["--seed", "1"], ["--temperature", "0.7"], ["--max-tokens", "8"],
-                 ["--save-rollout", "s.jsonl"]):
+    for flag in (["--seed", "1"], ["--temperature", "0.7"], ["--max-tokens", "8"]):
         assert main(["--model", "m", "--completion", "x", *flag]) == 2
+
+
+def test_system_only_sample_and_raw_sample_use_shared_sampling_paths(monkeypatch, capsys):
+    import mlx_lm
+    import distil.cli as cli
+    from distil.sample import Sample
+
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    calls = []
+
+    def sampled(kind, prefix):
+        calls.append((kind, prefix))
+        return Sample("rendered" if kind == "chat" else prefix, "answer", "answer", "stop", 1)
+
+    monkeypatch.setattr(
+        cli, "sample_completion", lambda model, tokenizer, messages, **kwargs:
+        sampled("chat", messages)
+    )
+    monkeypatch.setattr(
+        cli, "sample_text", lambda model, tokenizer, prompt, **kwargs:
+        sampled("raw", prompt)
+    )
+    monkeypatch.setattr(cli, "score_text", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "to_json_dict", lambda result: {"tokens": []})
+
+    assert main(["--model", "m", "--sample", "--system", "Be terse", "--json"]) == 0
+    assert main([
+        "--model", "m", "--raw", "--sample", "--prompt", "1 2 3", "--json"
+    ]) == 0
+    assert calls == [
+        ("chat", [
+            {"role": "system", "content": "Be terse"},
+            {"role": "user", "content": ""},
+        ]),
+        ("raw", "1 2 3"),
+    ]
+    capsys.readouterr()
+
+
+def test_raw_teacher_prompt_scores_same_completion_under_new_prefix(monkeypatch, capsys):
+    import mlx_lm
+    import distil.cli as cli
+    from distil.sample import Sample
+
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    monkeypatch.setattr(
+        cli,
+        "sample_text",
+        lambda *args, **kwargs: Sample("student: ", "answer", "answer", "stop", 1),
+    )
+    captured = {}
+
+    def fake_pair(*args, **kwargs):
+        captured["student"] = args[2]
+        captured["teacher"] = args[5]
+        return object()
+
+    monkeypatch.setattr(cli, "score_text_pair", fake_pair)
+    monkeypatch.setattr(cli, "to_json_dict", lambda result: {"tokens": []})
+    assert main([
+        "--model", "m", "--raw", "--sample", "--prompt", "student: ",
+        "--teacher-prompt", "teacher: ", "--json",
+    ]) == 0
+    assert captured["student"].text == "student: answer"
+    assert captured["teacher"].text == "teacher: answer"
+    capsys.readouterr()
 
 
 def test_speculative_sampling_requires_teacher(capsys):
@@ -115,6 +180,64 @@ def test_training_requires_adapter_and_canaries(capsys):
     assert "--adapter" in capsys.readouterr().err
     assert main(["--model", "m", "--train", "context", "--adapter", "run"]) == 2
     assert "--canaries" in capsys.readouterr().err
+
+
+def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
+    import distil.cli as cli
+
+    captured = {}
+    monkeypatch.setattr(
+        cli,
+        "_continual_cli",
+        lambda args, errcon, fail: captured.update(vars(args)) or 0,
+    )
+    assert main([
+        "--model", "m", "--train", "context", "--adapter", "run",
+        "--canaries", "canaries.jsonl", "--canary-max-tokens", "9",
+        "--save-rollout", "rollouts.jsonl", "--json",
+    ]) == 0
+    assert captured["canary_max_tokens"] == 9
+    assert captured["save_rollout"] == "rollouts.jsonl"
+    assert captured["json"] is True
+
+
+def test_training_json_reports_result_and_forwards_rollout_options(
+    tmp_path, monkeypatch, capsys
+):
+    import mlx_lm
+    import distil.distill
+
+    probes = tmp_path / "probes.jsonl"
+    probes.write_text(json.dumps({
+        "name": "fact",
+        "prompt": "heldout",
+        "completion": "answer",
+        "train_prompts": ["train"],
+    }) + "\n")
+    canaries = tmp_path / "canaries.jsonl"
+    canaries.write_text('{"name":"math","prompt":"2+2?","completion":"4"}\n')
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        root = tmp_path / "adapter"
+        return distil.distill.ContinualResult(
+            True, "mastered", 3, root / "adapters.safetensors", root / "selection.json"
+        )
+
+    monkeypatch.setattr(distil.distill, "run_continual", fake_run)
+    rollouts = tmp_path / "rollouts.jsonl"
+    assert main([
+        "--model", "m", "--train", "context", "--adapter", str(tmp_path / "adapter"),
+        "--probes", str(probes), "--canaries", str(canaries),
+        "--canary-max-tokens", "9", "--save-rollout", str(rollouts), "--json",
+    ]) == 0
+    assert captured["canary_max_tokens"] == 9
+    assert captured["save_rollout_path"] == str(rollouts)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is True
+    assert payload["selected_step"] == 3
 
 
 def test_training_rejects_prompt_and_teacher_prompts(tmp_path, capsys):
@@ -244,7 +367,7 @@ def test_progress_rejects_other_mode_flags(tmp_path):
     probes = tmp_path / "probes.jsonl"
     probes.write_text('{"name":"x","prompt":"p","completion":"c"}\n')
     base = ["--model", "m", "--progress", "run", "--probes", str(probes)]
-    for flag in (["--adapter-path", "a"], ["--system", "s"], ["--metric", "prob"]):
+    for flag in (["--adapter-path", "a"],):
         assert main([*base, *flag]) == 2
 
 
@@ -312,6 +435,42 @@ def test_progress_top_k_requires_json(capsys):
     assert "requires --json" in capsys.readouterr().err
 
 
+def test_progress_accepts_teacher_metric_and_default_probe_system(
+    tmp_path, monkeypatch, capsys
+):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    probes = tmp_path / "probes.jsonl"
+    probes.write_text('{"name":"x","prompt":"p","completion":"c"}\n')
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    model = object()
+    tokenizer = object()
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
+    captured = {}
+
+    def fake_score(model, tokenizer, root, probes, **kwargs):
+        captured.update(kwargs)
+        point = distil.progress.ProbePoint(
+            0, -1.0, 0.37, -1.0, 0.37, [], mean_kl=0.2
+        )
+        return distil.progress.ProgressResult(
+            str(root), [0], probes, {"x": [point]}, teacher_model="m"
+        )
+
+    monkeypatch.setattr(distil.progress, "score_progress", fake_score)
+    assert main([
+        "--model", "m", "--progress", "run", "--probes", str(probes),
+        "--system", "student default", "--teacher-system", "teacher context",
+        "--metric", "kl", "--json",
+    ]) == 0
+    assert captured["default_system"] == "student default"
+    assert captured["teacher_model"] is model
+    assert captured["teacher_system"] == "teacher context"
+    capsys.readouterr()
+
+
 def test_rollout_accepts_student_system_and_prompt_overrides(
     tmp_path, monkeypatch, capsys
 ):
@@ -347,6 +506,29 @@ def test_rollout_accepts_student_system_and_prompt_overrides(
         {"role": "user", "content": "new prompt"},
         {"role": "assistant", "content": "answer"},
     ]
+
+
+def test_completion_can_be_saved_as_rollout(tmp_path, monkeypatch, capsys):
+    import mlx_lm
+    import distil.cli as cli
+    from distil.rollout import load_rollout
+    from distil.templating import BuiltText
+
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    monkeypatch.setattr(cli, "build_rollout", lambda *args, **kwargs: BuiltText("x", [(0, 1)]))
+    monkeypatch.setattr(cli, "score_text", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "to_json_dict", lambda result: {"tokens": []})
+    path = tmp_path / "saved.jsonl"
+
+    assert main([
+        "--model", "m", "--prompt", "Question?", "--completion", "Answer.",
+        "--save-rollout", str(path), "--json",
+    ]) == 0
+    rollout = load_rollout(path)
+    assert rollout.prompt == [{"role": "user", "content": "Question?"}]
+    assert rollout.completion == [{"role": "assistant", "content": "Answer."}]
+    assert rollout.meta["task"] == "distil-completion"
+    capsys.readouterr()
 
 
 def test_bad_rollout_path_exits_before_model_load(capsys):

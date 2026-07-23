@@ -215,6 +215,23 @@ def test_render_progress_tokens():
     assert "step-0001  VIOLET-731   90.0%" in output
 
 
+def test_render_teacher_progress_uses_kl():
+    probe = Probe("target", "Code?", "V")
+    points = [
+        ProbePoint(
+            0, -1.0, 0.37, -1.0, 0.37,
+            [{"text": "V", "logprob": -1.0, "probability": 0.37, "kl": 0.25}],
+            mean_kl=0.25,
+        )
+    ]
+    result = ProgressResult("run", [0], [probe], {probe.name: points}, "teacher")
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    render_progress_tokens(result, console, metric="kl")
+    output = console.export_text()
+    assert "token KL(teacher ‖ student)" in output
+    assert "0.250" in output
+
+
 def test_render_progress_tokens_requires_one_probe():
     result = ProgressResult("run", [], [], {})
     console = Console(record=True)

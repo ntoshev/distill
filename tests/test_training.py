@@ -1,10 +1,14 @@
 """Fast training helpers that do not load a model."""
 
+import json
+
 import pytest
 import mlx.core as mx
 
+from distil.progress import Probe, ProbePoint
 from distil.sample import _select_interleaved_token
-from distil.training import _kl_loss, load_prompts
+from distil.stopping import LearningItem
+from distil.training import TrainStep, _kl_loss, load_prompts
 
 
 def test_kl_loss_directions_match_manual_distributions():
@@ -67,3 +71,61 @@ def test_interleaved_token_accepts_only_inside_teacher_top_k():
         teacher_sampler=greedy,
     )
     assert (token, accepted) == (1, True)
+
+
+def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monkeypatch):
+    import distil.distill as distill
+
+    state = {"learned": False}
+    answer_calls = []
+
+    class Model:
+        def eval(self):
+            pass
+
+    class Session:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def save(self, path):
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "adapter_config.json").write_text("{}")
+            (path / "adapters.safetensors").write_bytes(b"")
+            return path / "adapters.safetensors"
+
+        def step(self, prompt):
+            state["learned"] = True
+            return TrainStep(1, prompt, 0.1, 1, "stop", "VIOLET-731")
+
+    def fake_answer(model, tokenizer, probe, **kwargs):
+        answer_calls.append((probe.name, kwargs["max_tokens"]))
+        return probe.completion
+
+    def fake_score(model, tokenizer, probe, step, enable_thinking):
+        probability = 0.9 if state["learned"] else 0.1
+        return ProbePoint(step, -1.0, probability, -1.0, probability, [])
+
+    monkeypatch.setattr(distill, "TrainingSession", Session)
+    monkeypatch.setattr(distill, "_answer", fake_answer)
+    monkeypatch.setattr(distill, "score_probe", fake_score)
+
+    rollouts = tmp_path / "rollouts.jsonl"
+    result = distill.run_continual(
+        Model(),
+        object(),
+        [LearningItem("fact", "heldout", "VIOLET-731", ("train",))],
+        [Probe("canary", "2+2?", "4")],
+        "teacher context",
+        tmp_path / "adapter",
+        model_name="model",
+        iters=1,
+        eval_every=1,
+        canary_max_tokens=7,
+        save_rollout_path=rollouts,
+    )
+    assert result.success
+    assert all(limit == 7 for name, limit in answer_calls if name == "canary")
+    row = json.loads(rollouts.read_text())
+    assert row["item_id"] == "fact"
+    assert row["prompt"][-1]["content"] == "train"
+    assert row["completion"][0]["content"] == "VIOLET-731"

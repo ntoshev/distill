@@ -76,12 +76,50 @@ def sample_completion(
     seed: int | None = None,
     enable_thinking: bool | None = None,
 ) -> Sample:
+    prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
+    return _sample_text(
+        model, tokenizer, prompt_text, prompt_ids,
+        max_tokens=max_tokens, temperature=temperature, seed=seed,
+    )
+
+
+def sample_text(
+    model,
+    tokenizer,
+    prompt_text: str,
+    max_tokens: int = 512,
+    temperature: float = 1.0,
+    seed: int | None = None,
+) -> Sample:
+    """Sample directly from a raw text prefix."""
+    return _sample_text(
+        model,
+        tokenizer,
+        prompt_text,
+        tokenizer.encode(prompt_text, add_special_tokens=False),
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
+    )
+
+
+def _sample_text(
+    model,
+    tokenizer,
+    prompt_text: str,
+    prompt_ids: list[int],
+    *,
+    max_tokens: int,
+    temperature: float,
+    seed: int | None,
+) -> Sample:
     from mlx_lm import stream_generate  # deferred: slow import
     from mlx_lm.sample_utils import make_sampler
 
+    if max_tokens <= 0:
+        raise ValueError("--max-tokens must be positive")
     if seed is not None:
         mx.random.seed(seed)
-    prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
 
     gen_ids: list[int] = []
     finish_reason = None
@@ -126,6 +164,72 @@ def sample_speculative_completion(
     privileged-context prefix; otherwise a token is sampled from the teacher.
     The selected token is then fed back to both policies for the next step.
     """
+    prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
+    _, teacher_prompt_ids = _render_prompt(
+        teacher_tokenizer, teacher_messages, enable_thinking
+    )
+    return _sample_speculative_text(
+        model,
+        tokenizer,
+        prompt_text,
+        prompt_ids,
+        teacher_model,
+        teacher_tokenizer,
+        teacher_prompt_ids,
+        top_k=top_k,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
+        teacher_without_adapter=teacher_without_adapter,
+    )
+
+
+def sample_speculative_text(
+    model,
+    tokenizer,
+    prompt_text: str,
+    teacher_model,
+    teacher_tokenizer,
+    teacher_prompt_text: str,
+    *,
+    top_k: int = 5,
+    max_tokens: int = 512,
+    temperature: float = 1.0,
+    seed: int | None = None,
+    teacher_without_adapter: bool = False,
+) -> Sample:
+    """Speculative sampling from raw student and teacher prefixes."""
+    return _sample_speculative_text(
+        model,
+        tokenizer,
+        prompt_text,
+        tokenizer.encode(prompt_text, add_special_tokens=False),
+        teacher_model,
+        teacher_tokenizer,
+        teacher_tokenizer.encode(teacher_prompt_text, add_special_tokens=False),
+        top_k=top_k,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
+        teacher_without_adapter=teacher_without_adapter,
+    )
+
+
+def _sample_speculative_text(
+    model,
+    tokenizer,
+    prompt_text: str,
+    prompt_ids: list[int],
+    teacher_model,
+    teacher_tokenizer,
+    teacher_prompt_ids: list[int],
+    *,
+    top_k: int,
+    max_tokens: int,
+    temperature: float,
+    seed: int | None,
+    teacher_without_adapter: bool,
+) -> Sample:
     from mlx_lm.models.cache import make_prompt_cache  # deferred: slow import
     from mlx_lm.sample_utils import make_sampler
 
@@ -136,12 +240,8 @@ def sample_speculative_completion(
     if seed is not None:
         mx.random.seed(seed)
 
-    prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
-    _, teacher_prompt_ids = _render_prompt(
-        teacher_tokenizer, teacher_messages, enable_thinking
-    )
     if not prompt_ids or not teacher_prompt_ids:
-        raise ValueError("chat template produced an empty generation prompt")
+        raise ValueError("student and teacher generation prompts must not be empty")
 
     student_sampler = make_sampler(temp=temperature)
     teacher_sampler = make_sampler(temp=temperature)

@@ -201,6 +201,39 @@ def _step_payload(step: TrainStep) -> dict:
     }
 
 
+def save_training_rollout(
+    path: str | Path,
+    messages: list[dict],
+    step: TrainStep,
+    *,
+    model_name: str,
+    temperature: float,
+    max_tokens: int,
+    seed: int,
+    item_id: str | None = None,
+) -> int:
+    return save_rollout(
+        path,
+        messages,
+        [{"role": "assistant", "content": step.content}],
+        extra={
+            "task": "distil-train",
+            "model": model_name,
+            "iteration": step.iteration,
+            **({"item_id": item_id} if item_id is not None else {}),
+            "loss": step.loss,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "seed": seed,
+            "speculative_top_k": step.speculative_top_k,
+            "accepted_tokens": step.accepted_tokens,
+            "replaced_tokens": step.replaced_tokens,
+            "kl_direction": step.kl_direction,
+            "is_truncated": step.finish_reason != "stop",
+        },
+    )
+
+
 class TrainingSession:
     """Stateful LoRA optimizer that performs one successful KL update at a time."""
 
@@ -517,24 +550,14 @@ def train_lora(
         with metrics_file.open("a") as f:
             f.write(json.dumps(_step_payload(step), ensure_ascii=False) + "\n")
         if save_rollout_path is not None:
-            save_rollout(
+            save_training_rollout(
                 save_rollout_path,
                 messages,
-                [{"role": "assistant", "content": step.content}],
-                extra={
-                    "task": "distil-train",
-                    "model": model_name,
-                    "iteration": step.iteration,
-                    "loss": step.loss,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "seed": seed,
-                    "speculative_top_k": step.speculative_top_k,
-                    "accepted_tokens": step.accepted_tokens,
-                    "replaced_tokens": step.replaced_tokens,
-                    "kl_direction": kl_direction,
-                    "is_truncated": step.finish_reason != "stop",
-                },
+                step,
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                seed=seed,
             )
         if report is not None:
             report(step)
