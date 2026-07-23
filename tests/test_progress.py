@@ -84,7 +84,7 @@ def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, mon
     monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
     monkeypatch.setattr(
         "distil.progress.score_probe",
-        lambda model, tokenizer, probe, step, enable_thinking: ProbePoint(
+        lambda model, tokenizer, probe, step, enable_thinking, **kwargs: ProbePoint(
             step, -1.0, 0.37, -1.0, 0.37, []
         ),
     )

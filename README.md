@@ -44,6 +44,10 @@ uv run distil \
   --rollout examples/verifiers/gsm8k-results.jsonl --index 1
 ```
 
+For rollout scoring, `--system` replaces or inserts the student's system
+message and `--prompt` replaces its first user message. `--index` is valid only
+with `--rollout`.
+
 Inputs accept inline text, `@file`, or `-` for stdin. Tokens are colored from
 red (surprising) to green (likely). Useful output flags are:
 
@@ -175,8 +179,9 @@ uv run distil \
 
 Probe files contain one JSON object per line with `name`, `prompt`, and
 `completion`, plus an optional `system`. `--json` emits all checkpoint and
-per-token values. Progress mode performs inference over saved checkpoints but
-does not retrain.
+per-token values. Add `--top-k K --json` to include each scored token's top-K
+alternatives. Progress mode performs inference over saved checkpoints but does
+not retrain.
 
 The example progress commands require the local sweep artifacts. Recreate them
 with the commands in [EXPERIMENTS.md](EXPERIMENTS.md); generated sweep folders

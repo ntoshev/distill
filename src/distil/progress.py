@@ -102,6 +102,7 @@ def score_probe(
     probe: Probe,
     step: int,
     enable_thinking: bool | None,
+    top_k: int = 0,
 ) -> ProbePoint:
     messages = [] if probe.system is None else [{"role": "system", "content": probe.system}]
     messages.append({"role": "user", "content": probe.prompt})
@@ -111,7 +112,7 @@ def score_probe(
     )
     # Score only the supplied completion, not end-of-turn template tokens.
     built = build_raw(prompt_text, probe.completion)
-    result = score_text(model, tokenizer, built.text, built.spans, top_k=0)
+    result = score_text(model, tokenizer, built.text, built.spans, top_k=top_k)
     scored = result.scored
     sequence_logprob = sum(token.logprob for token in scored)
     return ProbePoint(
@@ -125,6 +126,16 @@ def score_probe(
                 "text": token.text,
                 "logprob": token.logprob,
                 "probability": math.exp(token.logprob),
+                **(
+                    {
+                        "top": [
+                            [alternative.text, alternative.logprob]
+                            for alternative in token.top_k
+                        ]
+                    }
+                    if token.top_k
+                    else {}
+                ),
             }
             for token in scored
         ],
@@ -138,6 +149,7 @@ def score_progress(
     probes: list[Probe],
     *,
     enable_thinking: bool | None = None,
+    top_k: int = 0,
 ) -> ProgressResult:
     """Score the base model and every checkpoint on each fixed probe."""
     checkpoints = find_checkpoints(checkpoint_root)
@@ -151,7 +163,7 @@ def score_progress(
         model.eval()
         for probe in probes:
             series[probe.name].append(
-                score_probe(model, tokenizer, probe, step, enable_thinking)
+                score_probe(model, tokenizer, probe, step, enable_thinking, top_k=top_k)
             )
 
     if not has_step_zero:

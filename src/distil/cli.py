@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="pass enable_thinking=False to chat templates that support it",
     )
     src.add_argument("--rollout", help="verifiers/prime-rl results.jsonl")
-    src.add_argument("--index", type=int, default=0, help="rollout row (default 0)")
+    src.add_argument("--index", type=int, help="rollout row (default 0)")
     src.add_argument("--train", metavar="CONTEXT", help="distill trusted inline, @file, or stdin context")
     src.add_argument(
         "--progress",
@@ -135,7 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     out.add_argument("--stats", action="store_true", help="show color legend and summary stats")
     out.add_argument("--worst", type=int, default=0, help="table of N most surprising tokens")
-    out.add_argument("--top-k", type=int, default=3, help="alternatives per surprising token")
+    out.add_argument(
+        "--top-k",
+        type=int,
+        help="alternatives per surprising token (default 3); progress alternatives require --json",
+    )
     out.add_argument("--hide-context", action="store_true", help="do not echo unscored context")
     out.add_argument("--json", action="store_true", help="print JSON instead of colored text")
     out.add_argument("--color", choices=["auto", "always", "never"], default="auto")
@@ -374,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
         return fail(
             "provide exactly one of --completion, --rollout, --sample, --train or --progress"
         )
+    if args.index is not None and not args.rollout:
+        return fail("--index only combines with --rollout")
+    if args.top_k is not None and args.top_k < 0:
+        return fail("--top-k must be nonnegative")
     if args.sample and not args.prompt:
         return fail("--sample requires --prompt")
     if args.speculative_top_k is not None:
@@ -476,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
             return fail("teacher and raw modes do not combine with --progress")
         if args.stats or args.worst or args.hide_context:
             return fail("--stats, --worst and --hide-context do not combine with --progress")
+        if args.top_k is not None and not args.json:
+            return fail("--top-k with --progress requires --json")
         if args.probes is not None:
             if args.system or args.prompt is not None:
                 return fail("--progress with --probes takes context from each probe")
@@ -516,10 +526,12 @@ def main(argv: list[str] | None = None) -> int:
             system = None
     elif args.rollout:
         try:
-            rollout = load_rollout(args.rollout, args.index)
+            rollout = load_rollout(args.rollout, args.index if args.index is not None else 0)
         except (FileNotFoundError, IndexError, ValueError) as e:
             return fail(str(e))
         meta = rollout.meta
+        system = _read_input(args.system)
+        prompt = _read_input(args.prompt)
     else:
         completion = _read_input(args.completion)
         prompt = _read_input(args.prompt) or ""
@@ -548,6 +560,7 @@ def main(argv: list[str] | None = None) -> int:
 
     max_tokens = args.max_tokens if args.max_tokens is not None else 512
     temperature = args.temperature if args.temperature is not None else 1.0
+    top_k = args.top_k if args.top_k is not None else 3
     enable_thinking = False if args.no_thinking else None
 
     if progress:
@@ -560,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.progress,
                 probes,
                 enable_thinking=enable_thinking,
+                top_k=args.top_k if args.top_k is not None else 0,
             )
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as e:
             return fail(str(e))
@@ -574,7 +588,10 @@ def main(argv: list[str] | None = None) -> int:
     sample = None
     teacher_messages = None
     if args.rollout:
-        messages = rollout.messages
+        try:
+            messages = apply_teacher_context(rollout.messages, system=system, prompt=prompt)
+        except ValueError as e:
+            return fail(str(e).replace("--teacher-prompt", "--prompt"))
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
     elif args.sample:
         messages = [] if system is None else [{"role": "system", "content": system}]
@@ -679,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
             result = score_text_pair(
                 model, tokenizer, built,
                 teacher_model, teacher_tokenizer, built_teacher,
-                model_name=args.model, teacher_name=teacher_name, top_k=args.top_k,
+                model_name=args.model, teacher_name=teacher_name, top_k=top_k,
                 teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
             )
         except ValueError as e:
@@ -692,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
             built.text,
             built.spans,
             model_name=args.model,
-            top_k=args.top_k,
+            top_k=top_k,
             warnings=built.warnings,
         )
 
@@ -724,6 +741,12 @@ def main(argv: list[str] | None = None) -> int:
         errcon.print(f"[yellow]warning:[/yellow] {w}")
     if meta:
         errcon.print("rollout: " + "  ".join(f"{k}={v}" for k, v in meta.items()), style="grey50")
+    if args.rollout and (system is not None or prompt is not None):
+        overrides = [
+            name for name, value in (("system", system), ("prompt", prompt))
+            if value is not None
+        ]
+        errcon.print("student overrides: " + ", ".join(overrides), style="grey50")
     if teacher_mode:
         overrides = [
             name for name, v in (("system", teacher_system), ("prompt", teacher_prompt))

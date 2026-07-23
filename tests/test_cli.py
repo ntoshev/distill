@@ -1,5 +1,7 @@
 """CLI argument validation. These run before any model load, so no model needed."""
 
+import json
+
 from distil.cli import main
 
 
@@ -29,6 +31,11 @@ def test_raw_excludes_no_thinking(capsys):
 
 def test_sample_requires_prompt(capsys):
     assert main(["--model", "m", "--sample"]) == 2
+
+
+def test_index_requires_rollout(capsys):
+    assert main(["--model", "m", "--completion", "x", "--index", "2"]) == 2
+    assert "only combines with --rollout" in capsys.readouterr().err
 
 
 def test_sampling_flags_require_sample(capsys):
@@ -265,6 +272,81 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
     ]) == 0
     assert disabled == [True]
     assert '"completion": "VIOLET-731"' in capsys.readouterr().out
+
+
+def test_progress_top_k_is_forwarded_and_emitted_in_json(monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_score(model, tokenizer, root, probes, **kwargs):
+        captured.update(kwargs)
+        tokens = [{
+            "text": "V",
+            "logprob": -1.0,
+            "probability": 0.37,
+            "top": [["V", -1.0], ["A", -1.5]],
+        }]
+        point = distil.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, tokens)
+        return distil.progress.ProgressResult(str(root), [0], probes, {"target": [point]})
+
+    monkeypatch.setattr(distil.progress, "score_progress", fake_score)
+    assert main([
+        "--model", "m", "--progress", "run", "--prompt", "Code?",
+        "--completion", "VIOLET-731", "--top-k", "2", "--json",
+    ]) == 0
+    assert captured["top_k"] == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["series"]["target"][0]["tokens"][0]["top"][1] == ["A", -1.5]
+
+
+def test_progress_top_k_requires_json(capsys):
+    assert main([
+        "--model", "m", "--progress", "run", "--prompt", "Code?",
+        "--completion", "VIOLET-731", "--top-k", "2",
+    ]) == 2
+    assert "requires --json" in capsys.readouterr().err
+
+
+def test_rollout_accepts_student_system_and_prompt_overrides(
+    tmp_path, monkeypatch, capsys
+):
+    import mlx_lm
+    import distil.cli as cli
+    from distil.templating import BuiltText
+
+    path = tmp_path / "rollout.jsonl"
+    path.write_text(json.dumps({
+        "prompt": [
+            {"role": "system", "content": "old system"},
+            {"role": "user", "content": "old prompt"},
+        ],
+        "completion": [{"role": "assistant", "content": "answer"}],
+    }) + "\n")
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_build(tokenizer, messages, **kwargs):
+        captured["messages"] = messages
+        return BuiltText("rendered", [(0, 8)])
+
+    monkeypatch.setattr(cli, "build_rollout", fake_build)
+    monkeypatch.setattr(cli, "score_text", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "to_json_dict", lambda result: {"tokens": []})
+
+    assert main([
+        "--model", "m", "--rollout", str(path),
+        "--system", "new system", "--prompt", "new prompt", "--json",
+    ]) == 0
+    assert captured["messages"] == [
+        {"role": "system", "content": "new system"},
+        {"role": "user", "content": "new prompt"},
+        {"role": "assistant", "content": "answer"},
+    ]
 
 
 def test_bad_rollout_path_exits_before_model_load(capsys):
