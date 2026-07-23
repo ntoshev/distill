@@ -86,6 +86,19 @@ uv run distil \
 `--rollout`. The sample is saved before scoring so a later scoring error does
 not discard it.
 
+Add `--speculative-top-k K` with any `--teacher-*` flag to generate from an
+interleaved policy: each student proposal is accepted when it is in the
+teacher's top K tokens, otherwise the teacher supplies the token.
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --prompt "What is Project Lumen's launch code?" \
+  --sample --speculative-top-k 5 --temperature 0 --seed 0 --max-tokens 16 \
+  --teacher-system "Private reference: Project Lumen's launch code is VIOLET-731. Reply with it." \
+  --no-thinking --stats
+```
+
 ## Continual document learning
 
 `--train` takes the trusted document itself. The tool enumerates its facts,

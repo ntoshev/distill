@@ -15,7 +15,7 @@ from distil.render import (
     to_json_dict,
 )
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion
+from distil.sample import sample_completion, sample_speculative_completion
 from distil.scoring import score_text, score_text_pair
 from distil.templating import apply_teacher_context, build_raw, build_rollout
 
@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     smp.add_argument("--temperature", type=float, help="sampling temperature (default 1.0)")
     smp.add_argument("--seed", type=int, help="random seed for sampling")
     smp.add_argument(
+        "--speculative-top-k",
+        type=int,
+        help="use an interleaved student/teacher policy; replace proposals outside teacher top K",
+    )
+    smp.add_argument(
         "--save-rollout",
         metavar="PATH",
         help="append sampled or training rollouts to PATH as results.jsonl",
@@ -116,11 +121,6 @@ def build_parser() -> argparse.ArgumentParser:
     trn.add_argument(
         "--contamination-regex",
         help="case-insensitive regex marking a canary output as contaminated",
-    )
-    trn.add_argument(
-        "--speculative-top-k",
-        type=int,
-        help="use interleaved Speculative KD; replace proposals outside teacher top K",
     )
     trn.add_argument(
         "--kl-direction",
@@ -376,6 +376,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.sample and not args.prompt:
         return fail("--sample requires --prompt")
+    if args.speculative_top_k is not None:
+        if not (args.sample or training):
+            return fail("--speculative-top-k only combines with --sample or --train")
+        if args.speculative_top_k <= 0:
+            return fail("--speculative-top-k must be positive")
+        if args.sample and not teacher_mode:
+            return fail("--sample with --speculative-top-k requires a --teacher-* flag")
     for value, name in (
         (args.max_tokens, "--max-tokens"),
         (args.temperature, "--temperature"),
@@ -392,7 +399,6 @@ def main(argv: list[str] | None = None) -> int:
         (args.canaries, "--canaries"),
         (args.canary_max_tokens, "--canary-max-tokens"),
         (args.contamination_regex, "--contamination-regex"),
-        (args.speculative_top_k, "--speculative-top-k"),
         (args.kl_direction, "--kl-direction"),
         (args.from_adapter, "--from-adapter"),
         (args.generator_model, "--generator-model"),
@@ -450,8 +456,6 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--checkpoint-every must be positive")
         if args.canary_max_tokens is not None and args.canary_max_tokens <= 0:
             return fail("--canary-max-tokens must be positive")
-        if args.speculative_top_k is not None and args.speculative_top_k <= 0:
-            return fail("--speculative-top-k must be positive")
         if args.questions_per_fact is not None and args.questions_per_fact < 2:
             return fail("--questions-per-fact must be at least 2")
         if args.eval_every is not None and args.eval_every <= 0:
@@ -568,20 +572,53 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     sample = None
+    teacher_messages = None
     if args.rollout:
         messages = rollout.messages
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
     elif args.sample:
         messages = [] if system is None else [{"role": "system", "content": system}]
         messages.append({"role": "user", "content": prompt})
-        sample = sample_completion(
-            model, tokenizer, messages,
-            max_tokens=max_tokens, temperature=temperature, seed=args.seed,
-            enable_thinking=enable_thinking,
-        )
-        errcon.print(
-            f"sampled {sample.num_tokens} tokens (finish: {sample.finish_reason})", style="grey50"
-        )
+        if args.speculative_top_k is not None:
+            try:
+                teacher_messages = apply_teacher_context(
+                    messages, system=teacher_system, prompt=teacher_prompt
+                )
+            except ValueError as e:
+                return fail(str(e))
+            try:
+                sample = sample_speculative_completion(
+                    model,
+                    tokenizer,
+                    messages,
+                    teacher_model,
+                    teacher_tokenizer,
+                    teacher_messages,
+                    top_k=args.speculative_top_k,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=args.seed,
+                    enable_thinking=enable_thinking,
+                    teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
+                )
+            except ValueError as e:
+                return fail(str(e))
+            errcon.print(
+                f"sampled {sample.num_tokens} tokens "
+                f"({sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; "
+                f"finish: {sample.finish_reason})",
+                style="grey50",
+            )
+        else:
+            sample = sample_completion(
+                model, tokenizer, messages,
+                max_tokens=max_tokens, temperature=temperature, seed=args.seed,
+                enable_thinking=enable_thinking,
+            )
+            errcon.print(
+                f"sampled {sample.num_tokens} tokens (finish: {sample.finish_reason})",
+                style="grey50",
+            )
         if args.save_rollout:
             # saved before scoring, so a scoring failure never loses the sample
             index = save_rollout(
@@ -594,6 +631,15 @@ def main(argv: list[str] | None = None) -> int:
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     **({"seed": args.seed} if args.seed is not None else {}),
+                    **(
+                        {
+                            "speculative_top_k": sample.speculative_top_k,
+                            "accepted_tokens": sample.accepted_tokens,
+                            "replaced_tokens": sample.replaced_tokens,
+                        }
+                        if sample.speculative_top_k is not None
+                        else {}
+                    ),
                     "is_truncated": sample.finish_reason != "stop",
                 },
             )
@@ -610,12 +656,13 @@ def main(argv: list[str] | None = None) -> int:
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
 
     if teacher_mode:
-        try:
-            teacher_messages = apply_teacher_context(
-                messages, system=teacher_system, prompt=teacher_prompt
-            )
-        except ValueError as e:
-            return fail(str(e))
+        if teacher_messages is None:
+            try:
+                teacher_messages = apply_teacher_context(
+                    messages, system=teacher_system, prompt=teacher_prompt
+                )
+            except ValueError as e:
+                return fail(str(e))
         if args.sample:
             template_kwargs = (
                 {} if enable_thinking is None else {"enable_thinking": enable_thinking}
@@ -660,6 +707,15 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": args.seed,
                 "finish_reason": sample.finish_reason,
                 "num_tokens": sample.num_tokens,
+                **(
+                    {
+                        "speculative_top_k": sample.speculative_top_k,
+                        "accepted_tokens": sample.accepted_tokens,
+                        "replaced_tokens": sample.replaced_tokens,
+                    }
+                    if sample.speculative_top_k is not None
+                    else {}
+                ),
             }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
