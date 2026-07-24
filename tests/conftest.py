@@ -15,7 +15,15 @@ MODEL = "mlx-community/Qwen3.5-0.8B-4bit"
 T = TypeVar("T")
 
 
-def sample_skd_case(model, tokenizer, *, on_decode_start=None):
+def sample_skd_case(
+    model,
+    tokenizer,
+    *,
+    max_block_size=8,
+    temperature=0.0,
+    seed=0,
+    on_decode_start=None,
+):
     """Run the shared privileged-teacher SKD scenario used by tests."""
     from distil.sample import sample_speculative_completion
     from distil.templating import apply_teacher_context
@@ -39,9 +47,10 @@ def sample_skd_case(model, tokenizer, *, on_decode_start=None):
         teacher_messages,
         top_k=3,
         max_tokens=16,
-        temperature=0.0,
-        seed=0,
+        temperature=temperature,
+        seed=seed,
         enable_thinking=False,
+        max_block_size=max_block_size,
         _on_decode_start=on_decode_start,
     )
     return sample, teacher_messages

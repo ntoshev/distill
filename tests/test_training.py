@@ -6,7 +6,7 @@ import pytest
 import mlx.core as mx
 
 from distil.progress import Probe, ProbePoint
-from distil.sample import _select_interleaved_token
+from distil.sample import _proposal_is_accepted
 from distil.stopping import LearningItem
 from distil.training import TrainStep, _kl_loss, load_prompts
 
@@ -50,27 +50,10 @@ def test_load_prompts_rejects_directory(tmp_path):
 
 
 def test_interleaved_token_accepts_only_inside_teacher_top_k():
-    greedy = lambda values: mx.argmax(values, axis=-1)
-    student = mx.array([0.0, 10.0, 1.0])
     teacher = mx.array([10.0, 9.0, 0.0])
 
-    token, accepted = _select_interleaved_token(
-        student,
-        teacher,
-        top_k=1,
-        student_sampler=greedy,
-        teacher_sampler=greedy,
-    )
-    assert (token, accepted) == (0, False)
-
-    token, accepted = _select_interleaved_token(
-        student,
-        teacher,
-        top_k=2,
-        student_sampler=greedy,
-        teacher_sampler=greedy,
-    )
-    assert (token, accepted) == (1, True)
+    assert not _proposal_is_accepted(1, teacher, top_k=1)
+    assert _proposal_is_accepted(1, teacher, top_k=2)
 
 
 def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monkeypatch):

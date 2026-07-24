@@ -18,7 +18,7 @@ from distil.distill import run_continual
 from distil.generation import teacher_system as document_teacher_system
 from distil.progress import Probe
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion
+from distil.sample import sample_completion, sample_speculative_completion
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 from distil.training import train_lora
@@ -284,6 +284,54 @@ def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
         top_k=0,
     )
     assert len(result.scored) == sample.num_tokens
+
+
+@pytest.mark.parametrize("temperature", [0.0, 0.7])
+def test_adaptive_speculative_matches_single_token_reference(
+    model, tokenizer, temperature
+):
+    reference, _ = sample_skd_case(
+        model,
+        tokenizer,
+        max_block_size=1,
+        temperature=temperature,
+        seed=17,
+    )
+    adaptive, _ = sample_skd_case(
+        model,
+        tokenizer,
+        max_block_size=8,
+        temperature=temperature,
+        seed=17,
+    )
+
+    assert adaptive.completion_text == reference.completion_text
+    assert adaptive.finish_reason == reference.finish_reason
+    assert adaptive.teacher_sampled == reference.teacher_sampled
+    assert adaptive.accepted_tokens == reference.accepted_tokens
+    assert adaptive.replaced_tokens == reference.replaced_tokens
+
+
+def test_adaptive_block_verification_matches_single_token_reference(model, tokenizer):
+    messages = [{"role": "user", "content": "Count upward from one."}]
+    kwargs = dict(
+        model=model,
+        tokenizer=tokenizer,
+        messages=messages,
+        teacher_model=model,
+        teacher_tokenizer=tokenizer,
+        teacher_messages=messages,
+        top_k=1,
+        max_tokens=16,
+        temperature=0.0,
+        seed=0,
+        enable_thinking=False,
+    )
+    reference = sample_speculative_completion(**kwargs, max_block_size=1)
+    adaptive = sample_speculative_completion(**kwargs, max_block_size=8)
+
+    assert adaptive.completion_text == reference.completion_text
+    assert adaptive.teacher_sampled == reference.teacher_sampled == [False] * 16
 
 
 @pytest.mark.slow
