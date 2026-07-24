@@ -7,6 +7,10 @@
         "score_prompt_completion": {
           "median_seconds": 0.41,
           "regression_tolerance": 0.02
+        },
+        "skd_rollout_generation": {
+          "median_seconds": 0.310132,
+          "regression_tolerance": 0.02
         }
       }
     }

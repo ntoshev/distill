@@ -18,13 +18,13 @@ from distil.distill import run_continual
 from distil.generation import teacher_system as document_teacher_system
 from distil.progress import Probe
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion, sample_speculative_completion
+from distil.sample import sample_completion
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 from distil.training import train_lora
 from distil.stopping import LearningItem
 
-from conftest import FIXTURE_DIR, MODEL
+from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 
 pytestmark = pytest.mark.model
 
@@ -258,27 +258,13 @@ def test_sample_then_teacher_scores_align(model, tokenizer):
 
 
 def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
-    messages = [{"role": "user", "content": "What is Project Lumen's launch code?"}]
-    teacher_messages = apply_teacher_context(
-        messages,
-        system="Private reference: Project Lumen's launch code is VIOLET-731. Reply with it.",
-    )
-    sample = sample_speculative_completion(
-        model,
-        tokenizer,
-        messages,
-        model,
-        tokenizer,
-        teacher_messages,
-        top_k=5,
-        max_tokens=16,
-        temperature=0.0,
-        seed=0,
-        enable_thinking=False,
-    )
+    sample, teacher_messages = sample_skd_case(model, tokenizer)
 
     assert sample.num_tokens > 0
     assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
+    assert sample.accepted_tokens > 0
+    assert sample.replaced_tokens > 0
+    assert "VIOLET-731" in sample.content
     built_student = build_raw(sample.prompt_text, sample.completion_text)
     teacher_prompt = tokenizer.apply_chat_template(
         teacher_messages,

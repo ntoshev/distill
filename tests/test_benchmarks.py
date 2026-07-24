@@ -9,7 +9,7 @@ from distil.rollout import load_rollout
 from distil.scoring import score_text
 from distil.templating import build_rollout
 
-from conftest import FIXTURE_DIR, MODEL
+from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 
 pytestmark = [pytest.mark.benchmark, pytest.mark.model]
 
@@ -49,3 +49,21 @@ def test_score_prompt_completion(timing_benchmark, model, tokenizer):
     assert math.isclose(
         stats["perplexity"], math.exp(stats["negative_log_likelihood"] / 299)
     )
+
+
+def test_skd_rollout_generation(timing_benchmark, model, tokenizer):
+    """Generate with both student proposals and privileged-teacher replacements."""
+
+    def operation():
+        sample, _ = sample_skd_case(model, tokenizer)
+        # Keep the timer robust if generation internals become lazier.
+        mx.synchronize()
+        return sample
+
+    sample, _ = timing_benchmark("skd_rollout_generation", operation)
+
+    assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
+    assert sample.accepted_tokens > 0
+    assert sample.replaced_tokens > 0
+    assert "VIOLET-731" in sample.content
+    assert sample.speculative_top_k == 3

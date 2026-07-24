@@ -15,6 +15,37 @@ MODEL = "mlx-community/Qwen3.5-0.8B-4bit"
 T = TypeVar("T")
 
 
+def sample_skd_case(model, tokenizer):
+    """Run the shared privileged-teacher SKD scenario used by tests."""
+    from distil.sample import sample_speculative_completion
+    from distil.templating import apply_teacher_context
+
+    messages = [
+        {"role": "user", "content": "What is Project Lumen's launch code?"}
+    ]
+    teacher_messages = apply_teacher_context(
+        messages,
+        system=(
+            "Private reference: Project Lumen's launch code is VIOLET-731. "
+            "Reply with it."
+        ),
+    )
+    sample = sample_speculative_completion(
+        model,
+        tokenizer,
+        messages,
+        model,
+        tokenizer,
+        teacher_messages,
+        top_k=3,
+        max_tokens=16,
+        temperature=0.0,
+        seed=0,
+        enable_thinking=False,
+    )
+    return sample, teacher_messages
+
+
 def pytest_addoption(parser):
     selection = parser.getgroup("test selection")
     selection.addoption(
