@@ -109,13 +109,17 @@ def color_for(value: float, metric: str = "logprob") -> str:
         return _interpolate_stops(min(max(value, LP_LO), 0.0), _LOGPROB_STOPS)
 
 
-def style_for(value: float, metric: str = "logprob") -> str:
+def style_for(
+    value: float, metric: str = "logprob", *, teacher_sampled: bool = False
+) -> str:
     """Terminal style for a scored token."""
     color = color_for(value, metric)
     extreme = value >= EXTREME_KL if metric == "kl" else value <= EXTREME_LOGPROB
-    if extreme:
-        return f"bold underline {color}"
-    return color
+    if teacher_sampled:
+        emphasis = "bold underline2" if extreme else "underline2"
+    else:
+        emphasis = "bold underline" if extreme else ""
+    return f"{emphasis} {color}" if emphasis else color
 
 
 @dataclass
@@ -124,6 +128,7 @@ class RenderOptions:
     hide_context: bool = False
     stats: bool = False  # legend + summary line
     worst: int = 0  # rows in the most-surprising-tokens / disagreements table (0 disables)
+    teacher_sampled: list[bool] | None = None  # provenance of scored sample tokens
 
 
 _SPARK_CHARS = "▁▂▃▄▅▆▇█"
@@ -233,10 +238,20 @@ def render(result: ScoreResult, console: Console, opts: RenderOptions | None = N
     opts = opts or RenderOptions()
 
     body = Text()
+    scored_index = 0
     for tok in result.tokens:
         value = _token_value(tok, opts.metric)
         if tok.scored and value is not None:
-            body.append(tok.text, style=style_for(value, opts.metric))
+            from_teacher = bool(
+                opts.teacher_sampled
+                and scored_index < len(opts.teacher_sampled)
+                and opts.teacher_sampled[scored_index]
+            )
+            body.append(
+                tok.text,
+                style=style_for(value, opts.metric, teacher_sampled=from_teacher),
+            )
+            scored_index += 1
         elif not opts.hide_context:
             body.append(tok.text, style=CONTEXT_STYLE)
     console.print(body, soft_wrap=True, end="" if body.plain.endswith("\n") else "\n")

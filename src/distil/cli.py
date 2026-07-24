@@ -706,7 +706,8 @@ def main(argv: list[str] | None = None) -> int:
         detail = f"finish: {sample.finish_reason}"
         if sample.speculative_top_k is not None:
             detail = (
-                f"{sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; {detail}"
+                f"{sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; "
+                f"teacher tokens double-underlined; {detail}"
             )
         errcon.print(f"sampled {sample.num_tokens} tokens ({detail})", style="grey50")
         # the rendered generation prompt plus the generated text is already the
@@ -850,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
             hide_context=args.hide_context,
             stats=args.stats,
             worst=args.worst,
+            teacher_sampled=sample.teacher_sampled if sample is not None else None,
         ),
     )
     return 0

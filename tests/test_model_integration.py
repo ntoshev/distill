@@ -262,6 +262,8 @@ def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
 
     assert sample.num_tokens > 0
     assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
+    assert len(sample.teacher_sampled) == sample.num_tokens
+    assert sum(sample.teacher_sampled) == sample.replaced_tokens
     assert sample.accepted_tokens > 0
     assert sample.replaced_tokens > 0
     assert "VIOLET-731" in sample.content

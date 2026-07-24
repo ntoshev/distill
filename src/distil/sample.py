@@ -24,6 +24,7 @@ class Sample:
     speculative_top_k: int | None = None
     accepted_tokens: int | None = None
     replaced_tokens: int | None = None
+    teacher_sampled: list[bool] | None = None
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):
@@ -252,6 +253,7 @@ def _sample_speculative_text(
     eos_ids = _eos_token_ids(tokenizer) | _eos_token_ids(teacher_tokenizer)
 
     gen_ids: list[int] = []
+    teacher_sampled: list[bool] = []
     accepted_tokens = 0
     replaced_tokens = 0
     finish_reason = "length"
@@ -294,6 +296,7 @@ def _sample_speculative_text(
             )
 
         gen_ids.append(token)
+        teacher_sampled.append(not accepted)
         accepted_tokens += int(accepted)
         replaced_tokens += int(not accepted)
         if token in eos_ids:
@@ -311,4 +314,5 @@ def _sample_speculative_text(
         speculative_top_k=top_k,
         accepted_tokens=accepted_tokens,
         replaced_tokens=replaced_tokens,
+        teacher_sampled=teacher_sampled,
     )

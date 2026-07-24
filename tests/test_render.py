@@ -80,6 +80,11 @@ def test_extreme_logprob_style_is_emphasized():
     assert style_for(-7.5) == f"bold underline {color_for(-7.5)}"
 
 
+def test_teacher_sampled_style_is_underlined():
+    assert style_for(-0.5, teacher_sampled=True) == f"underline2 {color_for(-0.5)}"
+    assert style_for(-7.5, teacher_sampled=True) == f"bold underline2 {color_for(-7.5)}"
+
+
 def test_high_likelihood_colors_are_distinct():
     assert color_for(-1.0) == "#d1d42f"
     assert color_for(-0.5) == "#65a30d"
@@ -120,6 +125,20 @@ def test_render_hide_context():
     )
     render(make_result(), console, RenderOptions(hide_context=True))
     assert "The prompt." not in console.export_text()
+
+
+def test_render_underlines_only_teacher_sampled_tokens():
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=80, height=25
+    )
+    render(
+        make_result(),
+        console,
+        RenderOptions(teacher_sampled=[False, True, False, True, False]),
+    )
+    styled = console.export_text(styles=True)
+    assert "\x1b[21;38;2;76;164;36m very" in styled
+    assert "\x1b[21;38;2;249;137;22m sentence" in styled
 
 
 def test_json_dict():
