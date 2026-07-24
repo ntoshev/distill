@@ -8,6 +8,7 @@ is what goes into a saved rollout's assistant message.
 
 from contextlib import nullcontext
 from dataclasses import dataclass
+from typing import Callable
 
 import mlx.core as mx
 
@@ -76,11 +77,13 @@ def sample_completion(
     temperature: float = 1.0,
     seed: int | None = None,
     enable_thinking: bool | None = None,
+    _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
     return _sample_text(
         model, tokenizer, prompt_text, prompt_ids,
         max_tokens=max_tokens, temperature=temperature, seed=seed,
+        on_decode_start=_on_decode_start,
     )
 
 
@@ -113,6 +116,7 @@ def _sample_text(
     max_tokens: int,
     temperature: float,
     seed: int | None,
+    on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     from mlx_lm import stream_generate  # deferred: slow import
     from mlx_lm.sample_utils import make_sampler
@@ -124,12 +128,21 @@ def _sample_text(
 
     gen_ids: list[int] = []
     finish_reason = None
+    decode_started = False
+
+    def prompt_progress(processed, total):
+        nonlocal decode_started
+        if processed == total and not decode_started and on_decode_start is not None:
+            decode_started = True
+            on_decode_start()
+
     for resp in stream_generate(
         model,
         tokenizer,
         prompt=prompt_ids,
         max_tokens=max_tokens,
         sampler=make_sampler(temp=temperature),
+        prompt_progress_callback=prompt_progress,
     ):
         gen_ids.append(resp.token)
         finish_reason = resp.finish_reason
@@ -157,6 +170,7 @@ def sample_speculative_completion(
     seed: int | None = None,
     enable_thinking: bool | None = None,
     teacher_without_adapter: bool = False,
+    _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Generate with Speculative KD's token-level interleaved policy.
 
@@ -182,6 +196,7 @@ def sample_speculative_completion(
         temperature=temperature,
         seed=seed,
         teacher_without_adapter=teacher_without_adapter,
+        on_decode_start=_on_decode_start,
     )
 
 
@@ -198,6 +213,7 @@ def sample_speculative_text(
     temperature: float = 1.0,
     seed: int | None = None,
     teacher_without_adapter: bool = False,
+    _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Speculative sampling from raw student and teacher prefixes."""
     return _sample_speculative_text(
@@ -213,6 +229,7 @@ def sample_speculative_text(
         temperature=temperature,
         seed=seed,
         teacher_without_adapter=teacher_without_adapter,
+        on_decode_start=_on_decode_start,
     )
 
 
@@ -230,6 +247,7 @@ def _sample_speculative_text(
     temperature: float,
     seed: int | None,
     teacher_without_adapter: bool,
+    on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     from mlx_lm.models.cache import make_prompt_cache  # deferred: slow import
     from mlx_lm.sample_utils import make_sampler
@@ -260,7 +278,7 @@ def _sample_speculative_text(
     model.eval()
     teacher_model.eval()
 
-    for _ in range(max_tokens):
+    def next_logprobs(student_input, teacher_input):
         student_logits = model(student_input[None], cache=student_cache)[0, -1].astype(
             mx.float32
         )
@@ -279,6 +297,11 @@ def _sample_speculative_text(
 
         student_logprobs = student_logits - mx.logsumexp(student_logits)
         teacher_logprobs = teacher_logits - mx.logsumexp(teacher_logits)
+        return student_logprobs, teacher_logprobs
+
+    student_logprobs, teacher_logprobs = next_logprobs(student_input, teacher_input)
+
+    for step in range(max_tokens):
         token, accepted = _select_interleaved_token(
             student_logprobs,
             teacher_logprobs,
@@ -299,11 +322,17 @@ def _sample_speculative_text(
         teacher_sampled.append(not accepted)
         accepted_tokens += int(accepted)
         replaced_tokens += int(not accepted)
+        if step == 0 and on_decode_start is not None:
+            on_decode_start()
         if token in eos_ids:
             finish_reason = "stop"
             break
         student_input = mx.array([token])
         teacher_input = mx.array([token])
+        if step + 1 < max_tokens:
+            student_logprobs, teacher_logprobs = next_logprobs(
+                student_input, teacher_input
+            )
 
     return Sample(
         prompt_text=prompt_text,

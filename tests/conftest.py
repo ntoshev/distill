@@ -15,7 +15,7 @@ MODEL = "mlx-community/Qwen3.5-0.8B-4bit"
 T = TypeVar("T")
 
 
-def sample_skd_case(model, tokenizer):
+def sample_skd_case(model, tokenizer, *, on_decode_start=None):
     """Run the shared privileged-teacher SKD scenario used by tests."""
     from distil.sample import sample_speculative_completion
     from distil.templating import apply_teacher_context
@@ -42,6 +42,7 @@ def sample_skd_case(model, tokenizer):
         temperature=0.0,
         seed=0,
         enable_thinking=False,
+        _on_decode_start=on_decode_start,
     )
     return sample, teacher_messages
 
@@ -168,6 +169,124 @@ class TimingBenchmark:
             reporter.write_line(
                 f"timing {action}: {name} on {self.system_id}: "
                 f"median {measurement.median_seconds:.3f}s, limit {limit:.3f}s"
+            )
+        return result, measurement
+
+    def relative(
+        self,
+        name: str,
+        operation: Callable[[], T],
+        *,
+        reference_name: str,
+        reference_operation: Callable[[], object],
+        units: Callable[[T], int] | None = None,
+        reference_units: Callable[[object], int] | None = None,
+        unit_name: str = "unit",
+        duration: Callable[[T], float] | None = None,
+        reference_duration: Callable[[object], float] | None = None,
+        warmup_rounds: int = 2,
+    ) -> tuple[T, TimingMeasurement]:
+        """Compare an operation with a reference measured in the same run."""
+        baselines = json.loads(TIMING_BASELINES_PATH.read_text())
+        systems = baselines.setdefault("systems", {})
+        if self.update:
+            system = systems.setdefault(self.system_id, {"benchmarks": {}})
+        else:
+            system = systems.get(self.system_id)
+        if system is None:
+            pytest.fail(
+                f"no timing baselines for system id {self.system_id!r}; rerun with "
+                "UPDATE_TIMING_BASELINES=1 to create them",
+                pytrace=False,
+            )
+        benchmarks = system.setdefault("benchmarks", {})
+        baseline = benchmarks.get(name)
+        if baseline is None and not self.update:
+            pytest.fail(
+                f"no {name!r} timing baseline for system id {self.system_id!r}; rerun "
+                "with UPDATE_TIMING_BASELINES=1 to create it",
+                pytrace=False,
+            )
+
+        def measure(fn, duration_fn=None, units_fn=None):
+            result = None
+            for _ in range(warmup_rounds):
+                result = fn()
+
+            samples = []
+            for _ in range(self.rounds):
+                started = perf_counter()
+                result = fn()
+                elapsed = perf_counter() - started
+                elapsed = elapsed if duration_fn is None else duration_fn(result)
+                if units_fn is not None:
+                    unit_count = units_fn(result)
+                    if unit_count <= 0:
+                        raise ValueError(f"{unit_name} count must be positive")
+                    elapsed /= unit_count
+                samples.append(elapsed)
+            return result, TimingMeasurement(median(samples), tuple(samples))
+
+        _, reference = measure(
+            reference_operation, reference_duration, reference_units
+        )
+        result, measurement = measure(operation, duration, units)
+        measured_multiple = measurement.median_seconds / reference.median_seconds
+        if self.update:
+            tolerance = baseline.get("regression_tolerance", 0.20) if baseline else 0.20
+            baseline_multiple = measured_multiple
+            benchmarks[name] = {
+                "reference": reference_name,
+                "median_multiple": round(measured_multiple, 6),
+                "regression_tolerance": tolerance,
+            }
+            TIMING_BASELINES_PATH.write_text(json.dumps(baselines, indent=2) + "\n")
+        else:
+            if baseline.get("reference") != reference_name:
+                pytest.fail(
+                    f"{name!r} baseline references {baseline.get('reference')!r}, "
+                    f"expected {reference_name!r}",
+                    pytrace=False,
+                )
+            baseline_multiple = baseline["median_multiple"]
+            tolerance = baseline["regression_tolerance"]
+        max_multiple = baseline_multiple * (1 + tolerance)
+        limit = reference.median_seconds * max_multiple
+        normalized = units is not None and reference_units is not None
+        measured = (
+            f"{1000 * measurement.median_seconds:.2f} ms/{unit_name}"
+            if normalized
+            else f"{measurement.median_seconds:.3f}s"
+        )
+        reference_measured = (
+            f"{1000 * reference.median_seconds:.2f} ms/{unit_name}"
+            if normalized
+            else f"{reference.median_seconds:.3f}s"
+        )
+        limit_measured = (
+            f"{1000 * limit:.2f} ms/{unit_name}"
+            if normalized
+            else f"{limit:.3f}s"
+        )
+        assert measurement.median_seconds <= limit, (
+            f"{name} regressed relative to {reference_name} on {self.system_id}: "
+            f"median {measured} > {limit_measured} "
+            f"({baseline_multiple:.2f}x baseline + {tolerance:.0%}; "
+            f"reference median {reference_measured}); "
+            f"samples={[round(sample, 3) for sample in measurement.samples]}; "
+            f"reference_samples="
+            f"{[round(sample, 3) for sample in reference.samples]}"
+        )
+
+        reporter = self.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            action = "recorded" if self.update else "passed"
+            reporter.write_line(
+                f"timing {action}: {name} on {self.system_id}: "
+                f"median {measured} = {measured_multiple:.2f}x "
+                f"{reference_name} ({reference_measured}), "
+                f"baseline {baseline_multiple:.2f}x + {tolerance:.0%}, "
+                f"limit {max_multiple:.2f}x"
             )
         return result, measurement
 

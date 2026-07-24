@@ -9,7 +9,8 @@
           "regression_tolerance": 0.02
         },
         "skd_rollout_generation": {
-          "median_seconds": 0.310132,
+          "reference": "student_rollout_generation",
+          "median_multiple": 2.7,
           "regression_tolerance": 0.02
         }
       }

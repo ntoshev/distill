@@ -234,3 +234,9 @@ replace a baseline for another machine:
 DISTIL_BENCHMARK_SYSTEM_ID=my-system UPDATE_TIMING_BASELINES=1 \
   uv run python -m pytest -m benchmark
 ```
+
+The SKD rollout benchmark is relative rather than absolute: in the same run,
+its decode-only milliseconds per generated token are compared with the 2.70x
+straight-student baseline in `tests/timing_baselines.json`, with 2% regression
+tolerance. Prompt prefill and the first generated token are excluded from both
+measurements.

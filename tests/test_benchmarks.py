@@ -1,11 +1,13 @@
 """System-specific timing regression tests for real MLX model operations."""
 
 import math
+from time import perf_counter
 
 import mlx.core as mx
 import pytest
 
 from distil.rollout import load_rollout
+from distil.sample import sample_completion
 from distil.scoring import score_text
 from distil.templating import build_rollout
 
@@ -52,15 +54,57 @@ def test_score_prompt_completion(timing_benchmark, model, tokenizer):
 
 
 def test_skd_rollout_generation(timing_benchmark, model, tokenizer):
-    """Generate with both student proposals and privileged-teacher replacements."""
+    """Bound SKD decode cost relative to straight student token generation."""
+    messages = [{"role": "user", "content": "What is Project Lumen's launch code?"}]
+
+    def student_operation():
+        decode_started = None
+
+        def mark_decode_start():
+            nonlocal decode_started
+            decode_started = perf_counter()
+
+        sample = sample_completion(
+            model,
+            tokenizer,
+            messages,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+            _on_decode_start=mark_decode_start,
+        )
+        mx.synchronize()
+        assert decode_started is not None
+        return sample, perf_counter() - decode_started
 
     def operation():
-        sample, _ = sample_skd_case(model, tokenizer)
+        decode_started = None
+
+        def mark_decode_start():
+            nonlocal decode_started
+            decode_started = perf_counter()
+
+        sample, _ = sample_skd_case(
+            model, tokenizer, on_decode_start=mark_decode_start
+        )
         # Keep the timer robust if generation internals become lazier.
         mx.synchronize()
-        return sample
+        assert decode_started is not None
+        return sample, perf_counter() - decode_started
 
-    sample, _ = timing_benchmark("skd_rollout_generation", operation)
+    timed_sample, _ = timing_benchmark.relative(
+        "skd_rollout_generation",
+        operation,
+        reference_name="student_rollout_generation",
+        reference_operation=student_operation,
+        units=lambda timed: timed[0].num_tokens - 1,
+        reference_units=lambda timed: timed[0].num_tokens - 1,
+        unit_name="generated token",
+        duration=lambda timed: timed[1],
+        reference_duration=lambda timed: timed[1],
+    )
+    sample, _ = timed_sample
 
     assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
     assert sample.accepted_tokens > 0
