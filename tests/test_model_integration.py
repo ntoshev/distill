@@ -296,6 +296,7 @@ def test_adaptive_speculative_matches_single_token_reference(
         max_block_size=1,
         temperature=temperature,
         seed=17,
+        batch_shared_model=False,
     )
     adaptive, _ = sample_skd_case(
         model,
@@ -303,6 +304,7 @@ def test_adaptive_speculative_matches_single_token_reference(
         max_block_size=8,
         temperature=temperature,
         seed=17,
+        batch_shared_model=False,
     )
 
     assert adaptive.completion_text == reference.completion_text
@@ -310,6 +312,56 @@ def test_adaptive_speculative_matches_single_token_reference(
     assert adaptive.teacher_sampled == reference.teacher_sampled
     assert adaptive.accepted_tokens == reference.accepted_tokens
     assert adaptive.replaced_tokens == reference.replaced_tokens
+
+
+@pytest.mark.parametrize("temperature", [0.0, 0.7])
+def test_batched_shared_model_matches_generic(model, tokenizer, temperature):
+    generic, _ = sample_skd_case(
+        model,
+        tokenizer,
+        max_block_size=1,
+        temperature=temperature,
+        seed=17,
+        batch_shared_model=False,
+    )
+    batched, _ = sample_skd_case(
+        model,
+        tokenizer,
+        temperature=temperature,
+        seed=17,
+    )
+
+    assert batched.completion_text == generic.completion_text
+    assert batched.finish_reason == generic.finish_reason
+    assert batched.teacher_sampled == generic.teacher_sampled
+    assert batched.accepted_tokens == generic.accepted_tokens
+    assert batched.replaced_tokens == generic.replaced_tokens
+
+
+def test_batched_shared_model_routes_student_lora_only(model, tokenizer):
+    from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
+
+    adapter = FIXTURE_DIR.parent.parent / "adapters" / "lumen-test"
+    try:
+        load_adapters(model, str(adapter))
+        generic, _ = sample_skd_case(
+            model,
+            tokenizer,
+            max_block_size=1,
+            batch_shared_model=False,
+            teacher_without_adapter=True,
+        )
+        batched, _ = sample_skd_case(
+            model,
+            tokenizer,
+            teacher_without_adapter=True,
+        )
+
+        assert batched.completion_text == generic.completion_text
+        assert batched.teacher_sampled == generic.teacher_sampled
+    finally:
+        remove_lora_layers(model)
+        model.eval()
 
 
 def test_adaptive_block_verification_matches_single_token_reference(model, tokenizer):
@@ -327,8 +379,12 @@ def test_adaptive_block_verification_matches_single_token_reference(model, token
         seed=0,
         enable_thinking=False,
     )
-    reference = sample_speculative_completion(**kwargs, max_block_size=1)
-    adaptive = sample_speculative_completion(**kwargs, max_block_size=8)
+    reference = sample_speculative_completion(
+        **kwargs, max_block_size=1, batch_shared_model=False
+    )
+    adaptive = sample_speculative_completion(
+        **kwargs, max_block_size=8, batch_shared_model=False
+    )
 
     assert adaptive.completion_text == reference.completion_text
     assert adaptive.teacher_sampled == reference.teacher_sampled == [False] * 16

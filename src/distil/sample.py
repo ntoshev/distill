@@ -13,7 +13,15 @@ from typing import Callable
 import mlx.core as mx
 from mlx.utils import tree_map
 
-from distil.adapters import lora_disabled
+from distil.adapters import (
+    lora_batch_enabled,
+    lora_disabled,
+    supports_lora_batch_routing,
+)
+
+
+class _SharedModelBatchUnsupported(Exception):
+    pass
 
 
 @dataclass
@@ -167,6 +175,7 @@ def sample_speculative_completion(
     enable_thinking: bool | None = None,
     teacher_without_adapter: bool = False,
     max_block_size: int = 8,
+    batch_shared_model: bool = True,
     _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Generate with Speculative KD's token-level interleaved policy.
@@ -174,7 +183,8 @@ def sample_speculative_completion(
     The student proposes each token. The proposal is accepted when it belongs
     to the teacher distribution's top ``top_k`` tokens at the corresponding
     privileged-context prefix; otherwise a token is sampled from the teacher.
-    Accepted runs are verified in adaptive blocks up to ``max_block_size``.
+    A shared model decodes both contexts as one batch; separate models use
+    adaptive verification blocks up to ``max_block_size``.
     """
     prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
     _, teacher_prompt_ids = _render_prompt(
@@ -194,6 +204,7 @@ def sample_speculative_completion(
         seed=seed,
         teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
+        batch_shared_model=batch_shared_model,
         on_decode_start=_on_decode_start,
     )
 
@@ -212,6 +223,7 @@ def sample_speculative_text(
     seed: int | None = None,
     teacher_without_adapter: bool = False,
     max_block_size: int = 8,
+    batch_shared_model: bool = True,
     _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Speculative sampling from raw student and teacher prefixes."""
@@ -229,11 +241,166 @@ def sample_speculative_text(
         seed=seed,
         teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
+        batch_shared_model=batch_shared_model,
         on_decode_start=_on_decode_start,
     )
 
 
 def _sample_speculative_text(
+    model,
+    tokenizer,
+    prompt_text: str,
+    prompt_ids: list[int],
+    teacher_model,
+    teacher_tokenizer,
+    teacher_prompt_ids: list[int],
+    *,
+    top_k: int,
+    max_tokens: int,
+    temperature: float,
+    seed: int | None,
+    teacher_without_adapter: bool,
+    max_block_size: int,
+    batch_shared_model: bool,
+    on_decode_start: Callable[[], None] | None = None,
+) -> Sample:
+    shared = (
+        teacher_model is model
+        and teacher_tokenizer is tokenizer
+        and (not teacher_without_adapter or supports_lora_batch_routing(model))
+    )
+    if batch_shared_model and shared:
+        try:
+            return _sample_speculative_shared_model(
+                model,
+                tokenizer,
+                prompt_text,
+                prompt_ids,
+                teacher_prompt_ids,
+                top_k=top_k,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=seed,
+                teacher_without_adapter=teacher_without_adapter,
+                on_decode_start=on_decode_start,
+            )
+        except _SharedModelBatchUnsupported:
+            pass
+
+    return _sample_speculative_generic(
+        model,
+        tokenizer,
+        prompt_text,
+        prompt_ids,
+        teacher_model,
+        teacher_tokenizer,
+        teacher_prompt_ids,
+        top_k=top_k,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
+        teacher_without_adapter=teacher_without_adapter,
+        max_block_size=max_block_size,
+        on_decode_start=on_decode_start,
+    )
+
+
+def _sample_speculative_shared_model(
+    model,
+    tokenizer,
+    prompt_text: str,
+    prompt_ids: list[int],
+    teacher_prompt_ids: list[int],
+    *,
+    top_k: int,
+    max_tokens: int,
+    temperature: float,
+    seed: int | None,
+    teacher_without_adapter: bool,
+    on_decode_start: Callable[[], None] | None,
+) -> Sample:
+    from mlx_lm.models.cache import make_prompt_cache
+    from mlx_lm.sample_utils import make_sampler
+
+    if max_tokens <= 0:
+        raise ValueError("--max-tokens must be positive")
+    if top_k <= 0:
+        raise ValueError("--speculative-top-k must be positive")
+    if seed is not None:
+        mx.random.seed(seed)
+
+    student_cache = make_prompt_cache(model)
+    teacher_cache = make_prompt_cache(model)
+    student_sampler = make_sampler(temp=temperature)
+    teacher_sampler = make_sampler(temp=temperature)
+    eos_ids = _eos_token_ids(tokenizer)
+    model.eval()
+
+    def prefill(ids, cache, adapter=True):
+        with lora_batch_enabled(model, [adapter]):
+            logits = model(mx.array(ids)[None], cache=cache)[0, -1].astype(mx.float32)
+            mx.eval(logits, [entry.state for entry in cache])
+        return logits
+
+    student_logits = prefill(prompt_ids, student_cache)
+    teacher_logits = prefill(
+        teacher_prompt_ids, teacher_cache, adapter=not teacher_without_adapter
+    )
+    if not all(hasattr(entry, "merge") for entry in student_cache):
+        raise _SharedModelBatchUnsupported
+    cache = [
+        type(entry).merge([entry, other])
+        for entry, other in zip(student_cache, teacher_cache)
+    ]
+
+    gen_ids: list[int] = []
+    teacher_sampled: list[bool] = []
+    decode_started = False
+    finish_reason = "length"
+
+    while len(gen_ids) < max_tokens:
+        proposal = int(student_sampler(student_logits).item())
+        rng_state = list(mx.random.state) if temperature > 0 else None
+        accepted = _proposal_is_accepted(proposal, teacher_logits, top_k=top_k)
+        token = proposal
+        if not accepted:
+            if rng_state is not None:
+                mx.random.state = rng_state
+            token = int(teacher_sampler(teacher_logits).item())
+
+        gen_ids.append(token)
+        teacher_sampled.append(not accepted)
+        if not decode_started and on_decode_start is not None:
+            decode_started = True
+            on_decode_start()
+        if token in eos_ids:
+            finish_reason = "stop"
+            break
+        if len(gen_ids) == max_tokens:
+            break
+
+        with lora_batch_enabled(model, [True, not teacher_without_adapter]):
+            logits = model(mx.array([[token], [token]]), cache=cache)[:, -1].astype(
+                mx.float32
+            )
+            mx.eval(logits, [entry.state for entry in cache])
+        student_logits, teacher_logits = logits[0], logits[1]
+
+    replaced = sum(teacher_sampled)
+    return Sample(
+        prompt_text=prompt_text,
+        completion_text=tokenizer.decode(gen_ids),
+        content=tokenizer._tokenizer.decode(gen_ids, skip_special_tokens=True),
+        finish_reason=finish_reason,
+        num_tokens=len(gen_ids),
+        speculative_top_k=top_k,
+        accepted_tokens=len(gen_ids) - replaced,
+        replaced_tokens=replaced,
+        teacher_sampled=teacher_sampled,
+    )
+
+
+def _sample_speculative_generic(
     model,
     tokenizer,
     prompt_text: str,

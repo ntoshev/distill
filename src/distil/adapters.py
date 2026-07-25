@@ -18,6 +18,12 @@ def lora_modules(model) -> list:
     return [module for _, module in model.named_modules() if isinstance(module, _LORA_TYPES)]
 
 
+def supports_lora_batch_routing(model) -> bool:
+    return not any(
+        isinstance(module, LoRASwitchLinear) for module in lora_modules(model)
+    )
+
+
 def add_lora(model, rank: int, num_layers: int = 16) -> dict:
     """Freeze ``model`` and add trainable LoRA layers.
 
@@ -64,6 +70,25 @@ def lora_disabled(model):
     try:
         for module in modules:
             module.scale = 0.0
+        yield
+    finally:
+        for module, scale in zip(modules, scales):
+            module.scale = scale
+
+
+@contextmanager
+def lora_batch_enabled(model, enabled: list[bool]):
+    """Select the loaded LoRA per batch row without duplicating base weights."""
+    modules = lora_modules(model)
+    if not modules or all(enabled):
+        yield
+        return
+    scales = [module.scale for module in modules]
+    try:
+        for module, scale in zip(modules, scales):
+            module.scale = mx.array(
+                [scale if active else 0.0 for active in enabled]
+            ).reshape(len(enabled), 1, 1)
         yield
     finally:
         for module, scale in zip(modules, scales):

@@ -12,6 +12,7 @@ SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 TIMING_BASELINES_PATH = Path(__file__).parent / "timing_baselines.json"
 MODEL = "mlx-community/Qwen3.5-0.8B-4bit"
+MODEL_4B = "mlx-community/Qwen3.5-4B-6bit"
 T = TypeVar("T")
 
 
@@ -22,6 +23,8 @@ def sample_skd_case(
     max_block_size=8,
     temperature=0.0,
     seed=0,
+    batch_shared_model=True,
+    teacher_without_adapter=False,
     on_decode_start=None,
 ):
     """Run the shared privileged-teacher SKD scenario used by tests."""
@@ -50,7 +53,9 @@ def sample_skd_case(
         temperature=temperature,
         seed=seed,
         enable_thinking=False,
+        teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
+        batch_shared_model=batch_shared_model,
         _on_decode_start=on_decode_start,
     )
     return sample, teacher_messages
@@ -320,6 +325,13 @@ def model(model_and_tokenizer):
 @pytest.fixture(scope="session")
 def tokenizer(model_and_tokenizer):
     return model_and_tokenizer[1]
+
+
+@pytest.fixture(scope="session")
+def model_4b_and_tokenizer():
+    from mlx_lm import load
+
+    return load(MODEL_4B)
 
 
 @pytest.fixture
