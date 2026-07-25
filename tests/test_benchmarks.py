@@ -69,7 +69,7 @@ def _timed_decode(run):
     return operation
 
 
-def _benchmark_skd(timing_benchmark, name, model, tokenizer):
+def _benchmark_skd(timing_benchmark, name, model, tokenizer, **skd_kwargs):
     messages = [{"role": "user", "content": "What is Project Lumen's launch code?"}]
     student_operation = _timed_decode(
         lambda mark: sample_completion(
@@ -85,7 +85,7 @@ def _benchmark_skd(timing_benchmark, name, model, tokenizer):
     )
     operation = _timed_decode(
         lambda mark: sample_skd_case(
-            model, tokenizer, on_decode_start=mark
+            model, tokenizer, on_decode_start=mark, **skd_kwargs
         )[0]
     )
 
@@ -135,3 +135,22 @@ def test_skd_rollout_generation_4b(timing_benchmark, model_4b_and_tokenizer):
     assert sample.replaced_tokens > 0
     assert sample.completion_text == generic.completion_text
     assert sample.teacher_sampled == generic.teacher_sampled
+
+
+def test_skd_rollout_generation_generic_4b(
+    timing_benchmark, model_4b_and_tokenizer
+):
+    """Bound generic SKD decode cost relative to straight student generation."""
+    model, tokenizer = model_4b_and_tokenizer
+    sample = _benchmark_skd(
+        timing_benchmark,
+        "skd_rollout_generation_generic_4b",
+        model,
+        tokenizer,
+        max_block_size=1,
+        batch_shared_model=False,
+    )
+
+    assert sample.accepted_tokens > 0
+    assert sample.replaced_tokens > 0
+    assert sample.speculative_top_k == 3

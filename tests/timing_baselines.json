@@ -17,6 +17,11 @@
           "reference": "student_rollout_generation",
           "median_multiple": 1.47,
           "regression_tolerance": 0.02
+        },
+        "skd_rollout_generation_generic_4b": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 2.244312,
+          "regression_tolerance": 0.02
         }
       }
     }

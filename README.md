@@ -240,4 +240,6 @@ its decode-only milliseconds per generated token are compared with the 2.70x
 straight-student baseline in `tests/timing_baselines.json`, with 2% regression
 tolerance. Prompt prefill and the first generated token are excluded from both
 measurements. The Qwen3.5 4B benchmark has a 1.47x baseline with 2% tolerance,
-keeping its effective limit below 1.5x.
+keeping its effective limit below 1.5x. A separate Qwen3.5 4B benchmark covers
+the generic, unbatched single-token SKD path and anchors it to the same
+straight-student decode; its baseline is 2.24x with 2% tolerance.
