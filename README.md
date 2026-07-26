@@ -242,4 +242,55 @@ tolerance. Prompt prefill and the first generated token are excluded from both
 measurements. The Qwen3.5 4B benchmark has a 1.47x baseline with 2% tolerance,
 keeping its effective limit below 1.5x. A separate Qwen3.5 4B benchmark covers
 the generic, unbatched single-token SKD path and anchors it to the same
-straight-student decode; its baseline is 2.24x with 2% tolerance.
+straight-student decode; its baseline is 2.24x with 2% tolerance. Training is
+anchored to that decode measurement too: one benchmark isolates the student
+forward-KL LoRA update with teacher rows and alignment precomputed, while a
+second adds teacher scoring for a fixed rollout. Rollout generation, prompt
+prefill for generation, chat rendering, tokenization, and token alignment are
+outside both training timers. Both report milliseconds per aligned token as a
+multiple of straight-student decode milliseconds per generated token.
+
+The Qwen3.5 6-bit comparison below was measured on the committed M3 Pro system
+with two warmups and the median of seven rounds. Student and teacher use the
+same model in both SKD paths. Rollouts use 16-token limits and SKD top-3;
+training uses rank-4 LoRA and a fixed prepared rollout.
+
+| Model (6-bit) | Student rollout (ms/token) | SKD generic | SKD optimized | LoRA update | Training step |
+|---|---:|---:|---:|---:|---:|
+| Qwen3.5-0.8B | 6.93 | 2.71x | 1.74x | 4.10x | 4.57x |
+| Qwen3.5-2B | 15.15 | 2.33x | 1.38x | 2.25x | 2.66x |
+| Qwen3.5-4B | 30.96 | 2.19x | 1.30x | 1.82x | 2.32x |
+| Qwen3.5-9B | 55.41 | 2.34x | 1.27x | 1.34x | 1.82x |
+
+Legend:
+
+- **Student rollout** is straight base-model generation, reported as
+  decode-only milliseconds per generated token. Prompt prefill and the first
+  generated token are excluded.
+- **SKD generic** uses the same model and tokenizer for student and privileged
+  teacher, with unbatched one-token proposal/verification
+  (`max_block_size=1`, `batch_shared_model=False`). The timer includes student
+  proposal plus teacher verification and repair, but excludes prompt prefill
+  and the first generated token.
+- **SKD optimized** measures the same dual-context rollout with shared-model
+  batching and adaptive proposal blocks up to eight tokens
+  (`max_block_size=8`, `batch_shared_model=True`). Its timer has the same
+  decode-only boundaries as the generic path.
+- **LoRA update** uses a fixed completion whose chat rendering, tokenization,
+  alignment, and teacher rows are prepared before timing. The timer includes
+  the student sequence forward pass, forward KL, backward pass, rank-4 LoRA
+  AdamW update, and materialization of the updated parameters and optimizer
+  state. It is normalized per aligned completion token.
+- **Training step** uses the same prepared completion and adds the frozen
+  teacher sequence forward pass and completion-row selection to the LoRA
+  update. Rollout generation, generation prefill, chat rendering, tokenization,
+  and alignment remain outside the timer. It is normalized per aligned
+  completion token.
+- Every `x` value divides that path's per-token median by the **Student
+  rollout** milliseconds per token in the same model row.
+
+Regenerate the table with:
+
+```sh
+uv run python scripts/benchmark_qwen35_matrix.py
+```

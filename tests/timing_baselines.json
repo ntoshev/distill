@@ -22,6 +22,16 @@
           "reference": "student_rollout_generation",
           "median_multiple": 2.244312,
           "regression_tolerance": 0.02
+        },
+        "lora_update": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 2.369977,
+          "regression_tolerance": 0.05
+        },
+        "fixed_rollout_training_step": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 2.715467,
+          "regression_tolerance": 0.05
         }
       }
     }

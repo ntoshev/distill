@@ -8,8 +8,9 @@ import pytest
 
 from distil.rollout import load_rollout
 from distil.sample import sample_completion
-from distil.scoring import score_text
-from distil.templating import build_rollout
+from distil.scoring import align_scored_tokens, score_text
+from distil.templating import apply_teacher_context, build_raw, build_rollout
+from distil.training import TrainingSession, _teacher_rows
 
 from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 
@@ -69,9 +70,9 @@ def _timed_decode(run):
     return operation
 
 
-def _benchmark_skd(timing_benchmark, name, model, tokenizer, **skd_kwargs):
+def _student_decode_operation(model, tokenizer):
     messages = [{"role": "user", "content": "What is Project Lumen's launch code?"}]
-    student_operation = _timed_decode(
+    return _timed_decode(
         lambda mark: sample_completion(
             model,
             tokenizer,
@@ -83,6 +84,10 @@ def _benchmark_skd(timing_benchmark, name, model, tokenizer, **skd_kwargs):
             _on_decode_start=mark,
         )
     )
+
+
+def _benchmark_skd(timing_benchmark, name, model, tokenizer, **skd_kwargs):
+    student_operation = _student_decode_operation(model, tokenizer)
     operation = _timed_decode(
         lambda mark: sample_skd_case(
             model, tokenizer, on_decode_start=mark, **skd_kwargs
@@ -104,6 +109,177 @@ def _benchmark_skd(timing_benchmark, name, model, tokenizer, **skd_kwargs):
 
     assert sample.accepted_tokens + sample.replaced_tokens == sample.num_tokens
     return sample
+
+
+def test_lora_update_relative_to_decode(timing_benchmark, model, tokenizer):
+    """Bound forward-KL LoRA optimization cost per aligned token."""
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    prompt = "What is Project Lumen's launch code?"
+    completion = "The launch code is VIOLET-731."
+    teacher_system = (
+        "Private reference: Project Lumen's launch code is VIOLET-731. "
+        "Reply with it."
+    )
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        session = TrainingSession(
+            model,
+            tokenizer,
+            teacher_system,
+            model_name=MODEL,
+            learning_rate=2e-6,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+        )
+        student_prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        teacher_messages = apply_teacher_context(messages, system=teacher_system)
+        teacher_prompt = tokenizer.apply_chat_template(
+            teacher_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        aligned = align_scored_tokens(
+            tokenizer,
+            build_raw(student_prompt, completion),
+            tokenizer,
+            build_raw(teacher_prompt, completion),
+        )
+        assert aligned.pairs
+        teacher_rows = _teacher_rows(
+            model,
+            aligned.teacher_ids,
+            [teacher_pos - 1 for _, teacher_pos in aligned.pairs],
+            disable_adapter=True,
+        )
+        student_ids = mx.array(aligned.student_ids)
+        student_rows = mx.array(
+            [student_pos - 1 for student_pos, _ in aligned.pairs]
+        )
+
+        def operation():
+            model.train()
+            loss, grads = session.loss_and_grad(
+                model, student_ids, student_rows, teacher_rows
+            )
+            session.optimizer.update(model, grads)
+            mx.eval(loss, model.trainable_parameters(), session.optimizer.state)
+            return loss.item(), len(aligned.pairs)
+
+        result, _ = timing_benchmark.relative(
+            "lora_update",
+            operation,
+            reference_name="student_rollout_generation",
+            reference_operation=_student_decode_operation(model, tokenizer),
+            units=lambda measured: measured[1],
+            reference_units=lambda timed: timed[0].num_tokens - 1,
+            unit_name="token",
+            reference_duration=lambda timed: timed[1],
+        )
+
+        assert math.isfinite(result[0])
+        assert result[1] == len(aligned.pairs)
+    finally:
+        remove_lora_layers(model)
+        model.eval()
+
+
+def test_fixed_rollout_training_step_relative_to_decode(
+    timing_benchmark, model, tokenizer
+):
+    """Bound teacher scoring plus a LoRA update for a prepared rollout."""
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    prompt = "What is Project Lumen's launch code?"
+    completion = "The launch code is VIOLET-731."
+    teacher_system = (
+        "Private reference: Project Lumen's launch code is VIOLET-731. "
+        "Reply with it."
+    )
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        session = TrainingSession(
+            model,
+            tokenizer,
+            teacher_system,
+            model_name=MODEL,
+            learning_rate=2e-6,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+        )
+        student_prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        teacher_messages = apply_teacher_context(messages, system=teacher_system)
+        teacher_prompt = tokenizer.apply_chat_template(
+            teacher_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        aligned = align_scored_tokens(
+            tokenizer,
+            build_raw(student_prompt, completion),
+            tokenizer,
+            build_raw(teacher_prompt, completion),
+        )
+        assert aligned.pairs
+        teacher_rows_indices = [
+            teacher_pos - 1 for _, teacher_pos in aligned.pairs
+        ]
+        student_ids = mx.array(aligned.student_ids)
+        student_rows = mx.array(
+            [student_pos - 1 for student_pos, _ in aligned.pairs]
+        )
+
+        def operation():
+            teacher_rows = _teacher_rows(
+                model,
+                aligned.teacher_ids,
+                teacher_rows_indices,
+                disable_adapter=True,
+            )
+            model.train()
+            loss, grads = session.loss_and_grad(
+                model, student_ids, student_rows, teacher_rows
+            )
+            session.optimizer.update(model, grads)
+            mx.eval(loss, model.trainable_parameters(), session.optimizer.state)
+            return loss.item(), len(aligned.pairs)
+
+        result, _ = timing_benchmark.relative(
+            "fixed_rollout_training_step",
+            operation,
+            reference_name="student_rollout_generation",
+            reference_operation=_student_decode_operation(model, tokenizer),
+            units=lambda measured: measured[1],
+            reference_units=lambda timed: timed[0].num_tokens - 1,
+            unit_name="token",
+            reference_duration=lambda timed: timed[1],
+        )
+
+        assert math.isfinite(result[0])
+        assert result[1] == len(aligned.pairs)
+    finally:
+        remove_lora_layers(model)
+        model.eval()
 
 
 def test_skd_rollout_generation(timing_benchmark, model, tokenizer):
