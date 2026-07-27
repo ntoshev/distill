@@ -243,24 +243,29 @@ measurements. The Qwen3.5 4B benchmark has a 1.47x baseline with 2% tolerance,
 keeping its effective limit below 1.5x. A separate Qwen3.5 4B benchmark covers
 the generic, unbatched single-token SKD path and anchors it to the same
 straight-student decode; its baseline is 2.24x with 2% tolerance. Training is
-anchored to that decode measurement too: one benchmark isolates the student
-forward-KL LoRA update with teacher rows and alignment precomputed, while a
-second adds teacher scoring for a fixed rollout. Rollout generation, prompt
-prefill for generation, chat rendering, tokenization, and token alignment are
-outside both training timers. Both report milliseconds per aligned token as a
-multiple of straight-student decode milliseconds per generated token.
+instead anchored to a compute-dense frozen-teacher forward pass over 128 tokens,
+with 64 prediction rows selected. One benchmark isolates the student
+forward-KL LoRA update with teacher rows precomputed, while a second adds the
+teacher scoring pass. Rollout generation, generation prefill, chat rendering,
+tokenization, and alignment are outside both training timers. Training costs
+are reported per target token as multiples of teacher scoring per target token.
 
 The Qwen3.5 6-bit comparison below was measured on the committed M3 Pro system
 with two warmups and the median of seven rounds. Student and teacher use the
 same model in both SKD paths. Rollouts use 16-token limits and SKD top-3;
-training uses rank-4 LoRA and a fixed prepared rollout.
+training uses rank-4 LoRA and four independent 128-token chunks with 64 target
+tokens each. Chunk gradients are averaged and applied with one AdamW update,
+so the logical step covers 512 input and 256 target tokens while peak activation
+memory is bounded by one chunk. The runner limits the MLX free cache to 1 GB,
+uses a 28 GB memory guideline and 20 GB measured-peak guard, clears caches
+between phases, and pauses for two seconds between phases and models.
 
-| Model (6-bit) | Student rollout (ms/token) | SKD generic | SKD optimized | LoRA update | Training step |
-|---|---:|---:|---:|---:|---:|
-| Qwen3.5-0.8B | 6.93 | 2.71x | 1.74x | 4.10x | 4.57x |
-| Qwen3.5-2B | 15.15 | 2.33x | 1.38x | 2.25x | 2.66x |
-| Qwen3.5-4B | 30.96 | 2.19x | 1.30x | 1.82x | 2.32x |
-| Qwen3.5-9B | 55.41 | 2.34x | 1.27x | 1.34x | 1.82x |
+| Model (6-bit) | Student rollout (ms/token) | SKD generic | SKD optimized | Teacher scoring (ms/token) | LoRA update | Training step | Peak MLX memory (GB) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Qwen3.5-0.8B | 6.76 | 2.67x | 1.69x | 1.25 | 14.64x | 15.64x | 4.55 |
+| Qwen3.5-2B | 14.08 | 2.40x | 1.47x | 2.53 | 8.22x | 9.16x | 5.56 |
+| Qwen3.5-4B | 29.64 | 2.24x | 1.35x | 5.09 | 6.71x | 7.71x | 10.84 |
+| Qwen3.5-9B | 52.62 | 2.25x | 1.24x | 8.97 | 4.59x | 5.96x | 14.59 |
 
 Legend:
 
@@ -276,18 +281,27 @@ Legend:
   batching and adaptive proposal blocks up to eight tokens
   (`max_block_size=8`, `batch_shared_model=True`). Its timer has the same
   decode-only boundaries as the generic path.
-- **LoRA update** uses a fixed completion whose chat rendering, tokenization,
-  alignment, and teacher rows are prepared before timing. The timer includes
-  the student sequence forward pass, forward KL, backward pass, rank-4 LoRA
-  AdamW update, and materialization of the updated parameters and optimizer
-  state. It is normalized per aligned completion token.
-- **Training step** uses the same prepared completion and adds the frozen
-  teacher sequence forward pass and completion-row selection to the LoRA
-  update. Rollout generation, generation prefill, chat rendering, tokenization,
-  and alignment remain outside the timer. It is normalized per aligned
-  completion token.
-- Every `x` value divides that path's per-token median by the **Student
-  rollout** milliseconds per token in the same model row.
+- **Teacher scoring** runs a frozen, adapter-disabled sequence forward on each
+  independent 128-token chunk, selecting the logits that predict its final 64
+  tokens. Each vector is long enough to use dense full-sequence matrix kernels
+  instead of the one-token decode path. Only one chunk's logits remain live at
+  a time. The result is reported in milliseconds per selected target token.
+- **LoRA update** computes teacher rows one chunk at a time outside its reported
+  timer. Inside the timer, each chunk performs the student sequence forward,
+  forward KL over 64 target rows, and backward pass. LoRA gradients are
+  accumulated across all four chunks, averaged, and applied with one rank-4
+  AdamW update. Its multiple is relative to **Teacher scoring**, not decode.
+- **Training step** includes one **Teacher scoring** pass followed by the full
+  **LoRA update**. Rollout generation, generation prefill, chat rendering,
+  tokenization, and alignment remain outside the timer. Its multiple is also
+  relative to **Teacher scoring**.
+- **Peak MLX memory** is the largest MLX allocator usage observed during that
+  model row, including its model and measured operations. The runner checks the
+  configured guard after every decode phase, scoring chunk, backward chunk, and
+  optimizer update, aborting before further allocation-heavy work if exceeded.
+- **SKD generic** and **SKD optimized** multiples use **Student rollout** as
+  their denominator. **LoRA update** and **Training step** multiples use
+  **Teacher scoring** as their denominator.
 
 Regenerate the table with:
 
