@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 
-PROMPT_VERSION = "continual-v3"
+PROMPT_VERSION = "continual-v4"
 _LIST_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
 _META_REFERENCE = re.compile(
     r"\b(source|source fact|given fact|passage|text|document|prompt|above)\b",
@@ -30,7 +30,9 @@ class GeneratedFact:
     error: str | None = None
 
 
-def resolve_context(value: str, stdin: Callable[[], str] | None = None) -> tuple[str, dict]:
+def resolve_context(
+    value: str, stdin: Callable[[], str] | None = None
+) -> tuple[str, dict]:
     """Resolve inline text, ``@file``, or stdin with strict UTF-8 decoding."""
     source_path = None
     if value == "-":
@@ -74,45 +76,57 @@ def parse_lines(text: str) -> list[str]:
 
 
 def fact_prompt(document: str) -> str:
-    return f"""Extract a compact, exhaustive inventory of the facts stated in the reference document.
+    return f"""Create a compact study inventory of the most useful facts stated in the reference document.
 
 Reference document:
 
 {document}
 
-Return only the inventory, with one complete standalone sentence per line and no numbering.
+Before drafting, silently scan the entire document, including its middle and end. Identify its main subject and major sections, then select a small set of high-information facts that represents the whole document rather than merely its title, lead, infobox, first section, or largest table.
 
-Group details that describe the same event or relationship:
-- Keep lists intact: all founders in one fact, all research fields in one fact, and all investors in one fact.
-- Keep each funding event's amount, round, year, investors, and qualifiers in one fact.
-- Keep a name's origin and meaning together.
-- When an example, image, or analogy represents a named concept, keep the example, mechanism, and named concept together.
-- Keep a person's paper, employer, and year together when stated together.
-- Keep a method's date, mechanism, motivation, and computational requirement together.
-- Prefer retaining a source sentence's tightly linked chain of clauses in one fact.
-- Split only claims that could vary independently and answer genuinely different questions.
+Return only 12 to 15 facts, with one complete standalone sentence per line and no numbering. If the document truly contains fewer than 12 useful facts, return all of them. Never exceed 15 lines and never begin a line unless enough output space remains to finish it.
 
-Preserve every stated relationship, exact name, date, amount, qualifier, reason, and interpretation. State only information directly supported by the document. Do not infer, explain, summarize, or repeat facts.
+Prioritize facts that are useful for later question answering:
+- identities, classifications, and major relationships;
+- named people, organizations, places, works, products, and events;
+- important dates, durations, quantities, rankings, outcomes, and records;
+- major actions, changes, causes, purposes, mechanisms, and attributed positions;
+- details from distinct sections and from the beginning, middle, and end of the document.
 
-HARD STANDALONE-SUBJECT FORMAT:
-- Every line must contain the explicit name of its subject copied from the document, even when adjacent lines discuss the same subject.
-- No line may contain any of these context-dependent expressions, case-insensitively: \"the company\", \"the company's\", \"this\", \"it\", \"they\", \"the paper\", \"this amount\", \"the process\".
-- Rewrite a draft such as \"The company's name comes from X\" as \"Organization Name's name comes from X\".
-- Rewrite a draft such as \"This method reduces cost\" as \"Organization Name's method reduces cost\".
-- A line that violates either rule is invalid and must not be emitted.
+Skip low-value metadata such as catalog identifiers, URLs, citation markers, image captions, navigation text, and repetitive table rows. Do not exhaustively list rosters, scores, venues, or timeline entries when one representative or summary fact captures the important information.
 
-Before responding, silently perform two checks: verify full source coverage, then scan each output line for the forbidden expressions and rewrite every violation with its explicit named subject. Cover the document from beginning to end, then stop."""
+Make each line question-worthy:
+- Express one main relationship that can be tested with one concise answer.
+- Keep a natural list intact, such as a complete team, founder list, investor list, or set of co-winners.
+- Keep directly linked values together, such as a date with its event, an amount with its unit and qualifier, or equivalent measurements and local times.
+- Split unrelated claims that would require different questions.
+
+HARD SUBJECT-ANCHOR FORMAT:
+- First identify the document's MAIN SUBJECT from its title or lead.
+- For any fact about the MAIN SUBJECT, its parts, participants, schedule, actions, results, or attributes, begin the line with the MAIN SUBJECT's exact name or possessive form. Use another proper name first only when the fact primarily tests that other entity's own attribute.
+- Every line must begin with the exact proper name of the person, organization, place, work, product, or event that the line is about. A leading \"The\" is allowed only when the proper name immediately follows it. Repeat the name on every applicable line even when it sounds redundant.
+- A generic role is not a subject anchor. Never write a line whose subject is only \"the mission\", \"the tournament\", \"the event\", \"the company\", \"the organization\", \"the team\", \"the crew\", \"the spacecraft\", \"the study\", \"the project\", \"the offering\", \"the IPO\", \"it\", \"they\", \"this\", or a similar role phrase.
+- No line may begin with \"A\", \"An\", a pronoun, a number word, or an unnamed role. A numeral is allowed when it is the first part of an exact proper name. Do not write bare openings such as \"The mission\", \"The tournament\", \"The company\", \"The offering\", or \"The crew\"; write the MAIN SUBJECT's exact name instead.
+- Rewrite \"The mission launched in 2030\" as \"Mission One launched in 2030\", \"Four people joined the crew\" as \"Mission One's crew comprised four people\", \"The spacecraft used Engine X\" as \"Mission One's spacecraft used Engine X\", and \"The company raised $10 million\" as \"Acme Corp raised $10 million\".
+- When in doubt, repeat the MAIN SUBJECT's exact name at the start of the line.
+- A line without an exact named subject anchor is invalid and must not be emitted.
+
+Use only information directly supported by the document. Preserve exact names, values, dates, and meaningful qualifiers. Keep planned, target, proposed, estimated, projected, reported, alleged, and actual values distinct; never turn a target or forecast into an accomplished result. Do not infer a cause, outcome, or relationship merely because the document discusses the ideas near each other. Attribute opinions and disputed claims to their stated source. Do not explain, editorialize, repeat a fact, or copy citation markers.
+
+Before responding, silently verify that the inventory covers the document from beginning to end, contains at most 15 complete lines, preserves every status qualifier, and gives every line an exact named subject anchor."""
 
 
 def question_prompt(fact: str, count: int) -> str:
     if count != 2:
-        raise ValueError("structured question generation requires exactly 2 questions per fact")
-    return f"""Create one aligned training/held-out question pair for the source fact.
+        raise ValueError(
+            "structured question generation requires exactly 2 questions per fact"
+        )
+    return f"""Turn one standalone fact into an aligned training/held-out question pair.
 
 SOURCE FACT:
 {fact}
 
-Identify the explicit subject, choose one useful answer target, and put other details needed to identify the event in shared context. Then write two questions that ask only for the same answer target.
+Decompose the fact as SUBJECT -- RELATION -- ANSWER. Choose the entity or event being described as SUBJECT and the value supplied by the main relationship as ANSWER. Put only other identifying details in shared CONTEXT. Then write two questions that ask for exactly the same ANSWER.
 
 Output exactly:
 SUBJECT: <explicit named subject copied from the source fact>
@@ -122,15 +136,18 @@ TRAIN: <question>
 HELDOUT: <different question>
 
 Rules:
-- SUBJECT is the named entity being described. State it in both questions; never ask for it.
-- ANSWER must be one concise, meaningful target: a name, complete natural list, amount, date, place, type, work, mechanism, purpose, or short description.
+- Copy SUBJECT, ANSWER, and every CONTEXT item exactly, character-for-character, as contiguous text from SOURCE FACT.
+- SUBJECT is the shortest exact proper-name anchor for the entity or event being described, usually the proper name at the start of SOURCE FACT before the first verb. State SUBJECT verbatim in both questions and never ask for SUBJECT.
+- Do not extend SUBJECT with a possessive or role phrase. For \"X's crew comprised A and B\", use X, not \"X's crew\". For \"X match ball was Y\", use X, not \"X match ball\".
+- Keep the grammatical subject as SUBJECT even when another named entity appears later. For \"X awarded Y the prize\", use X as SUBJECT and Y as ANSWER. For \"The manufacturer of X is Y\", use X as SUBJECT and Y as ANSWER. For \"X was recovered by Y\", use X as SUBJECT and Y as ANSWER.
+- ANSWER must be the concise value of the main relationship: a name, complete natural list, amount, date, place, type, work, mechanism, purpose, outcome, or short description. Prefer a short named entity, date, number, or natural list over a long descriptive clause when either would make a useful target.
 - SUBJECT and ANSWER must not overlap.
-- Keep founders or investors together as one complete list; never target one member of a natural list.
-- CONTEXT may contain exact source phrases that both questions can state or rely on. ANSWER and CONTEXT must not overlap.
-- Every informative source detail must be represented by SUBJECT, ANSWER, or CONTEXT.
+- Keep every natural list as one complete ANSWER; never target only one member.
+- Keep equivalent forms of one value together in ANSWER, including converted measurements or the same time in multiple time zones. Do not ask for one form while placing another form in CONTEXT.
+- CONTEXT is optional and should contain only exact source phrases that materially identify the target. Each item must independently occur verbatim in SOURCE FACT. Never create a CONTEXT item by deleting, reordering, joining, or inflecting source words; use separate items around ANSWER when needed. Use NONE rather than an inexact item. ANSWER and CONTEXT must not overlap.
 - Both questions must ask only for ANSWER and have exactly the same answer scope.
-- Both questions must stand alone, explicitly name SUBJECT, and express every CONTEXT detail needed to identify the target.
-- Never reveal ANSWER or part of ANSWER in either question. CONTEXT is allowed in questions.
+- Both questions must stand alone, contain the exact SUBJECT string verbatim, and express every CONTEXT detail needed to identify the target. A related phrase is not a substitute for the exact SUBJECT string.
+- Never reveal ANSWER or any named member of ANSWER in either question. CONTEXT is allowed in questions.
 - Never refer to a source, fact, passage, text, document, prompt, or information above.
 - Use meaningfully different wording without requesting extra information.
 - Output only the five lines.
@@ -157,7 +174,112 @@ SUBJECT: Acme AI
 ANSWER: $12M
 CONTEXT: seed round || North Fund and South Ventures
 TRAIN: How much did Acme AI raise in its seed round from North Fund and South Ventures?
-HELDOUT: What was the size of Acme AI's seed financing backed by North Fund and South Ventures?"""
+HELDOUT: What was the size of Acme AI's seed financing backed by North Fund and South Ventures?
+
+Example 4:
+SOURCE FACT: The manufacturer of the service module for Mission One is Example Aerospace.
+SUBJECT: Mission One
+ANSWER: Example Aerospace
+CONTEXT: service module
+TRAIN: Which company manufactures the service module for Mission One?
+HELDOUT: Who is the service-module manufacturer for Mission One?
+
+Example 5:
+SOURCE FACT: Mission One's crew comprised Ana One and Bo Two.
+SUBJECT: Mission One
+ANSWER: Ana One and Bo Two
+CONTEXT: crew
+TRAIN: Who comprised the crew of Mission One?
+HELDOUT: List the complete Mission One crew.
+
+Example 6:
+SOURCE FACT: Example Games awarded Ana One the Golden Prize as best player.
+SUBJECT: Example Games
+ANSWER: Ana One
+CONTEXT: Golden Prize || best player
+TRAIN: Who received the Golden Prize as best player at Example Games?
+HELDOUT: Name the best player whom Example Games awarded the Golden Prize.
+
+Example 7:
+SOURCE FACT: Example Games match ball was named Orb.
+SUBJECT: Example Games
+ANSWER: Orb
+CONTEXT: match ball
+TRAIN: What was the Example Games match ball called?
+HELDOUT: Name the match ball used at Example Games.
+
+Leakage correction:
+BAD HELDOUT: Identify the match ball named Orb at Example Games.
+GOOD HELDOUT: Identify the name of the Example Games match ball.
+The bad question is invalid because it contains ANSWER. Descriptive ANSWER phrases are also forbidden verbatim; ask for the category instead of repeating the description.
+
+Before responding, silently run literal substring checks: every SUBJECT, ANSWER, and CONTEXT value must be found unchanged in SOURCE FACT; the exact SUBJECT string must be found in both questions; the ANSWER and every named member of it must be absent from both questions. Then verify that both questions request one identical target and that the output has exactly five nonempty lines."""
+
+
+def question_repair_prompt(fact: str, previous: str, error: str) -> str:
+    if error == "question omits its explicit subject":
+        repair_action = (
+            "Keep SUBJECT, ANSWER, and CONTEXT exactly as they are in FAILED OUTPUT. "
+            "Rewrite only TRAIN and HELDOUT so each contains the exact full SUBJECT "
+            "string verbatim."
+        )
+    elif error == "question reveals its answer":
+        repair_action = (
+            "Keep SUBJECT, ANSWER, and CONTEXT exactly as they are in FAILED OUTPUT. "
+            "Rewrite only TRAIN and HELDOUT so neither contains ANSWER or any named "
+            "member of ANSWER."
+        )
+    elif error == "subject, answer, or context is not copied from the fact":
+        repair_action = (
+            "Keep any SUBJECT and ANSWER that already occur verbatim in SOURCE FACT, "
+            "and set CONTEXT: NONE. If SUBJECT or ANSWER is not verbatim, replace only "
+            "that field with an exact source span."
+        )
+    elif error == "answer duplicates context":
+        repair_action = (
+            "Keep SUBJECT and ANSWER exactly as they are in FAILED OUTPUT, set "
+            "CONTEXT: NONE, and rewrite the questions only if needed."
+        )
+    elif error == "answer duplicates the subject":
+        repair_action = (
+            "Keep ANSWER if it is a useful exact target. Replace SUBJECT with the "
+            "leading named entity before any possessive suffix or role phrase, set "
+            "CONTEXT: NONE, and rewrite both questions."
+        )
+    else:
+        repair_action = (
+            "Preserve every field that already satisfies the validation error, and "
+            "change only the invalid field or question."
+        )
+    return f"""Repair a generated training/held-out question pair that failed deterministic validation.
+
+SOURCE FACT:
+{fact}
+
+FAILED OUTPUT:
+{previous}
+
+VALIDATION ERROR:
+{error}
+
+REQUIRED REPAIR ACTION:
+{repair_action}
+
+Return a corrected block with exactly five nonempty lines:
+SUBJECT: <shortest leading proper-name anchor copied exactly from SOURCE FACT>
+ANSWER: <one concise exact contiguous phrase copied from SOURCE FACT>
+CONTEXT: <exact contiguous phrase> || <exact contiguous phrase>  (or NONE)
+TRAIN: <question>
+HELDOUT: <different question>
+
+Non-negotiable repair rules:
+- Follow REQUIRED REPAIR ACTION exactly; do not replace fields that it says to keep.
+- When a new SUBJECT is required, copy the leading proper name from SOURCE FACT. If SOURCE FACT begins with \"X's\", SUBJECT is exactly X before the apostrophe. Never choose a proper name that first appears later in the sentence.
+- Every SUBJECT, ANSWER, and CONTEXT value must occur verbatim in SOURCE FACT. Use CONTEXT: NONE instead of paraphrasing, deleting, joining, reordering, or inflecting source words.
+- Both questions must contain the exact SUBJECT string verbatim.
+- Neither question may contain ANSWER or any named member of ANSWER. If the failed output leaked ANSWER, rewrite the entire question to ask for its category without naming it.
+- Both questions must ask for exactly the same single ANSWER and must not refer to a source or text.
+- Output only the corrected five-line block."""
 
 
 def parse_question_block(text: str) -> tuple[str, str, list[str], list[str]]:
@@ -197,7 +319,9 @@ def validate_question_block(
     questions: list[str],
 ) -> str | None:
     normalized_fact = fact.casefold()
-    if any(value.casefold() not in normalized_fact for value in [subject, answer, *context]):
+    if any(
+        value.casefold() not in normalized_fact for value in [subject, answer, *context]
+    ):
         return "subject, answer, or context is not copied from the fact"
     if (
         answer.casefold() == subject.casefold()
@@ -209,13 +333,32 @@ def validate_question_block(
         return "answer duplicates context"
     if questions[0].casefold() == questions[1].casefold():
         return "held-out prompt duplicates a training prompt"
-    if any(subject.casefold() not in question.casefold() for question in questions):
+    subject_terms = {
+        term
+        for term in re.findall(r"[^\W_]+", subject.casefold())
+        if term not in {"a", "an", "and", "at", "for", "in", "of", "on", "s", "the"}
+    }
+    if any(
+        not subject_terms.issubset(set(re.findall(r"[^\W_]+", question.casefold())))
+        for question in questions
+    ):
         return "question omits its explicit subject"
     if any(answer.casefold() in question.casefold() for question in questions):
         return "question reveals its answer"
     if any(_META_REFERENCE.search(question) for question in questions):
         return "question contains a document-relative reference"
     return None
+
+
+def sanitize_question_context(fact: str, answer: str, context: list[str]) -> list[str]:
+    """Drop optional context fields that are inexact or duplicate the answer."""
+    normalized_fact = fact.casefold()
+    normalized_answer = answer.casefold()
+    return [
+        value
+        for value in context
+        if value.casefold() in normalized_fact and value.casefold() != normalized_answer
+    ]
 
 
 def teacher_system(document: str) -> str:
@@ -267,19 +410,28 @@ def generate_facts(
     generated = []
     for index, fact in enumerate(facts, 1):
         item = GeneratedFact(fact_id=f"fact-{index:04d}", fact=fact)
-        try:
-            item.subject, item.answer, item.context, item.questions = (
-                parse_question_block(
-                    generate_questions(question_prompt(fact, questions_per_fact))
+        prompt = question_prompt(fact, questions_per_fact)
+        previous = ""
+        for attempt in range(2):
+            previous = generate_questions(prompt)
+            try:
+                item.subject, item.answer, item.context, item.questions = (
+                    parse_question_block(previous)
                 )
-            )
-            item.error = validate_question_block(
-                fact, item.subject, item.answer, item.context, item.questions
-            )
-            item.train_prompts = item.questions[:-1]
-            item.prompt = item.questions[-1]
-        except ValueError as error:
-            item.error = str(error)
+                item.context = sanitize_question_context(
+                    fact, item.answer, item.context
+                )
+                item.error = validate_question_block(
+                    fact, item.subject, item.answer, item.context, item.questions
+                )
+            except ValueError as error:
+                item.error = str(error)
+            if item.error is None:
+                item.train_prompts = item.questions[:-1]
+                item.prompt = item.questions[-1]
+                break
+            if attempt == 0:
+                prompt = question_repair_prompt(fact, previous, item.error)
         generated.append(item)
     return generated
 

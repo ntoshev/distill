@@ -8,9 +8,10 @@ from distil.generation import (
     fact_prompt,
     generate_facts,
     parse_question_block,
-    parse_lines,
     question_prompt,
+    question_repair_prompt,
     resolve_context,
+    sanitize_question_context,
     validate_question_block,
     write_generation,
 )
@@ -91,13 +92,22 @@ def test_selected_source_answer_is_used_without_teacher_cleanup():
     assert facts[0].completion == "red"
 
 
-def test_fact_prompt_requires_compact_standalone_event_facts():
+def test_fact_prompt_requires_bounded_whole_document_study_facts():
     prompt = fact_prompt("DOCUMENT")
-    assert "Keep lists intact" in prompt
-    assert "funding event's amount, round, year, investors" in prompt
-    assert "HARD STANDALONE-SUBJECT FORMAT" in prompt
-    assert 'No line may contain any of these context-dependent expressions' in prompt
-    assert "verify full source coverage" in prompt
+    assert "silently scan the entire document" in prompt
+    assert "Return only 12 to 15 facts" in prompt
+    assert "beginning, middle, and end" in prompt
+    assert "Keep a natural list intact" in prompt
+    assert (
+        "never begin a line unless enough output space remains to finish it" in prompt
+    )
+    assert "HARD SUBJECT-ANCHOR FORMAT" in prompt
+    assert "A generic role is not a subject anchor" in prompt
+    assert (
+        'A leading "The" is allowed only when the proper name immediately follows'
+        in prompt
+    )
+    assert "never turn a target or forecast into an accomplished result" in prompt
 
 
 def test_question_prompt_and_parser_use_auditable_aligned_fields():
@@ -105,6 +115,24 @@ def test_question_prompt_and_parser_use_auditable_aligned_fields():
     assert "SUBJECT:" in prompt
     assert "Both questions must ask only for ANSWER" in prompt
     assert "Never refer to a source, fact, passage" in prompt
+    assert "The manufacturer of X is Y" in prompt
+    assert "exactly five nonempty lines" in prompt
+    assert "shortest exact proper-name anchor" in prompt
+    assert "Never create a CONTEXT item by deleting, reordering" in prompt
+    assert "silently run literal substring checks" in prompt
+    repair = question_repair_prompt("Alpha is red.", "bad", "answer leak")
+    assert "VALIDATION ERROR:\nanswer leak" in repair
+    assert "Use CONTEXT: NONE instead of paraphrasing" in repair
+    omitted = question_repair_prompt(
+        "Alpha is red.", "bad", "question omits its explicit subject"
+    )
+    assert "Keep SUBJECT, ANSWER, and CONTEXT exactly" in omitted
+    copied = question_repair_prompt(
+        "Alpha is red.",
+        "bad",
+        "subject, answer, or context is not copied from the fact",
+    )
+    assert "set CONTEXT: NONE" in copied
     parsed = parse_question_block(
         "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
         "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color."
@@ -129,6 +157,45 @@ def test_question_generation_rejects_unsupported_counts_and_answer_leaks():
         ["Is Alpha red?", "What color is Alpha?"],
     )
     assert error == "question reveals its answer"
+
+
+def test_question_validation_allows_natural_subject_reordering_and_sanitizes_context():
+    parsed = (
+        "SpaceX IPO voting control",
+        "Elon Musk",
+        ["remained with", "Elon Musk", "not copied"],
+        [
+            "Who retained voting control of the SpaceX IPO?",
+            "Which person held the SpaceX IPO voting control?",
+        ],
+    )
+    fact = "SpaceX IPO voting control remained with Elon Musk."
+    context = sanitize_question_context(fact, parsed[1], parsed[2])
+    assert context == ["remained with"]
+    assert (
+        validate_question_block(fact, parsed[0], parsed[1], context, parsed[3]) is None
+    )
+
+
+def test_question_generation_repairs_one_invalid_attempt():
+    outputs = iter(
+        [
+            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "TRAIN: Is Alpha red?\nHELDOUT: What color is Alpha?",
+            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color.",
+        ]
+    )
+    prompts = []
+
+    def questions(prompt):
+        prompts.append(prompt)
+        return next(outputs)
+
+    facts = generate_facts("doc", 2, lambda _: "Alpha is red.", questions)
+    assert facts[0].error is None
+    assert len(prompts) == 2
+    assert "VALIDATION ERROR:\nquestion reveals its answer" in prompts[1]
 
 
 def test_generation_artifacts_record_validation_errors(tmp_path):

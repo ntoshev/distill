@@ -355,7 +355,7 @@ def _continual_cli(args, errcon, fail) -> int:
             seed=seed,
             enable_thinking=enable_thinking,
             speculative_top_k=(
-                args.speculative_top_k if args.speculative_top_k is not None else 5
+                args.speculative_top_k if args.speculative_top_k is not None else 3
             ),
             kl_direction=args.kl_direction or "forward",
             source=source,

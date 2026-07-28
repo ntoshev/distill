@@ -15,6 +15,7 @@ import mlx.optimizers as optim
 from mlx_lm.tuner.losses import kl_div_loss
 
 from distil.adapters import add_lora, continue_lora, lora_disabled, save_lora_adapter
+from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, select_logits
 from distil.rollout import save_rollout
 from distil.sample import Sample, sample_completion, sample_speculative_completion
 from distil.scoring import align_scored_tokens
@@ -96,12 +97,17 @@ def _distillation_loss(
     return _kl_loss(student, teacher, kl_direction).mean()
 
 
-def _teacher_rows(model, ids: list[int], rows: list[int], disable_adapter: bool):
+def _teacher_rows(
+    model,
+    ids: list[int],
+    rows: list[int],
+    disable_adapter: bool,
+    prefill_step_size: int = DEFAULT_PREFILL_STEP_SIZE,
+):
     context = lora_disabled(model) if disable_adapter else nullcontext()
     model.eval()
     with context:
-        logits = model(mx.array(ids)[None])[0]
-        selected = logits[mx.array(rows)].astype(mx.float32)
+        selected = select_logits(model, ids, rows, step_size=prefill_step_size)
         # MLX is lazy: force the adapter-disabled graph before restoring scales.
         mx.eval(selected)
     return selected
@@ -379,11 +385,13 @@ class TrainingSession:
             )
             self.optimizer.update(self.model, grads)
             mx.eval(loss, self.model.trainable_parameters(), self.optimizer.state)
+            loss_value = loss.item()
+            mx.clear_cache()
             self.iteration += 1
             return TrainStep(
                 iteration=self.iteration,
                 prompt=prompt,
-                loss=loss.item(),
+                loss=loss_value,
                 num_tokens=len(aligned.pairs),
                 finish_reason=sample.finish_reason,
                 content=sample.content,

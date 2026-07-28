@@ -140,9 +140,12 @@ reloaded directly with `--probes PATH`. An edited probe row needs
 `--from-adapter PATH` starts from an existing LoRA and preserves it as the
 frozen teacher baseline.
 
-Training defaults to forward `KL(teacher || student)`, speculative top-5
+Training defaults to forward `KL(teacher || student)`, speculative top-3
 rollouts, evaluation every five successful updates, a target-token geometric
 mean probability threshold of 0.5, and a `1e-6` learning rate.
+Long privileged teacher prompts are prefilled into the KV cache in bounded
+2,048-token chunks. Training evaluates vocabulary logits only for the sampled
+completion rows, so memory does not scale with `document tokens × vocabulary`.
 `--canary-max-tokens` controls only retention-canary generation.
 `--save-rollout PATH` records every training sample, and `--json` emits the
 selected checkpoint and stop result for automation.

@@ -237,6 +237,7 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     ]) == 0
     assert captured["canary_max_tokens"] == 9
     assert captured["save_rollout_path"] == str(rollouts)
+    assert captured["speculative_top_k"] == 3
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     assert payload["selected_step"] == 3

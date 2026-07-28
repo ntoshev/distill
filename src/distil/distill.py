@@ -92,7 +92,7 @@ def run_continual(
     temperature: float = 1.0,
     seed: int = 0,
     enable_thinking: bool | None = None,
-    speculative_top_k: int | None = 5,
+    speculative_top_k: int | None = 3,
     kl_direction: str = "forward",
     source: dict | None = None,
     probes_path: str | Path | None = None,

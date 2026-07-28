@@ -18,6 +18,7 @@ from distil.adapters import (
     lora_disabled,
     supports_lora_batch_routing,
 )
+from distil.prefill import prefill_last_logits
 
 
 class _SharedModelBatchUnsupported(Exception):
@@ -338,8 +339,7 @@ def _sample_speculative_shared_model(
 
     def prefill(ids, cache, adapter=True):
         with lora_batch_enabled(model, [adapter]):
-            logits = model(mx.array(ids)[None], cache=cache)[0, -1].astype(mx.float32)
-            mx.eval(logits, [entry.state for entry in cache])
+            logits = prefill_last_logits(model, ids, cache)
         return logits
 
     student_logits = prefill(prompt_ids, student_cache)
@@ -436,8 +436,6 @@ def _sample_speculative_generic(
     teacher_sampler = make_sampler(temp=temperature)
     student_cache = make_prompt_cache(model)
     teacher_cache = make_prompt_cache(teacher_model)
-    student_input = mx.array(prompt_ids)
-    teacher_input = mx.array(teacher_prompt_ids)
     eos_ids = _eos_token_ids(tokenizer) | _eos_token_ids(teacher_tokenizer)
 
     gen_ids: list[int] = []
@@ -477,8 +475,14 @@ def _sample_speculative_generic(
             entry.state = state
             entry.meta_state = meta_state
 
-    student_logits = student_forward(student_input)[-1]
-    teacher_logits = teacher_forward(teacher_input)[-1]
+    student_logits = prefill_last_logits(model, prompt_ids, student_cache)
+    teacher_context = (
+        lora_disabled(teacher_model) if teacher_without_adapter else nullcontext()
+    )
+    with teacher_context:
+        teacher_logits = prefill_last_logits(
+            teacher_model, teacher_prompt_ids, teacher_cache
+        )
     block_size = 1
     accepted_streak = 0
     decode_started = False

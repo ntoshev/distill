@@ -13,7 +13,7 @@ seeing it. The value follows the existing input convention: inline text,
 uv run distil \
   --model mlx-community/Qwen3.5-0.8B-4bit \
   --train @examples/distillation/sakana_wiki.txt \
-  --generator-model mlx-community/Qwen3.5-2B-6bit \
+  --generator-model mlx-community/Qwen3.5-9B-6bit \
   --adapter adapters/sakana-wiki \
   --canaries examples/distillation/canaries.jsonl \
   --no-thinking
@@ -426,8 +426,8 @@ Only LoRA parameters update. Canonical probe answers do not appear in the
 loss. Forward KL is the v1 default because it produced a cleaner locality
 trade-off than reverse KL in the repository's Project Lumen experiments.
 
-Speculative top-5 generation remains enabled: a student token is retained if
-it lies in the teacher's top five; otherwise a teacher-policy token replaces
+Speculative top-3 generation remains enabled: a student token is retained if
+it lies in the teacher's top three; otherwise a teacher-policy token replaces
 it. This exposes useful suffixes before the student can generate the complete
 answer independently.
 
@@ -628,7 +628,7 @@ Training controls:
 --iters N                     hard cap; computed when omitted
 --learning-rate F             default 1e-6
 --lora-rank N                 default 16 for a new adapter
---speculative-top-k N         default 5
+--speculative-top-k N         default 3
 --kl-direction forward|reverse default forward
 --max-tokens N                default 64
 --seed N
