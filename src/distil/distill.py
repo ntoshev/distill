@@ -1,6 +1,7 @@
 """Probe-driven continual context distillation orchestration."""
 
 import json
+import math
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +85,7 @@ def run_continual(
     from_adapter: str | Path | None = None,
     iters: int | None = None,
     eval_every: int = 5,
+    batch_size: int = 4,
     learned_threshold: float = 0.5,
     learning_rate: float = 1e-6,
     lora_rank: int = 16,
@@ -111,6 +113,8 @@ def run_continual(
         )
     if eval_every <= 0:
         raise ValueError("--eval-every must be positive")
+    if batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
     if canary_max_tokens <= 0:
         raise ValueError("--canary-max-tokens must be positive")
     if not 0 < learned_threshold <= 1:
@@ -186,6 +190,7 @@ def run_continual(
         "canaries": str(canaries_path) if canaries_path is not None else None,
         "rollouts": str(save_rollout_path) if save_rollout_path is not None else None,
         "eval_every": eval_every,
+        "batch_size": batch_size,
         "learned_threshold": learned_threshold,
         "iters": iters,
         "learning_rate": learning_rate,
@@ -284,7 +289,8 @@ def run_continual(
         config_file.write_text(json.dumps(run_config, ensure_ascii=False, indent=2) + "\n")
         stopped, reason, selected = "already_mastered", "already_mastered", baseline
     else:
-        budget = iters if iters is not None else min(2000, max(200, 200 * len(active)))
+        example_budget = min(2000, max(200, 200 * len(active)))
+        budget = iters if iters is not None else math.ceil(example_budget / batch_size)
         run_config["resolved_iters"] = budget
         config_file.write_text(json.dumps(run_config, ensure_ascii=False, indent=2) + "\n")
         rotation = ActiveRotation(items, seed)
@@ -292,29 +298,31 @@ def run_continual(
         stopped = reason = ""
         selected = baseline
         for _ in range(budget):
-            item_id, prompt = rotation.next()
-            step = session.step(prompt)
-            last_loss = step.loss
-            payload = _step_payload(step)
-            payload["item_id"] = item_id
+            batch = rotation.next_batch(batch_size)
+            steps = session.step_batch([prompt for _, prompt in batch])
+            last_loss = steps[0].batch_loss
             with metrics_file.open("a") as file:
-                file.write(json.dumps(payload, ensure_ascii=False) + "\n")
-            if save_rollout_path is not None:
-                save_training_rollout(
-                    save_rollout_path,
-                    _prompt_messages(prompt, student_system),
-                    step,
-                    model_name=model_name,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    seed=seed,
-                    item_id=item_id,
-                )
-            if step.iteration % eval_every != 0:
+                for (item_id, prompt), step in zip(batch, steps):
+                    payload = _step_payload(step)
+                    payload["item_id"] = item_id
+                    file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                    if save_rollout_path is not None:
+                        save_training_rollout(
+                            save_rollout_path,
+                            _prompt_messages(prompt, student_system),
+                            step,
+                            model_name=model_name,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            seed=seed,
+                            item_id=item_id,
+                        )
+            iteration = steps[0].iteration
+            if iteration % eval_every != 0:
                 continue
-            checkpoint = checkpoints / f"step-{step.iteration:04d}"
+            checkpoint = checkpoints / f"step-{iteration:04d}"
             session.save(checkpoint)
-            row, active = evaluate(step.iteration, checkpoint)
+            row, active = evaluate(iteration, checkpoint)
             if row["canary_changed"]:
                 stopped, reason = "aborted", "locality"
                 break

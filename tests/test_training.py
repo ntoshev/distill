@@ -76,9 +76,22 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
             (path / "adapters.safetensors").write_bytes(b"")
             return path / "adapters.safetensors"
 
-        def step(self, prompt):
+        def step_batch(self, prompts):
             state["learned"] = True
-            return TrainStep(1, prompt, 0.1, 1, "stop", "VIOLET-731")
+            return [
+                TrainStep(
+                    1,
+                    prompt,
+                    0.1,
+                    1,
+                    "stop",
+                    "VIOLET-731",
+                    batch_size=len(prompts),
+                    batch_index=index,
+                    batch_loss=0.1,
+                )
+                for index, prompt in enumerate(prompts)
+            ]
 
     def fake_answer(model, tokenizer, probe, **kwargs):
         answer_calls.append((probe.name, kwargs["max_tokens"]))
@@ -110,5 +123,19 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
     row = json.loads(rollouts.read_text())
     assert row["item_id"] == "fact"
+    assert row["batch_size"] == 1
+    assert row["batch_index"] == 0
+    assert row["batch_loss"] == 0.1
     assert row["prompt"][-1]["content"] == "train"
     assert row["completion"][0]["content"] == "VIOLET-731"
+    metric = json.loads(
+        (tmp_path / "adapter" / "training_metrics.jsonl").read_text()
+    )
+    assert metric["batch"] == {
+        "size": 1,
+        "index": 0,
+        "loss": 0.1,
+        "train_seconds": 0.0,
+    }
+    config = json.loads((tmp_path / "adapter" / "run_config.json").read_text())
+    assert config["batch_size"] == 4

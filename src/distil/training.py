@@ -12,6 +12,7 @@ from typing import Callable
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
+from mlx.utils import tree_map
 from mlx_lm.tuner.losses import kl_div_loss
 
 from distil.adapters import add_lora, continue_lora, lora_disabled, save_lora_adapter
@@ -40,6 +41,10 @@ class TrainStep:
     accepted_tokens: int | None = None
     replaced_tokens: int | None = None
     kl_direction: str = "forward"
+    batch_size: int = 1
+    batch_index: int = 0
+    batch_loss: float | None = None
+    batch_train_seconds: float = 0.0
 
 
 @dataclass
@@ -167,6 +172,12 @@ def _step_payload(step: TrainStep) -> dict:
         "finish_reason": step.finish_reason,
         "content": step.content,
         "kl_direction": step.kl_direction,
+        "batch": {
+            "size": step.batch_size,
+            "index": step.batch_index,
+            "loss": step.batch_loss if step.batch_loss is not None else step.loss,
+            "train_seconds": step.batch_train_seconds,
+        },
         "sampling": {
             "policy": "speculative" if step.speculative_top_k is not None else "student",
             "top_k": step.speculative_top_k,
@@ -235,9 +246,23 @@ def save_training_rollout(
             "accepted_tokens": step.accepted_tokens,
             "replaced_tokens": step.replaced_tokens,
             "kl_direction": step.kl_direction,
+            "batch_size": step.batch_size,
+            "batch_index": step.batch_index,
+            "batch_loss": step.batch_loss,
             "is_truncated": step.finish_reason != "stop",
         },
     )
+
+
+@dataclass
+class _PreparedRollout:
+    prompt: str
+    sample: Sample
+    student_ids: list[int]
+    student_rows: list[int]
+    teacher_ids: list[int]
+    teacher_rows: list[int]
+    prepare_seconds: float
 
 
 class TrainingSession:
@@ -310,7 +335,9 @@ class TrainingSession:
         self.model.eval()
         return save_lora_adapter(self.model, path, self.config)
 
-    def step(self, prompt: str, max_attempts: int = 10) -> TrainStep:
+    def _prepare_rollout(
+        self, prompt: str, max_attempts: int = 10
+    ) -> _PreparedRollout:
         messages = _messages(prompt, self.student_system)
         teacher_messages = apply_teacher_context(messages, system=self.teacher_system)
         for _ in range(max_attempts):
@@ -368,41 +395,103 @@ class TrainingSession:
                 continue
             if not aligned.pairs:
                 continue
+            return _PreparedRollout(
+                prompt=prompt,
+                sample=sample,
+                student_ids=aligned.student_ids,
+                student_rows=[
+                    student_pos - 1 for student_pos, _ in aligned.pairs
+                ],
+                teacher_ids=aligned.teacher_ids,
+                teacher_rows=[
+                    teacher_pos - 1 for _, teacher_pos in aligned.pairs
+                ],
+                prepare_seconds=perf_counter() - started,
+            )
+        raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
 
+    def step_batch(
+        self, prompts: list[str] | tuple[str, ...], max_attempts: int = 10
+    ) -> list[TrainStep]:
+        """Apply one optimizer update from independently scored prompt rollouts."""
+        if not prompts:
+            raise ValueError("training batch must contain at least one prompt")
+
+        batch_started = perf_counter()
+        # Generate every rollout before computing gradients so all batch members
+        # come from the same pre-update student policy.
+        prepared = [
+            self._prepare_rollout(prompt, max_attempts=max_attempts)
+            for prompt in prompts
+        ]
+        accumulated_grads = None
+        losses: list[float] = []
+        train_seconds: list[float] = []
+        for rollout in prepared:
+            gradient_started = perf_counter()
             teacher_rows = _teacher_rows(
                 self.teacher_model,
-                aligned.teacher_ids,
-                [teacher_pos - 1 for _, teacher_pos in aligned.pairs],
+                rollout.teacher_ids,
+                rollout.teacher_rows,
                 disable_adapter=self.self_teacher,
             )
-            student_ids = mx.array(aligned.student_ids)
-            student_rows = mx.array(
-                [student_pos - 1 for student_pos, _ in aligned.pairs]
-            )
+            student_ids = mx.array(rollout.student_ids)
+            student_rows = mx.array(rollout.student_rows)
             self.model.train()
             loss, grads = self.loss_and_grad(
                 self.model, student_ids, student_rows, teacher_rows
             )
-            self.optimizer.update(self.model, grads)
-            mx.eval(loss, self.model.trainable_parameters(), self.optimizer.state)
-            loss_value = loss.item()
-            mx.clear_cache()
-            self.iteration += 1
-            return TrainStep(
-                iteration=self.iteration,
-                prompt=prompt,
-                loss=loss_value,
-                num_tokens=len(aligned.pairs),
-                finish_reason=sample.finish_reason,
-                content=sample.content,
-                train_seconds=perf_counter() - started,
-                total_seconds=perf_counter() - started,
-                speculative_top_k=sample.speculative_top_k,
-                accepted_tokens=sample.accepted_tokens,
-                replaced_tokens=sample.replaced_tokens,
-                kl_direction=self.kl_direction,
+            mx.eval(loss, grads)
+            losses.append(loss.item())
+            accumulated_grads = (
+                grads
+                if accumulated_grads is None
+                else tree_map(
+                    lambda accumulated, current: accumulated + current,
+                    accumulated_grads,
+                    grads,
+                )
             )
-        raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
+            mx.eval(accumulated_grads)
+            train_seconds.append(
+                rollout.prepare_seconds + perf_counter() - gradient_started
+            )
+            mx.clear_cache()
+
+        batch_size = len(prepared)
+        accumulated_grads = tree_map(
+            lambda grad: grad / batch_size, accumulated_grads
+        )
+        self.optimizer.update(self.model, accumulated_grads)
+        mx.eval(self.model.trainable_parameters(), self.optimizer.state)
+        self.iteration += 1
+        batch_loss = sum(losses) / batch_size
+        batch_seconds = perf_counter() - batch_started
+        mx.clear_cache()
+        return [
+            TrainStep(
+                iteration=self.iteration,
+                prompt=rollout.prompt,
+                loss=losses[index],
+                num_tokens=len(rollout.student_rows),
+                finish_reason=rollout.sample.finish_reason,
+                content=rollout.sample.content,
+                train_seconds=train_seconds[index],
+                total_seconds=batch_seconds,
+                speculative_top_k=rollout.sample.speculative_top_k,
+                accepted_tokens=rollout.sample.accepted_tokens,
+                replaced_tokens=rollout.sample.replaced_tokens,
+                kl_direction=self.kl_direction,
+                batch_size=batch_size,
+                batch_index=index,
+                batch_loss=batch_loss,
+                batch_train_seconds=batch_seconds,
+            )
+            for index, rollout in enumerate(prepared)
+        ]
+
+    def step(self, prompt: str, max_attempts: int = 10) -> TrainStep:
+        return self.step_batch([prompt], max_attempts=max_attempts)[0]
 
 
 def train_lora(

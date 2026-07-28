@@ -48,5 +48,71 @@ def test_mastery_and_rotation_retire_and_restore_items(tmp_path):
     rotation.update({"b"})
     assert rotation.next() == ("b", "b1")
     rotation.update({"a", "b"})
-    seen = {rotation.next(), rotation.next(), rotation.next()}
-    assert seen == {("a", "a1"), ("a", "a2"), ("b", "b1")}
+    first = rotation.next_batch(2)
+    second = rotation.next_batch(2)
+    assert {name for name, _ in first} == {"a", "b"}
+    assert {name for name, _ in second} == {"a", "b"}
+    assert {
+        prompt
+        for name, prompt in (*first, *second)
+        if name == "a"
+    } == {"a1", "a2"}
+
+
+def test_rotation_preserves_queue_when_active_set_is_unchanged(tmp_path):
+    path = tmp_path / "probes.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "name": name,
+                    "prompt": f"held-{name}",
+                    "completion": name.upper(),
+                    "train_prompts": [f"train-{name}"],
+                }
+            )
+            for name in ("a", "b", "c")
+        )
+        + "\n"
+    )
+    rotation = ActiveRotation(load_learning_items(path), seed=0)
+    rotation.update({"a", "b", "c"})
+    first = rotation.next()
+    remaining = list(rotation.queue)
+
+    rotation.update({"a", "b", "c"})
+
+    assert rotation.queue == remaining
+    assert {first, rotation.next(), rotation.next()} == {
+        ("a", "train-a"),
+        ("b", "train-b"),
+        ("c", "train-c"),
+    }
+
+
+def test_rotation_batches_distinct_facts(tmp_path):
+    path = tmp_path / "probes.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "name": name,
+                    "prompt": f"held-{name}",
+                    "completion": name.upper(),
+                    "train_prompts": [f"{name}-1", f"{name}-2"],
+                }
+            )
+            for name in ("a", "b", "c", "d")
+        )
+        + "\n"
+    )
+    rotation = ActiveRotation(load_learning_items(path), seed=0)
+    rotation.update({"a", "b", "c", "d"})
+
+    for _ in range(4):
+        batch = rotation.next_batch(3)
+        assert len(batch) == 3
+        assert len({name for name, _ in batch}) == 3
+
+    with pytest.raises(ValueError, match="batch size"):
+        rotation.next_batch(0)

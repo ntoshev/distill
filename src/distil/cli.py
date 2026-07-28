@@ -100,7 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="save a trained adapter, or load one for scoring/sampling",
     )
-    trn.add_argument("--iters", type=int, help="successful training updates (default 100)")
+    trn.add_argument("--iters", type=int, help="successful optimizer updates (default adaptive)")
+    trn.add_argument(
+        "--batch-size",
+        type=int,
+        help="distinct facts per logical optimizer batch (default 4)",
+    )
     trn.add_argument("--learning-rate", type=float, help="training learning rate (default 2e-6)")
     trn.add_argument("--lora-rank", type=int, help="LoRA rank (default 16)")
     trn.add_argument("--from-adapter", metavar="PATH", help="continue an existing LoRA adapter")
@@ -340,6 +345,7 @@ def _continual_cli(args, errcon, fail) -> int:
             from_adapter=args.from_adapter,
             iters=args.iters,
             eval_every=args.eval_every if args.eval_every is not None else 5,
+            batch_size=args.batch_size if args.batch_size is not None else 4,
             learned_threshold=(
                 args.learned_threshold if args.learned_threshold is not None else 0.5
             ),
@@ -436,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         return fail("--save-rollout only combines with --sample, --completion or --train")
     for value, name in (
         (args.iters, "--iters"),
+        (args.batch_size, "--batch-size"),
         (args.learning_rate, "--learning-rate"),
         (args.lora_rank, "--lora-rank"),
         (args.checkpoint_every, "--checkpoint-every"),
@@ -489,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
                 pass
         if args.iters is not None and args.iters <= 0:
             return fail("--iters must be positive")
+        if args.batch_size is not None and args.batch_size <= 0:
+            return fail("--batch-size must be positive")
         if args.learning_rate is not None and args.learning_rate <= 0:
             return fail("--learning-rate must be positive")
         if args.lora_rank is not None and args.lora_rank <= 0:

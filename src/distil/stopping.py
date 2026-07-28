@@ -81,26 +81,64 @@ def mastered(scores: dict[str, float], threshold: float) -> set[str]:
 
 
 class ActiveRotation:
-    """Deterministic shuffled prompt cycles rebuilt after each evaluation."""
+    """Deterministic shuffled prompt cycles over the currently active facts."""
 
     def __init__(self, items: list[LearningItem], seed: int):
         self.items = {item.name: item for item in items}
         self.rng = random.Random(seed)
-        self.queue: list[tuple[str, str]] = []
+        self.queue: list[str] = []
+        self.prompt_queues: dict[str, list[str]] = {}
         self.active: tuple[str, ...] = ()
 
     def update(self, active: set[str]) -> None:
-        self.active = tuple(sorted(active))
+        updated = tuple(sorted(active))
+        if updated == self.active:
+            return
+        self.active = updated
         self.queue.clear()
+
+    def _refill(self) -> None:
+        self.queue = list(self.active)
+        self.rng.shuffle(self.queue)
+
+    def _next_prompt(self, name: str) -> str:
+        prompts = self.prompt_queues.get(name)
+        if not prompts:
+            prompts = list(self.items[name].train_prompts)
+            self.rng.shuffle(prompts)
+            self.prompt_queues[name] = prompts
+        return prompts.pop()
 
     def next(self) -> tuple[str, str]:
         if not self.active:
             raise RuntimeError("no active learning items")
         if not self.queue:
-            self.queue = [
-                (name, prompt)
-                for name in self.active
-                for prompt in self.items[name].train_prompts
-            ]
-            self.rng.shuffle(self.queue)
-        return self.queue.pop()
+            self._refill()
+        name = self.queue.pop()
+        return name, self._next_prompt(name)
+
+    def next_batch(self, size: int) -> list[tuple[str, str]]:
+        """Return up to ``size`` prompts from distinct active facts."""
+        if size <= 0:
+            raise ValueError("training batch size must be positive")
+        if not self.active:
+            raise RuntimeError("no active learning items")
+
+        target = min(size, len(self.active))
+        selected: list[tuple[str, str]] = []
+        selected_names: set[str] = set()
+        deferred: list[str] = []
+        while len(selected) < target:
+            if not self.queue:
+                self._refill()
+            name = self.queue.pop()
+            if name in selected_names:
+                deferred.append(name)
+                continue
+            selected.append((name, self._next_prompt(name)))
+            selected_names.add(name)
+
+        # Keep same-fact prompts for later batches without putting them ahead of
+        # the unconsumed portion of the current shuffled cycle.
+        self.queue[:0] = deferred
+        return selected

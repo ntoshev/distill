@@ -141,8 +141,11 @@ reloaded directly with `--probes PATH`. An edited probe row needs
 frozen teacher baseline.
 
 Training defaults to forward `KL(teacher || student)`, speculative top-3
-rollouts, evaluation every five successful updates, a target-token geometric
-mean probability threshold of 0.5, and a `1e-6` learning rate.
+rollouts, logical batches of four distinct active facts, evaluation every five
+optimizer updates, a target-token geometric mean probability threshold of 0.5,
+and a `1e-6` learning rate. Batch members are generated from the same pre-update
+student, scored independently, and accumulated sequentially before one averaged
+AdamW update, so unrelated questions never share an attention context.
 Long privileged teacher prompts are prefilled into the KV cache in bounded
 2,048-token chunks. Training evaluates vocabulary logits only for the sampled
 completion rows, so memory does not scale with `document tokens × vocabulary`.
@@ -167,6 +170,11 @@ Each run writes:
 - `training_metrics.jsonl`, `eval_metrics.jsonl`, `run_config.json`, and
   `selection.json`;
 - source, fact, and probe audit artifacts under `generated/`.
+
+`--batch-size` controls the number of distinct facts in each logical batch.
+`training_metrics.jsonl` contains one row per batch member; rows from the same
+optimizer update share an iteration and include their batch index, size, and
+batch-average loss.
 
 An aborted run returns nonzero but still preserves its best safe partial
 checkpoint.

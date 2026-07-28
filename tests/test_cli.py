@@ -199,6 +199,7 @@ def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
         "--save-rollout", "rollouts.jsonl", "--json",
     ]) == 0
     assert captured["canary_max_tokens"] == 9
+    assert captured["batch_size"] is None
     assert captured["save_rollout"] == "rollouts.jsonl"
     assert captured["json"] is True
 
@@ -236,6 +237,7 @@ def test_training_json_reports_result_and_forwards_rollout_options(
         "--canary-max-tokens", "9", "--save-rollout", str(rollouts), "--json",
     ]) == 0
     assert captured["canary_max_tokens"] == 9
+    assert captured["batch_size"] == 4
     assert captured["save_rollout_path"] == str(rollouts)
     assert captured["speculative_top_k"] == 3
     payload = json.loads(capsys.readouterr().out)
@@ -256,6 +258,7 @@ def test_training_rejects_prompt_and_teacher_prompts(tmp_path, capsys):
 def test_training_flags_require_train(capsys):
     for flag in (
         ["--iters", "1"],
+        ["--batch-size", "4"],
         ["--learning-rate", "1e-4"],
         ["--lora-rank", "4"],
         ["--checkpoint-every", "1"],
@@ -281,6 +284,7 @@ def test_training_rejects_nonpositive_settings(tmp_path):
     ]
     for flag in (
         ["--iters", "0"],
+        ["--batch-size", "0"],
         ["--learning-rate", "0"],
         ["--lora-rank", "0"],
         ["--checkpoint-every", "0"],
