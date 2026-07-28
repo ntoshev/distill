@@ -1,0 +1,12 @@
+{
+  "prompt_version": "continual-v4",
+  "generator_model": "mlx-community/Qwen3.5-9B-6bit",
+  "questions_per_fact": 2,
+  "fact_temperature": 0.0,
+  "question_temperature": 0.0,
+  "seed": 0,
+  "facts": 15,
+  "valid_facts": 15,
+  "questions": 30,
+  "errors": []
+}

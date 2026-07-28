@@ -1,0 +1,358 @@
+[
+  {
+    "fact_id": "fact-0001",
+    "fact": "Artemis II was a crewed lunar flyby mission that took place from April 1 to April 11, 2026.",
+    "subject": "Artemis II",
+    "answer": "April 1 to April 11, 2026",
+    "context": [
+      "crewed lunar flyby mission"
+    ],
+    "questions": [
+      "When did the crewed lunar flyby mission Artemis II take place?",
+      "What were the dates for the Artemis II crewed lunar flyby mission?"
+    ],
+    "train_prompts": [
+      "When did the crewed lunar flyby mission Artemis II take place?"
+    ],
+    "prompt": "What were the dates for the Artemis II crewed lunar flyby mission?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: April 1 to April 11, 2026\nCONTEXT: crewed lunar flyby mission\nTRAIN: When did the crewed lunar flyby mission Artemis II take place?\nHELDOUT: What were the dates for the Artemis II crewed lunar flyby mission?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: April 1 to April 11, 2026\nCONTEXT: crewed lunar flyby mission\nTRAIN: When did the crewed lunar flyby mission Artemis II take place?\nHELDOUT: What were the dates for the Artemis II crewed lunar flyby mission?"
+    ]
+  },
+  {
+    "fact_id": "fact-0002",
+    "fact": "Artemis II's crew comprised four astronauts: Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen.",
+    "subject": "Artemis II",
+    "answer": "Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen",
+    "context": [
+      "crew comprised four astronauts"
+    ],
+    "questions": [
+      "Who comprised the crew of Artemis II?",
+      "List the four astronauts who made up the Artemis II crew."
+    ],
+    "train_prompts": [
+      "Who comprised the crew of Artemis II?"
+    ],
+    "prompt": "List the four astronauts who made up the Artemis II crew.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen\nCONTEXT: crew comprised four astronauts\nTRAIN: Who comprised the crew of Artemis II?\nHELDOUT: List the four astronauts who made up the Artemis II crew.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen\nCONTEXT: crew comprised four astronauts\nTRAIN: Who comprised the crew of Artemis II?\nHELDOUT: List the four astronauts who made up the Artemis II crew."
+    ]
+  },
+  {
+    "fact_id": "fact-0003",
+    "fact": "Artemis II's spacecraft, named Integrity, was manufactured by Lockheed Martin for the Orion module and Airbus for the European Service Module.",
+    "subject": "Artemis II's spacecraft",
+    "answer": "Integrity",
+    "context": [
+      "named",
+      "Lockheed Martin for the Orion module and Airbus for the European Service Module"
+    ],
+    "questions": [
+      "What was the name of Artemis II's spacecraft manufactured by Lockheed Martin for the Orion module and Airbus for the European Service Module?",
+      "Identify the name of the Artemis II spacecraft built by Lockheed Martin for the Orion module and Airbus for the European Service Module."
+    ],
+    "train_prompts": [],
+    "prompt": "",
+    "completion": "",
+    "error": "question omits its explicit subject",
+    "raw_question": "SUBJECT: Artemis II's spacecraft\nANSWER: Integrity\nCONTEXT: named || Lockheed Martin for the Orion module and Airbus for the European Service Module\nTRAIN: What was the name of Artemis II's spacecraft manufactured by Lockheed Martin for the Orion module and Airbus for the European Service Module?\nHELDOUT: Identify the name of the Artemis II spacecraft built by Lockheed Martin for the Orion module and Airbus for the European Service Module.",
+    "question_attempts": [
+      "SUBJECT: Artemis II's spacecraft\nANSWER: Integrity\nCONTEXT: named || Lockheed Martin for the Orion module and Airbus for the European Service Module\nTRAIN: What was the name of Artemis II's spacecraft manufactured by Lockheed Martin for the Orion module and Airbus for the European Service Module?\nHELDOUT: Identify the name of the Artemis II spacecraft built by Lockheed Martin for the Orion module and Airbus for the European Service Module.",
+      "SUBJECT: Artemis II's spacecraft\nANSWER: Integrity\nCONTEXT: named || Lockheed Martin for the Orion module and Airbus for the European Service Module\nTRAIN: What was the name of Artemis II's spacecraft manufactured by Lockheed Martin for the Orion module and Airbus for the European Service Module?\nHELDOUT: Identify the name of the Artemis II spacecraft built by Lockheed Martin for the Orion module and Airbus for the European Service Module."
+    ]
+  },
+  {
+    "fact_id": "fact-0004",
+    "fact": "Artemis II launched from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket on April 1, 2026.",
+    "subject": "Artemis II",
+    "answer": "April 1, 2026",
+    "context": [
+      "Kennedy Space Center's Launch Complex 39B",
+      "aboard a Space Launch System rocket"
+    ],
+    "questions": [
+      "On what date did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?",
+      "When did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?"
+    ],
+    "train_prompts": [
+      "On what date did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?"
+    ],
+    "prompt": "When did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: April 1, 2026\nCONTEXT: Kennedy Space Center's Launch Complex 39B || aboard a Space Launch System rocket\nTRAIN: On what date did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?\nHELDOUT: When did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: April 1, 2026\nCONTEXT: Kennedy Space Center's Launch Complex 39B || aboard a Space Launch System rocket\nTRAIN: On what date did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?\nHELDOUT: When did Artemis II launch from Kennedy Space Center's Launch Complex 39B aboard a Space Launch System rocket?"
+    ]
+  },
+  {
+    "fact_id": "fact-0005",
+    "fact": "Artemis II's closest approach to the Moon occurred on April 6, 2026, at a distance of 4,067 miles.",
+    "subject": "Artemis II",
+    "answer": "April 6, 2026",
+    "context": [
+      "closest approach to the Moon",
+      "4,067 miles"
+    ],
+    "questions": [
+      "On what date did Artemis II make its closest approach to the Moon at a distance of 4,067 miles?",
+      "When did Artemis II reach its minimum distance of 4,067 miles from the Moon?"
+    ],
+    "train_prompts": [
+      "On what date did Artemis II make its closest approach to the Moon at a distance of 4,067 miles?"
+    ],
+    "prompt": "When did Artemis II reach its minimum distance of 4,067 miles from the Moon?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: April 6, 2026\nCONTEXT: closest approach to the Moon || 4,067 miles\nTRAIN: On what date did Artemis II make its closest approach to the Moon at a distance of 4,067 miles?\nHELDOUT: When did Artemis II reach its minimum distance of 4,067 miles from the Moon?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: April 6, 2026\nCONTEXT: closest approach to the Moon || 4,067 miles\nTRAIN: On what date did Artemis II make its closest approach to the Moon at a distance of 4,067 miles?\nHELDOUT: When did Artemis II reach its minimum distance of 4,067 miles from the Moon?"
+    ]
+  },
+  {
+    "fact_id": "fact-0006",
+    "fact": "Artemis II set a new record for the greatest human distance from Earth, reaching 252,756 miles during its flyby.",
+    "subject": "Artemis II",
+    "answer": "252,756 miles",
+    "context": [
+      "greatest human distance from Earth",
+      "during its flyby"
+    ],
+    "questions": [
+      "What was the greatest human distance from Earth reached by Artemis II during its flyby?",
+      "How far did Artemis II travel from Earth to set the greatest human distance record during its flyby?"
+    ],
+    "train_prompts": [
+      "What was the greatest human distance from Earth reached by Artemis II during its flyby?"
+    ],
+    "prompt": "How far did Artemis II travel from Earth to set the greatest human distance record during its flyby?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: 252,756 miles\nCONTEXT: greatest human distance from Earth || during its flyby\nTRAIN: What was the greatest human distance from Earth reached by Artemis II during its flyby?\nHELDOUT: How far did Artemis II travel from Earth to set the greatest human distance record during its flyby?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: 252,756 miles\nCONTEXT: greatest human distance from Earth || during its flyby\nTRAIN: What was the greatest human distance from Earth reached by Artemis II during its flyby?\nHELDOUT: How far did Artemis II travel from Earth to set the greatest human distance record during its flyby?"
+    ]
+  },
+  {
+    "fact_id": "fact-0007",
+    "fact": "Artemis II's mission duration was exactly 9 days, 1 hour, 32 minutes, and 15 seconds.",
+    "subject": "Artemis II",
+    "answer": "9 days, 1 hour, 32 minutes, and 15 seconds",
+    "context": [
+      "mission duration"
+    ],
+    "questions": [
+      "How long was the duration of the Artemis II mission?",
+      "What was the exact length of time for the Artemis II mission?"
+    ],
+    "train_prompts": [
+      "How long was the duration of the Artemis II mission?"
+    ],
+    "prompt": "What was the exact length of time for the Artemis II mission?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: 9 days, 1 hour, 32 minutes, and 15 seconds\nCONTEXT: mission duration\nTRAIN: How long was the duration of the Artemis II mission?\nHELDOUT: What was the exact length of time for the Artemis II mission?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: 9 days, 1 hour, 32 minutes, and 15 seconds\nCONTEXT: mission duration\nTRAIN: How long was the duration of the Artemis II mission?\nHELDOUT: What was the exact length of time for the Artemis II mission?"
+    ]
+  },
+  {
+    "fact_id": "fact-0008",
+    "fact": "Artemis II's crew broke the record for the most people in deep space at once, surpassing the Apollo 8 count of three.",
+    "subject": "Artemis II",
+    "answer": "the most people in deep space at once",
+    "context": [
+      "crew broke the record",
+      "surpassing the Apollo 8 count of three"
+    ],
+    "questions": [
+      "What record did Artemis II's crew break by surpassing the Apollo 8 count of three?",
+      "Identify the specific achievement regarding the number of people in deep space that Artemis II's crew attained."
+    ],
+    "train_prompts": [
+      "What record did Artemis II's crew break by surpassing the Apollo 8 count of three?"
+    ],
+    "prompt": "Identify the specific achievement regarding the number of people in deep space that Artemis II's crew attained.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: the most people in deep space at once\nCONTEXT: crew broke the record || surpassing the Apollo 8 count of three\nTRAIN: What record did Artemis II's crew break by surpassing the Apollo 8 count of three?\nHELDOUT: Identify the specific achievement regarding the number of people in deep space that Artemis II's crew attained.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: the most people in deep space at once\nCONTEXT: crew broke the record || surpassing the Apollo 8 count of three\nTRAIN: What record did Artemis II's crew break by surpassing the Apollo 8 count of three?\nHELDOUT: Identify the specific achievement regarding the number of people in deep space that Artemis II's crew attained."
+    ]
+  },
+  {
+    "fact_id": "fact-0009",
+    "fact": "Artemis II's reentry trajectory was modified to a steeper direct entry to mitigate risks from heat shield erosion observed after Artemis I.",
+    "subject": "Artemis II",
+    "answer": "steeper direct entry",
+    "context": [
+      "reentry trajectory was modified to",
+      "mitigate risks from heat shield erosion observed after Artemis I"
+    ],
+    "questions": [
+      "To what type of reentry trajectory was Artemis II's path modified to mitigate risks from heat shield erosion observed after Artemis I?",
+      "What specific reentry trajectory modification was applied to Artemis II to address heat shield erosion risks seen after Artemis I?"
+    ],
+    "train_prompts": [
+      "To what type of reentry trajectory was Artemis II's path modified to mitigate risks from heat shield erosion observed after Artemis I?"
+    ],
+    "prompt": "What specific reentry trajectory modification was applied to Artemis II to address heat shield erosion risks seen after Artemis I?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: steeper direct entry\nCONTEXT: reentry trajectory was modified to || mitigate risks from heat shield erosion observed after Artemis I\nTRAIN: To what type of reentry trajectory was Artemis II's path modified to mitigate risks from heat shield erosion observed after Artemis I?\nHELDOUT: What specific reentry trajectory modification was applied to Artemis II to address heat shield erosion risks seen after Artemis I?",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: steeper direct entry\nCONTEXT: reentry trajectory was modified to || mitigate risks from heat shield erosion observed after Artemis I\nTRAIN: To what type of reentry trajectory was Artemis II's path modified to mitigate risks from heat shield erosion observed after Artemis I?\nHELDOUT: What specific reentry trajectory modification was applied to Artemis II to address heat shield erosion risks seen after Artemis I?"
+    ]
+  },
+  {
+    "fact_id": "fact-0010",
+    "fact": "Artemis II was recovered by the USS John P. Murtha in the Pacific Ocean southwest of San Diego on April 11, 2026.",
+    "subject": "Artemis II",
+    "answer": "USS John P. Murtha",
+    "context": [
+      "recovered",
+      "Pacific Ocean southwest of San Diego",
+      "April 11, 2026"
+    ],
+    "questions": [
+      "Which vessel recovered Artemis II in the Pacific Ocean southwest of San Diego on April 11, 2026?",
+      "Name the ship that recovered Artemis II on April 11, 2026."
+    ],
+    "train_prompts": [
+      "Which vessel recovered Artemis II in the Pacific Ocean southwest of San Diego on April 11, 2026?"
+    ],
+    "prompt": "Name the ship that recovered Artemis II on April 11, 2026.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: USS John P. Murtha\nCONTEXT: recovered || Pacific Ocean southwest of San Diego || April 11, 2026\nTRAIN: Which vessel recovered Artemis II in the Pacific Ocean southwest of San Diego on April 11, 2026?\nHELDOUT: Name the ship that recovered Artemis II on April 11, 2026.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: USS John P. Murtha\nCONTEXT: recovered || Pacific Ocean southwest of San Diego || April 11, 2026\nTRAIN: Which vessel recovered Artemis II in the Pacific Ocean southwest of San Diego on April 11, 2026?\nHELDOUT: Name the ship that recovered Artemis II on April 11, 2026."
+    ]
+  },
+  {
+    "fact_id": "fact-0011",
+    "fact": "Artemis II carried the zero-gravity indicator plush toy named Rise, which was designed by eight-year-old Lucas Ye.",
+    "subject": "Artemis II",
+    "answer": "Rise",
+    "context": [
+      "zero-gravity indicator plush toy",
+      "designed by eight-year-old Lucas Ye"
+    ],
+    "questions": [
+      "What is the name of the zero-gravity indicator plush toy carried by Artemis II, which was designed by eight-year-old Lucas Ye?",
+      "Identify the name of the plush toy designed by eight-year-old Lucas Ye that was carried on Artemis II."
+    ],
+    "train_prompts": [
+      "What is the name of the zero-gravity indicator plush toy carried by Artemis II, which was designed by eight-year-old Lucas Ye?"
+    ],
+    "prompt": "Identify the name of the plush toy designed by eight-year-old Lucas Ye that was carried on Artemis II.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: Rise\nCONTEXT: zero-gravity indicator plush toy || designed by eight-year-old Lucas Ye\nTRAIN: What is the name of the zero-gravity indicator plush toy carried by Artemis II, which was designed by eight-year-old Lucas Ye?\nHELDOUT: Identify the name of the plush toy designed by eight-year-old Lucas Ye that was carried on Artemis II.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: Rise\nCONTEXT: zero-gravity indicator plush toy || designed by eight-year-old Lucas Ye\nTRAIN: What is the name of the zero-gravity indicator plush toy carried by Artemis II, which was designed by eight-year-old Lucas Ye?\nHELDOUT: Identify the name of the plush toy designed by eight-year-old Lucas Ye that was carried on Artemis II."
+    ]
+  },
+  {
+    "fact_id": "fact-0012",
+    "fact": "Artemis II's optical communications system, O2O, achieved a downlink rate of up to 260 megabits per second.",
+    "subject": "Artemis II",
+    "answer": "up to 260 megabits per second",
+    "context": [
+      "optical communications system, O2O"
+    ],
+    "questions": [
+      "What was the downlink rate achieved by Artemis II's optical communications system, O2O?",
+      "State the maximum downlink rate for Artemis II's O2O system."
+    ],
+    "train_prompts": [
+      "What was the downlink rate achieved by Artemis II's optical communications system, O2O?"
+    ],
+    "prompt": "State the maximum downlink rate for Artemis II's O2O system.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: up to 260 megabits per second\nCONTEXT: optical communications system, O2O\nTRAIN: What was the downlink rate achieved by Artemis II's optical communications system, O2O?\nHELDOUT: State the maximum downlink rate for Artemis II's O2O system.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: up to 260 megabits per second\nCONTEXT: optical communications system, O2O\nTRAIN: What was the downlink rate achieved by Artemis II's optical communications system, O2O?\nHELDOUT: State the maximum downlink rate for Artemis II's O2O system."
+    ]
+  },
+  {
+    "fact_id": "fact-0013",
+    "fact": "Artemis II's crew included Jeremy Hansen, the first non-American astronaut to travel around the Moon.",
+    "subject": "Artemis II",
+    "answer": "Jeremy Hansen",
+    "context": [
+      "crew",
+      "first non-American astronaut to travel around the Moon"
+    ],
+    "questions": [
+      "Who was the first non-American astronaut to travel around the Moon on the Artemis II crew?",
+      "Name the crew member of Artemis II who was the first non-American astronaut to travel around the Moon."
+    ],
+    "train_prompts": [
+      "Who was the first non-American astronaut to travel around the Moon on the Artemis II crew?"
+    ],
+    "prompt": "Name the crew member of Artemis II who was the first non-American astronaut to travel around the Moon.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: Jeremy Hansen\nCONTEXT: crew || first non-American astronaut to travel around the Moon\nTRAIN: Who was the first non-American astronaut to travel around the Moon on the Artemis II crew?\nHELDOUT: Name the crew member of Artemis II who was the first non-American astronaut to travel around the Moon.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: Jeremy Hansen\nCONTEXT: crew || first non-American astronaut to travel around the Moon\nTRAIN: Who was the first non-American astronaut to travel around the Moon on the Artemis II crew?\nHELDOUT: Name the crew member of Artemis II who was the first non-American astronaut to travel around the Moon."
+    ]
+  },
+  {
+    "fact_id": "fact-0014",
+    "fact": "Artemis II's wake-up calls included a posthumous message from Apollo astronaut Jim Lovell recorded in August 2025.",
+    "subject": "Artemis II",
+    "answer": "a posthumous message from Apollo astronaut Jim Lovell",
+    "context": [
+      "wake-up calls included",
+      "recorded in August 2025"
+    ],
+    "questions": [
+      "What did Artemis II's wake-up calls include that was recorded in August 2025?",
+      "Identify the specific content of the August 2025 recording included in Artemis II's wake-up calls."
+    ],
+    "train_prompts": [
+      "What did Artemis II's wake-up calls include that was recorded in August 2025?"
+    ],
+    "prompt": "Identify the specific content of the August 2025 recording included in Artemis II's wake-up calls.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: a posthumous message from Apollo astronaut Jim Lovell\nCONTEXT: wake-up calls included || recorded in August 2025\nTRAIN: What did Artemis II's wake-up calls include that was recorded in August 2025?\nHELDOUT: Identify the specific content of the August 2025 recording included in Artemis II's wake-up calls.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: a posthumous message from Apollo astronaut Jim Lovell\nCONTEXT: wake-up calls included || recorded in August 2025\nTRAIN: What did Artemis II's wake-up calls include that was recorded in August 2025?\nHELDOUT: Identify the specific content of the August 2025 recording included in Artemis II's wake-up calls."
+    ]
+  },
+  {
+    "fact_id": "fact-0015",
+    "fact": "Artemis II's mission objectives were similar to those of Apollo 8, though it did not enter lunar orbit due to propulsion limitations.",
+    "subject": "Artemis II",
+    "answer": "similar to those of Apollo 8",
+    "context": [
+      "mission objectives",
+      "did not enter lunar orbit due to propulsion limitations"
+    ],
+    "questions": [
+      "How were Artemis II's mission objectives related to those of Apollo 8?",
+      "Describe the relationship between Artemis II's mission objectives and Apollo 8's."
+    ],
+    "train_prompts": [
+      "How were Artemis II's mission objectives related to those of Apollo 8?"
+    ],
+    "prompt": "Describe the relationship between Artemis II's mission objectives and Apollo 8's.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: Artemis II\nANSWER: similar to those of Apollo 8\nCONTEXT: mission objectives || did not enter lunar orbit due to propulsion limitations\nTRAIN: How were Artemis II's mission objectives related to those of Apollo 8?\nHELDOUT: Describe the relationship between Artemis II's mission objectives and Apollo 8's.",
+    "question_attempts": [
+      "SUBJECT: Artemis II\nANSWER: similar to those of Apollo 8\nCONTEXT: mission objectives || did not enter lunar orbit due to propulsion limitations\nTRAIN: How were Artemis II's mission objectives related to those of Apollo 8?\nHELDOUT: Describe the relationship between Artemis II's mission objectives and Apollo 8's."
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "document": "examples/distillation/initial_public_offering_spacex.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 0,
+    "valid_questions": 0,
+    "errors": []
+  }
+]

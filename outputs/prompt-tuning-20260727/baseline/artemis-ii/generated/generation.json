@@ -1,0 +1,29 @@
+{
+  "prompt_version": "continual-v3",
+  "generator_model": "mlx-community/Qwen3.5-9B-6bit",
+  "questions_per_fact": 2,
+  "fact_temperature": 0.0,
+  "question_temperature": 0.0,
+  "seed": 0,
+  "facts": 24,
+  "valid_facts": 20,
+  "questions": 48,
+  "errors": [
+    {
+      "fact_id": "fact-0011",
+      "error": "subject, answer, or context is not copied from the fact"
+    },
+    {
+      "fact_id": "fact-0012",
+      "error": "question omits its explicit subject"
+    },
+    {
+      "fact_id": "fact-0021",
+      "error": "subject, answer, or context is not copied from the fact"
+    },
+    {
+      "fact_id": "fact-0024",
+      "error": "subject, answer, or context is not copied from the fact"
+    }
+  ]
+}

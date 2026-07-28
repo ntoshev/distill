@@ -1,0 +1,80 @@
+[
+  {
+    "document": "examples/distillation/artemis_ii.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 14,
+    "errors": [
+      {
+        "fact_id": "fact-0003",
+        "error": "answer duplicates the subject"
+      }
+    ]
+  },
+  {
+    "document": "examples/distillation/2026_fifa_world_cup.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 14,
+    "errors": [
+      {
+        "fact_id": "fact-0004",
+        "error": "subject, answer, or context is not copied from the fact"
+      }
+    ]
+  },
+  {
+    "document": "examples/distillation/initial_public_offering_spacex.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 11,
+    "errors": [
+      {
+        "fact_id": "fact-0004",
+        "error": "subject, answer, or context is not copied from the fact"
+      },
+      {
+        "fact_id": "fact-0008",
+        "error": "answer duplicates context"
+      },
+      {
+        "fact_id": "fact-0009",
+        "error": "question reveals its answer"
+      },
+      {
+        "fact_id": "fact-0010",
+        "error": "answer duplicates context"
+      }
+    ]
+  }
+]

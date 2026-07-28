@@ -1,0 +1,72 @@
+[
+  {
+    "document": "examples/distillation/artemis_ii.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 14,
+    "errors": [
+      {
+        "fact_id": "fact-0003",
+        "error": "question omits its explicit subject"
+      }
+    ]
+  },
+  {
+    "document": "examples/distillation/2026_fifa_world_cup.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 14,
+    "errors": [
+      {
+        "fact_id": "fact-0004",
+        "error": "subject, answer, or context is not copied from the fact"
+      }
+    ]
+  },
+  {
+    "document": "examples/distillation/initial_public_offering_spacex.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_generic_subject_starts": true
+      },
+      "count": 15
+    },
+    "questions": 15,
+    "valid_questions": 13,
+    "errors": [
+      {
+        "fact_id": "fact-0009",
+        "error": "invalid question line: 'SpaceX IPO lock-up period'"
+      },
+      {
+        "fact_id": "fact-0010",
+        "error": "invalid question line: 'SpaceX IPO lead underwriters'"
+      }
+    ]
+  }
+]

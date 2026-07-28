@@ -1,0 +1,53 @@
+[
+  {
+    "document": "examples/distillation/artemis_ii.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_backward_reference_starts": true
+      },
+      "count": 16
+    },
+    "questions": 0,
+    "valid_questions": 0,
+    "errors": []
+  },
+  {
+    "document": "examples/distillation/2026_fifa_world_cup.txt",
+    "fact_checks": {
+      "passed": true,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_backward_reference_starts": true
+      },
+      "count": 15
+    },
+    "questions": 0,
+    "valid_questions": 0,
+    "errors": []
+  },
+  {
+    "document": "examples/distillation/initial_public_offering_spacex.txt",
+    "fact_checks": {
+      "passed": false,
+      "checks": {
+        "bounded_count": true,
+        "complete_lines": true,
+        "no_citations": true,
+        "no_duplicates": true,
+        "no_backward_reference_starts": false
+      },
+      "count": 15
+    },
+    "questions": 0,
+    "valid_questions": 0,
+    "errors": []
+  }
+]

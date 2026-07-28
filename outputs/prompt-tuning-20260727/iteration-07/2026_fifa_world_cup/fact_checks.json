@@ -1,0 +1,11 @@
+{
+  "passed": false,
+  "checks": {
+    "bounded_count": true,
+    "complete_lines": true,
+    "no_citations": true,
+    "no_duplicates": true,
+    "no_generic_subject_starts": false
+  },
+  "count": 16
+}

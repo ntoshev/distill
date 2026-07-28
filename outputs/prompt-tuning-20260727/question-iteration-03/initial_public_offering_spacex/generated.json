@@ -1,0 +1,353 @@
+[
+  {
+    "fact_id": "fact-0001",
+    "fact": "SpaceX IPO occurred on June 12, 2026, with a target valuation of US$1.77 trillion.",
+    "subject": "SpaceX IPO",
+    "answer": "June 12, 2026",
+    "context": [
+      "occurred",
+      "US$1.77 trillion"
+    ],
+    "questions": [
+      "On what date did the SpaceX IPO occur with a target valuation of US$1.77 trillion?",
+      "When did the SpaceX IPO happen given its target valuation was US$1.77 trillion?"
+    ],
+    "train_prompts": [
+      "On what date did the SpaceX IPO occur with a target valuation of US$1.77 trillion?"
+    ],
+    "prompt": "When did the SpaceX IPO happen given its target valuation was US$1.77 trillion?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO\nANSWER: June 12, 2026\nCONTEXT: occurred || US$1.77 trillion\nTRAIN: On what date did the SpaceX IPO occur with a target valuation of US$1.77 trillion?\nHELDOUT: When did the SpaceX IPO happen given its target valuation was US$1.77 trillion?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO\nANSWER: June 12, 2026\nCONTEXT: occurred || US$1.77 trillion\nTRAIN: On what date did the SpaceX IPO occur with a target valuation of US$1.77 trillion?\nHELDOUT: When did the SpaceX IPO happen given its target valuation was US$1.77 trillion?"
+    ]
+  },
+  {
+    "fact_id": "fact-0002",
+    "fact": "SpaceX IPO listed on the Nasdaq exchange under the ticker symbol SPCX.",
+    "subject": "SpaceX",
+    "answer": "SPCX",
+    "context": [
+      "IPO listed on the Nasdaq exchange"
+    ],
+    "questions": [
+      "Under what ticker symbol was SpaceX listed on the Nasdaq exchange in its IPO?",
+      "What is the Nasdaq ticker symbol for SpaceX's IPO?"
+    ],
+    "train_prompts": [
+      "Under what ticker symbol was SpaceX listed on the Nasdaq exchange in its IPO?"
+    ],
+    "prompt": "What is the Nasdaq ticker symbol for SpaceX's IPO?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX\nANSWER: SPCX\nCONTEXT: IPO listed on the Nasdaq exchange\nTRAIN: Under what ticker symbol was SpaceX listed on the Nasdaq exchange in its IPO?\nHELDOUT: What is the Nasdaq ticker symbol for SpaceX's IPO?",
+    "question_attempts": [
+      "SUBJECT: SpaceX\nANSWER: SPCX\nCONTEXT: IPO listed on the Nasdaq exchange\nTRAIN: Under what ticker symbol was SpaceX listed on the Nasdaq exchange in its IPO?\nHELDOUT: What is the Nasdaq ticker symbol for SpaceX's IPO?"
+    ]
+  },
+  {
+    "fact_id": "fact-0003",
+    "fact": "SpaceX IPO raised US$75 billion through the sale of 555,555,555 Class A shares.",
+    "subject": "SpaceX IPO",
+    "answer": "US$75 billion",
+    "context": [
+      "sale of 555,555,555 Class A shares"
+    ],
+    "questions": [
+      "How much capital did the SpaceX IPO raise through the sale of 555,555,555 Class A shares?",
+      "What was the total amount raised by the SpaceX IPO via the sale of 555,555,555 Class A shares?"
+    ],
+    "train_prompts": [
+      "How much capital did the SpaceX IPO raise through the sale of 555,555,555 Class A shares?"
+    ],
+    "prompt": "What was the total amount raised by the SpaceX IPO via the sale of 555,555,555 Class A shares?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO\nANSWER: US$75 billion\nCONTEXT: sale of 555,555,555 Class A shares\nTRAIN: How much capital did the SpaceX IPO raise through the sale of 555,555,555 Class A shares?\nHELDOUT: What was the total amount raised by the SpaceX IPO via the sale of 555,555,555 Class A shares?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO\nANSWER: US$75 billion\nCONTEXT: sale of 555,555,555 Class A shares\nTRAIN: How much capital did the SpaceX IPO raise through the sale of 555,555,555 Class A shares?\nHELDOUT: What was the total amount raised by the SpaceX IPO via the sale of 555,555,555 Class A shares?"
+    ]
+  },
+  {
+    "fact_id": "fact-0004",
+    "fact": "SpaceX IPO subscription price was set at US$135 per share before the roadshow.",
+    "subject": "SpaceX",
+    "answer": "US$135 per share",
+    "context": [
+      "was set at before the roadshow",
+      "subscription price"
+    ],
+    "questions": [
+      "What was the SpaceX subscription price set at before the roadshow?",
+      "At what rate was the SpaceX subscription price established prior to the roadshow?"
+    ],
+    "train_prompts": [],
+    "prompt": "",
+    "completion": "",
+    "error": "subject, answer, or context is not copied from the fact",
+    "raw_question": "SUBJECT: SpaceX\nANSWER: US$135 per share\nCONTEXT: was set at before the roadshow || subscription price\nTRAIN: What was the SpaceX subscription price set at before the roadshow?\nHELDOUT: At what rate was the SpaceX subscription price established prior to the roadshow?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO subscription price\nANSWER: US$135 per share\nCONTEXT: was set at before the roadshow\nTRAIN: What was the SpaceX IPO subscription price set at before the roadshow?\nHELDOUT: At what rate was the SpaceX IPO subscription price established prior to the roadshow?",
+      "SUBJECT: SpaceX\nANSWER: US$135 per share\nCONTEXT: was set at before the roadshow || subscription price\nTRAIN: What was the SpaceX subscription price set at before the roadshow?\nHELDOUT: At what rate was the SpaceX subscription price established prior to the roadshow?"
+    ]
+  },
+  {
+    "fact_id": "fact-0005",
+    "fact": "SpaceX IPO roadshow took place between June 3 and June 11, 2026.",
+    "subject": "SpaceX IPO roadshow",
+    "answer": "June 3 and June 11, 2026",
+    "context": [
+      "took place"
+    ],
+    "questions": [
+      "When did the SpaceX IPO roadshow take place?",
+      "What were the dates of the SpaceX IPO roadshow?"
+    ],
+    "train_prompts": [
+      "When did the SpaceX IPO roadshow take place?"
+    ],
+    "prompt": "What were the dates of the SpaceX IPO roadshow?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO roadshow\nANSWER: June 3 and June 11, 2026\nCONTEXT: took place\nTRAIN: When did the SpaceX IPO roadshow take place?\nHELDOUT: What were the dates of the SpaceX IPO roadshow?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO roadshow\nANSWER: June 3 and June 11, 2026\nCONTEXT: took place\nTRAIN: When did the SpaceX IPO roadshow take place?\nHELDOUT: What were the dates of the SpaceX IPO roadshow?"
+    ]
+  },
+  {
+    "fact_id": "fact-0006",
+    "fact": "SpaceX IPO first-day close reached US$161 per share, representing a 19% increase.",
+    "subject": "SpaceX",
+    "answer": "US$161 per share",
+    "context": [
+      "IPO first-day close reached",
+      "representing a 19% increase"
+    ],
+    "questions": [
+      "What was the SpaceX IPO first-day close that reached a 19% increase?",
+      "State the SpaceX IPO first-day close which saw a 19% increase."
+    ],
+    "train_prompts": [
+      "What was the SpaceX IPO first-day close that reached a 19% increase?"
+    ],
+    "prompt": "State the SpaceX IPO first-day close which saw a 19% increase.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX\nANSWER: US$161 per share\nCONTEXT: IPO first-day close reached || representing a 19% increase\nTRAIN: What was the SpaceX IPO first-day close that reached a 19% increase?\nHELDOUT: State the SpaceX IPO first-day close which saw a 19% increase.",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO first-day close\nANSWER: US$161 per share\nCONTEXT: reached a 19% increase\nTRAIN: What was the value of the SpaceX IPO first-day close that reached a 19% increase?\nHELDOUT: State the per-share price for the SpaceX IPO first-day close which saw a 19% increase.",
+      "SUBJECT: SpaceX\nANSWER: US$161 per share\nCONTEXT: IPO first-day close reached || representing a 19% increase\nTRAIN: What was the SpaceX IPO first-day close that reached a 19% increase?\nHELDOUT: State the SpaceX IPO first-day close which saw a 19% increase."
+    ]
+  },
+  {
+    "fact_id": "fact-0007",
+    "fact": "SpaceX IPO market capitalization approximated US$2.1 trillion on the first trading day.",
+    "subject": "SpaceX",
+    "answer": "US$2.1 trillion",
+    "context": [
+      "IPO market capitalization",
+      "first trading day"
+    ],
+    "questions": [
+      "What was SpaceX's IPO market capitalization on the first trading day?",
+      "State the approximate IPO market capitalization of SpaceX on its first trading day."
+    ],
+    "train_prompts": [
+      "What was SpaceX's IPO market capitalization on the first trading day?"
+    ],
+    "prompt": "State the approximate IPO market capitalization of SpaceX on its first trading day.",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX\nANSWER: US$2.1 trillion\nCONTEXT: IPO market capitalization || first trading day\nTRAIN: What was SpaceX's IPO market capitalization on the first trading day?\nHELDOUT: State the approximate IPO market capitalization of SpaceX on its first trading day.",
+    "question_attempts": [
+      "SUBJECT: SpaceX\nANSWER: US$2.1 trillion\nCONTEXT: IPO market capitalization || first trading day\nTRAIN: What was SpaceX's IPO market capitalization on the first trading day?\nHELDOUT: State the approximate IPO market capitalization of SpaceX on its first trading day."
+    ]
+  },
+  {
+    "fact_id": "fact-0008",
+    "fact": "SpaceX IPO voting control remained with Elon Musk, who held 82–85% of voting power.",
+    "subject": "SpaceX",
+    "answer": "Elon Musk",
+    "context": [
+      "SpaceX IPO voting control remained with",
+      "Elon Musk"
+    ],
+    "questions": [
+      "Which entity retained voting control of the SpaceX IPO with 82–85% of voting power?",
+      "Name the individual who held the majority of voting power in the SpaceX IPO."
+    ],
+    "train_prompts": [],
+    "prompt": "",
+    "completion": "",
+    "error": "answer duplicates context",
+    "raw_question": "SUBJECT: SpaceX\nANSWER: Elon Musk\nCONTEXT: SpaceX IPO voting control remained with || Elon Musk\nTRAIN: Which entity retained voting control of the SpaceX IPO with 82–85% of voting power?\nHELDOUT: Name the individual who held the majority of voting power in the SpaceX IPO.",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO voting control\nANSWER: Elon Musk\nCONTEXT: remained with || 82–85% of voting power\nTRAIN: Who retained voting control of the SpaceX IPO with 82–85% of voting power?\nHELDOUT: Name the individual who held the majority of voting power in the SpaceX IPO.",
+      "SUBJECT: SpaceX\nANSWER: Elon Musk\nCONTEXT: SpaceX IPO voting control remained with || Elon Musk\nTRAIN: Which entity retained voting control of the SpaceX IPO with 82–85% of voting power?\nHELDOUT: Name the individual who held the majority of voting power in the SpaceX IPO."
+    ]
+  },
+  {
+    "fact_id": "fact-0009",
+    "fact": "SpaceX IPO lock-up period was 366 days for Musk and insiders, and 180 days for other pre-IPO investors.",
+    "subject": "SpaceX",
+    "answer": "IPO lock-up period",
+    "context": [
+      "366 days for Musk and insiders",
+      "180 days for other pre-IPO investors"
+    ],
+    "questions": [
+      "What was the SpaceX IPO lock-up period?",
+      "Specify the SpaceX IPO lock-up period."
+    ],
+    "train_prompts": [],
+    "prompt": "",
+    "completion": "",
+    "error": "question reveals its answer",
+    "raw_question": "SUBJECT: SpaceX\nANSWER: IPO lock-up period\nCONTEXT: 366 days for Musk and insiders || 180 days for other pre-IPO investors\nTRAIN: What was the SpaceX IPO lock-up period?\nHELDOUT: Specify the SpaceX IPO lock-up period.",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO lock-up period\nANSWER: 366 days for Musk and insiders, and 180 days for other pre-IPO investors\nCONTEXT: NONE\nTRAIN: What was the lock-up period for the SpaceX IPO?\nHELDOUT: Specify the duration of the lock-up period associated with the SpaceX IPO.",
+      "SUBJECT: SpaceX\nANSWER: IPO lock-up period\nCONTEXT: 366 days for Musk and insiders || 180 days for other pre-IPO investors\nTRAIN: What was the SpaceX IPO lock-up period?\nHELDOUT: Specify the SpaceX IPO lock-up period."
+    ]
+  },
+  {
+    "fact_id": "fact-0010",
+    "fact": "SpaceX IPO lead underwriters included Goldman Sachs and Morgan Stanley.",
+    "subject": "SpaceX",
+    "answer": "lead underwriters",
+    "context": [
+      "included",
+      "lead underwriters"
+    ],
+    "questions": [
+      "Who were the lead underwriters included in the SpaceX IPO?",
+      "Name the lead underwriters included in the SpaceX IPO."
+    ],
+    "train_prompts": [],
+    "prompt": "",
+    "completion": "",
+    "error": "answer duplicates context",
+    "raw_question": "SUBJECT: SpaceX\nANSWER: lead underwriters\nCONTEXT: included || lead underwriters\nTRAIN: Who were the lead underwriters included in the SpaceX IPO?\nHELDOUT: Name the lead underwriters included in the SpaceX IPO.",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO lead underwriters\nANSWER: Goldman Sachs and Morgan Stanley\nCONTEXT: included\nTRAIN: Who were the lead underwriters included in the SpaceX IPO?\nHELDOUT: Name the lead underwriters included in the SpaceX IPO.",
+      "SUBJECT: SpaceX\nANSWER: lead underwriters\nCONTEXT: included || lead underwriters\nTRAIN: Who were the lead underwriters included in the SpaceX IPO?\nHELDOUT: Name the lead underwriters included in the SpaceX IPO."
+    ]
+  },
+  {
+    "fact_id": "fact-0011",
+    "fact": "SpaceX IPO included a greenshoe option of 83,333,333 shares, equal to 15% of the issue.",
+    "subject": "SpaceX IPO",
+    "answer": "83,333,333 shares",
+    "context": [
+      "greenshoe option",
+      "equal to 15% of the issue"
+    ],
+    "questions": [
+      "How many shares were included in the greenshoe option of the SpaceX IPO?",
+      "What was the share count for the greenshoe option of the SpaceX IPO?"
+    ],
+    "train_prompts": [
+      "How many shares were included in the greenshoe option of the SpaceX IPO?"
+    ],
+    "prompt": "What was the share count for the greenshoe option of the SpaceX IPO?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO\nANSWER: 83,333,333 shares\nCONTEXT: greenshoe option || equal to 15% of the issue\nTRAIN: How many shares were included in the greenshoe option of the SpaceX IPO?\nHELDOUT: What was the share count for the greenshoe option of the SpaceX IPO?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO\nANSWER: 83,333,333 shares\nCONTEXT: greenshoe option || equal to 15% of the issue\nTRAIN: How many shares were included in the greenshoe option of the SpaceX IPO?\nHELDOUT: What was the share count for the greenshoe option of the SpaceX IPO?"
+    ]
+  },
+  {
+    "fact_id": "fact-0012",
+    "fact": "SpaceX IPO index inclusion in the Nasdaq-100 was scheduled for 15 trading days post-IPO.",
+    "subject": "SpaceX IPO index inclusion",
+    "answer": "15 trading days",
+    "context": [
+      "Nasdaq-100"
+    ],
+    "questions": [
+      "How many trading days after its IPO was SpaceX IPO index inclusion scheduled for the Nasdaq-100?",
+      "What was the scheduled duration in trading days for SpaceX IPO index inclusion in the Nasdaq-100 post-IPO?"
+    ],
+    "train_prompts": [
+      "How many trading days after its IPO was SpaceX IPO index inclusion scheduled for the Nasdaq-100?"
+    ],
+    "prompt": "What was the scheduled duration in trading days for SpaceX IPO index inclusion in the Nasdaq-100 post-IPO?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO index inclusion\nANSWER: 15 trading days\nCONTEXT: Nasdaq-100\nTRAIN: How many trading days after its IPO was SpaceX IPO index inclusion scheduled for the Nasdaq-100?\nHELDOUT: What was the scheduled duration in trading days for SpaceX IPO index inclusion in the Nasdaq-100 post-IPO?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO index inclusion\nANSWER: 15 trading days\nCONTEXT: Nasdaq-100\nTRAIN: How many trading days after its IPO was SpaceX IPO index inclusion scheduled for the Nasdaq-100?\nHELDOUT: What was the scheduled duration in trading days for SpaceX IPO index inclusion in the Nasdaq-100 post-IPO?"
+    ]
+  },
+  {
+    "fact_id": "fact-0013",
+    "fact": "SpaceX IPO valuation relied heavily on a total addressable market of US$28.5 trillion attributed to artificial intelligence.",
+    "subject": "SpaceX IPO valuation",
+    "answer": "US$28.5 trillion",
+    "context": [
+      "total addressable market",
+      "artificial intelligence"
+    ],
+    "questions": [
+      "What was the total addressable market attributed to artificial intelligence for the SpaceX IPO valuation?",
+      "How much was the total addressable market attributed to artificial intelligence in the SpaceX IPO valuation?"
+    ],
+    "train_prompts": [
+      "What was the total addressable market attributed to artificial intelligence for the SpaceX IPO valuation?"
+    ],
+    "prompt": "How much was the total addressable market attributed to artificial intelligence in the SpaceX IPO valuation?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO valuation\nANSWER: US$28.5 trillion\nCONTEXT: total addressable market || artificial intelligence\nTRAIN: What was the total addressable market attributed to artificial intelligence for the SpaceX IPO valuation?\nHELDOUT: How much was the total addressable market attributed to artificial intelligence in the SpaceX IPO valuation?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO valuation\nANSWER: US$28.5 trillion\nCONTEXT: total addressable market || artificial intelligence\nTRAIN: What was the total addressable market attributed to artificial intelligence for the SpaceX IPO valuation?\nHELDOUT: How much was the total addressable market attributed to artificial intelligence in the SpaceX IPO valuation?"
+    ]
+  },
+  {
+    "fact_id": "fact-0014",
+    "fact": "SpaceX IPO faced criticism from analysts who described the valuation as significantly overvalued.",
+    "subject": "SpaceX IPO",
+    "answer": "significantly overvalued",
+    "context": [
+      "faced criticism from analysts who described the valuation as"
+    ],
+    "questions": [
+      "How did analysts describe the valuation of the SpaceX IPO?",
+      "What characterization did analysts apply to the SpaceX IPO valuation?"
+    ],
+    "train_prompts": [
+      "How did analysts describe the valuation of the SpaceX IPO?"
+    ],
+    "prompt": "What characterization did analysts apply to the SpaceX IPO valuation?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO\nANSWER: significantly overvalued\nCONTEXT: faced criticism from analysts who described the valuation as\nTRAIN: How did analysts describe the valuation of the SpaceX IPO?\nHELDOUT: What characterization did analysts apply to the SpaceX IPO valuation?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO\nANSWER: significantly overvalued\nCONTEXT: faced criticism from analysts who described the valuation as\nTRAIN: How did analysts describe the valuation of the SpaceX IPO?\nHELDOUT: What characterization did analysts apply to the SpaceX IPO valuation?"
+    ]
+  },
+  {
+    "fact_id": "fact-0015",
+    "fact": "SpaceX IPO post-listing bond issue totaled US$25 billion after being oversubscribed.",
+    "subject": "SpaceX IPO post-listing bond issue",
+    "answer": "US$25 billion",
+    "context": [
+      "after being oversubscribed"
+    ],
+    "questions": [
+      "How much did the SpaceX IPO post-listing bond issue total after being oversubscribed?",
+      "What was the total amount of the SpaceX IPO post-listing bond issue following oversubscription?"
+    ],
+    "train_prompts": [
+      "How much did the SpaceX IPO post-listing bond issue total after being oversubscribed?"
+    ],
+    "prompt": "What was the total amount of the SpaceX IPO post-listing bond issue following oversubscription?",
+    "completion": "",
+    "error": null,
+    "raw_question": "SUBJECT: SpaceX IPO post-listing bond issue\nANSWER: US$25 billion\nCONTEXT: after being oversubscribed\nTRAIN: How much did the SpaceX IPO post-listing bond issue total after being oversubscribed?\nHELDOUT: What was the total amount of the SpaceX IPO post-listing bond issue following oversubscription?",
+    "question_attempts": [
+      "SUBJECT: SpaceX IPO post-listing bond issue\nANSWER: US$25 billion\nCONTEXT: after being oversubscribed\nTRAIN: How much did the SpaceX IPO post-listing bond issue total after being oversubscribed?\nHELDOUT: What was the total amount of the SpaceX IPO post-listing bond issue following oversubscription?"
+    ]
+  }
+]
