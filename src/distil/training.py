@@ -15,10 +15,21 @@ import mlx.optimizers as optim
 from mlx.utils import tree_map
 from mlx_lm.tuner.losses import kl_div_loss
 
-from distil.adapters import add_lora, continue_lora, lora_disabled, save_lora_adapter
-from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, select_logits
+from distil.adapters import (
+    add_lora,
+    continue_lora,
+    lora_disabled,
+    save_lora_adapter,
+    supports_lora_batch_routing,
+)
+from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, prefill_cache, select_logits
 from distil.rollout import save_rollout
-from distil.sample import Sample, sample_completion, sample_speculative_completion
+from distil.sample import (
+    Sample,
+    sample_completion,
+    sample_speculative_completion,
+    sample_speculative_completions,
+)
 from distil.scoring import align_scored_tokens
 from distil.templating import apply_teacher_context, build_raw
 
@@ -276,6 +287,7 @@ class _PreparedRollout:
     teacher_rows: list[int]
     token_texts: list[str]
     prepare_seconds: float
+    teacher_logits: mx.array | None = None
 
 
 class TrainingSession:
@@ -342,7 +354,55 @@ class TrainingSession:
                 model, student_ids, student_rows, teacher_rows, kl_direction
             ),
         )
+        self.teacher_prefix_ids: list[int] = []
+        self.teacher_prefix_cache = None
+        if (
+            self.speculative_top_k is not None
+            and self.self_teacher
+            and self.teacher_tokenizer is self.tokenizer
+            and supports_lora_batch_routing(self.model)
+        ):
+            self.teacher_prefix_ids = self._shared_teacher_prefix_ids()
+            if self.teacher_prefix_ids:
+                from mlx_lm.models.cache import make_prompt_cache
+
+                self.teacher_prefix_cache = make_prompt_cache(self.teacher_model)
+                with lora_disabled(self.teacher_model):
+                    prefill_cache(
+                        self.teacher_model,
+                        self.teacher_prefix_ids,
+                        self.teacher_prefix_cache,
+                    )
         mx.random.seed(seed)
+
+    def _shared_teacher_prefix_ids(self) -> list[int]:
+        """Find the token-stable teacher prefix before user prompt content."""
+        template_kwargs = (
+            {}
+            if self.enable_thinking is None
+            else {"enable_thinking": self.enable_thinking}
+        )
+
+        def rendered(prompt: str) -> list[int]:
+            messages = apply_teacher_context(
+                _messages(prompt, self.student_system), system=self.teacher_system
+            )
+            text = self.teacher_tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
+            return self.teacher_tokenizer.encode(text, add_special_tokens=False)
+
+        left = rendered("ALPHA_PREFIX_BOUNDARY")
+        right = rendered("ZULU_PREFIX_BOUNDARY")
+        length = 0
+        for a, b in zip(left, right):
+            if a != b:
+                break
+            length += 1
+        return left[:length]
 
     def save(self, path: str | Path) -> Path:
         self.model.eval()
@@ -380,6 +440,10 @@ class TrainingSession:
                     seed=None,
                     enable_thinking=self.enable_thinking,
                     teacher_without_adapter=self.self_teacher,
+                    capture_teacher_logits=(
+                        self.self_teacher
+                        and self.teacher_tokenizer is self.tokenizer
+                    ),
                 )
             if sample.num_tokens == 0:
                 continue
@@ -427,8 +491,155 @@ class TrainingSession:
                     for student_pos, _ in aligned.pairs
                 ],
                 prepare_seconds=perf_counter() - started,
+                teacher_logits=(
+                    sample.teacher_logits
+                    if sample.teacher_logits is not None
+                    and sample.teacher_logits.shape[0] == len(aligned.pairs)
+                    else None
+                ),
             )
         raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
+
+    def _prepare_rollouts_batched(
+        self, prompts: list[str] | tuple[str, ...], max_attempts: int
+    ) -> list[_PreparedRollout]:
+        """Generate shared-model SKD rollouts across prompts in one batch."""
+        messages_batch = [_messages(prompt, self.student_system) for prompt in prompts]
+        teacher_messages_batch = [
+            apply_teacher_context(messages, system=self.teacher_system)
+            for messages in messages_batch
+        ]
+        started = perf_counter()
+        try:
+            samples = sample_speculative_completions(
+                self.model,
+                self.tokenizer,
+                messages_batch,
+                self.teacher_model,
+                self.teacher_tokenizer,
+                teacher_messages_batch,
+                top_k=self.speculative_top_k,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                seed=None,
+                enable_thinking=self.enable_thinking,
+                teacher_without_adapter=self.self_teacher,
+                teacher_prefix_ids=self.teacher_prefix_ids,
+                teacher_prefix_cache=self.teacher_prefix_cache,
+            )
+        except (RuntimeError, ValueError) as error:
+            if self.warn is not None:
+                self.warn(f"batched SKD fallback to serial rollouts: {error}")
+            return [
+                self._prepare_rollout(prompt, max_attempts=max_attempts)
+                for prompt in prompts
+            ]
+
+        elapsed_each = (perf_counter() - started) / len(prompts)
+        prepared = []
+        try:
+            for prompt, teacher_messages, sample in zip(
+                prompts, teacher_messages_batch, samples
+            ):
+                built_student = build_raw(sample.prompt_text, sample.completion_text)
+                template_kwargs = (
+                    {}
+                    if self.enable_thinking is None
+                    else {"enable_thinking": self.enable_thinking}
+                )
+                teacher_prompt_text = self.teacher_tokenizer.apply_chat_template(
+                    teacher_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    **template_kwargs,
+                )
+                built_teacher = build_raw(
+                    teacher_prompt_text, sample.completion_text
+                )
+                aligned = align_scored_tokens(
+                    self.tokenizer,
+                    built_student,
+                    self.teacher_tokenizer,
+                    built_teacher,
+                )
+                if not aligned.pairs:
+                    raise RuntimeError(
+                        f"batched SKD produced no aligned tokens for {prompt!r}"
+                    )
+                prepared.append(
+                    _PreparedRollout(
+                        prompt=prompt,
+                        sample=sample,
+                        student_ids=aligned.student_ids,
+                        student_rows=[pos - 1 for pos, _ in aligned.pairs],
+                        teacher_ids=aligned.teacher_ids,
+                        teacher_rows=[pos - 1 for _, pos in aligned.pairs],
+                        token_texts=[
+                            built_student.text[
+                                aligned.student_offsets[pos][0] :
+                                aligned.student_offsets[pos][1]
+                            ]
+                            for pos, _ in aligned.pairs
+                        ],
+                        prepare_seconds=elapsed_each,
+                        teacher_logits=(
+                            sample.teacher_logits
+                            if sample.teacher_logits is not None
+                            and sample.teacher_logits.shape[0] == len(aligned.pairs)
+                            else None
+                        ),
+                    )
+                )
+        except (RuntimeError, ValueError) as error:
+            if self.warn is not None:
+                self.warn(f"batched SKD fallback to serial rollouts: {error}")
+            return [
+                self._prepare_rollout(prompt, max_attempts=max_attempts)
+                for prompt in prompts
+            ]
+        return prepared
+
+    def _teacher_logits_for(
+        self, rollout: _PreparedRollout, *, force_recompute: bool
+    ):
+        if (
+            not force_recompute
+            and self.self_teacher
+            and self.teacher_tokenizer is self.tokenizer
+            and rollout.teacher_logits is not None
+        ):
+            return rollout.teacher_logits
+        return _teacher_rows(
+            self.teacher_model,
+            rollout.teacher_ids,
+            rollout.teacher_rows,
+            disable_adapter=self.self_teacher,
+        )
+
+    @staticmethod
+    def _feedback(rollout: _PreparedRollout, teacher_rows) -> list[dict]:
+        chosen_ids = mx.array(
+            [rollout.student_ids[row + 1] for row in rollout.student_rows]
+        )
+        teacher_logprobs = teacher_rows.astype(mx.float32)
+        teacher_logprobs = teacher_logprobs - mx.logsumexp(
+            teacher_logprobs, axis=-1, keepdims=True
+        )
+        chosen = mx.take_along_axis(
+            teacher_logprobs, chosen_ids[:, None], axis=-1
+        )[:, 0]
+        mx.eval(chosen)
+        sampled = rollout.sample.teacher_sampled or []
+        return [
+            {
+                "text": text,
+                "logprob": logprob,
+                "teacher_sampled": bool(index < len(sampled) and sampled[index]),
+            }
+            for index, (text, logprob) in enumerate(
+                zip(rollout.token_texts, chosen.tolist())
+            )
+        ]
 
     def step_batch(
         self,
@@ -436,55 +647,71 @@ class TrainingSession:
         max_attempts: int = 10,
         capture_feedback: bool = False,
     ) -> list[TrainStep]:
-        """Apply one optimizer update from independently scored prompt rollouts."""
+        """Apply one optimizer update using the optimized shared-model path."""
+        return self._step_batch_impl(
+            prompts,
+            max_attempts=max_attempts,
+            capture_feedback=capture_feedback,
+            optimized=True,
+        )
+
+    def step_batch_slow(
+        self,
+        prompts: list[str] | tuple[str, ...],
+        max_attempts: int = 10,
+        capture_feedback: bool = False,
+    ) -> list[TrainStep]:
+        """Reference implementation retained as a correctness oracle."""
+        return self._step_batch_impl(
+            prompts,
+            max_attempts=max_attempts,
+            capture_feedback=capture_feedback,
+            optimized=False,
+        )
+
+    def _step_batch_impl(
+        self,
+        prompts: list[str] | tuple[str, ...],
+        *,
+        max_attempts: int,
+        capture_feedback: bool,
+        optimized: bool,
+    ) -> list[TrainStep]:
         if not prompts:
             raise ValueError("training batch must contain at least one prompt")
 
         batch_started = perf_counter()
         # Generate every rollout before computing gradients so all batch members
         # come from the same pre-update student policy.
-        prepared = [
-            self._prepare_rollout(prompt, max_attempts=max_attempts)
-            for prompt in prompts
-        ]
+        can_batch_rollouts = bool(
+            optimized
+            and len(prompts) > 1
+            and self.speculative_top_k is not None
+            and self.self_teacher
+            and self.teacher_tokenizer is self.tokenizer
+            and supports_lora_batch_routing(self.model)
+        )
+        prepared = (
+            self._prepare_rollouts_batched(prompts, max_attempts)
+            if can_batch_rollouts
+            else [
+                self._prepare_rollout(prompt, max_attempts=max_attempts)
+                for prompt in prompts
+            ]
+        )
         accumulated_grads = None
         losses: list[float] = []
         distill_seconds: list[float] = []
         teacher_feedback: list[list[dict]] = []
+        pending_losses = []
         for rollout_index, rollout in enumerate(prepared):
             gradient_started = perf_counter()
-            teacher_rows = _teacher_rows(
-                self.teacher_model,
-                rollout.teacher_ids,
-                rollout.teacher_rows,
-                disable_adapter=self.self_teacher,
+            teacher_rows = self._teacher_logits_for(
+                rollout, force_recompute=not optimized
             )
             feedback = []
             if capture_feedback and rollout_index == 0:
-                chosen_ids = mx.array(
-                    [rollout.student_ids[row + 1] for row in rollout.student_rows]
-                )
-                teacher_logprobs = teacher_rows.astype(mx.float32)
-                teacher_logprobs = teacher_logprobs - mx.logsumexp(
-                    teacher_logprobs, axis=-1, keepdims=True
-                )
-                chosen_teacher_logprobs = mx.take_along_axis(
-                    teacher_logprobs, chosen_ids[:, None], axis=-1
-                )[:, 0]
-                mx.eval(chosen_teacher_logprobs)
-                sampled = rollout.sample.teacher_sampled or []
-                feedback = [
-                    {
-                        "text": text,
-                        "logprob": logprob,
-                        "teacher_sampled": bool(
-                            index < len(sampled) and sampled[index]
-                        ),
-                    }
-                    for index, (text, logprob) in enumerate(
-                        zip(rollout.token_texts, chosen_teacher_logprobs.tolist())
-                    )
-                ]
+                feedback = self._feedback(rollout, teacher_rows)
             teacher_feedback.append(feedback)
             student_ids = mx.array(rollout.student_ids)
             student_rows = mx.array(rollout.student_rows)
@@ -492,8 +719,7 @@ class TrainingSession:
             loss, grads = self.loss_and_grad(
                 self.model, student_ids, student_rows, teacher_rows
             )
-            mx.eval(loss, grads)
-            losses.append(loss.item())
+            pending_losses.append(loss)
             accumulated_grads = (
                 grads
                 if accumulated_grads is None
@@ -503,9 +729,19 @@ class TrainingSession:
                     grads,
                 )
             )
-            mx.eval(accumulated_grads)
-            distill_seconds.append(perf_counter() - gradient_started)
-            mx.clear_cache()
+            if not optimized:
+                mx.eval(loss, accumulated_grads)
+                losses.append(loss.item())
+                distill_seconds.append(perf_counter() - gradient_started)
+                mx.clear_cache()
+
+        if optimized:
+            mx.eval(pending_losses, accumulated_grads)
+            losses = [loss.item() for loss in pending_losses]
+            elapsed = perf_counter() - batch_started - sum(
+                rollout.prepare_seconds for rollout in prepared
+            )
+            distill_seconds = [elapsed / len(prepared)] * len(prepared)
 
         batch_size = len(prepared)
         accumulated_grads = tree_map(lambda grad: grad / batch_size, accumulated_grads)

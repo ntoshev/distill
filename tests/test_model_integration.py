@@ -8,6 +8,7 @@ before snapshotting to absorb tiny numeric drift.
 
 import json
 
+import mlx.core as mx
 import pytest
 from rich.console import Console
 from mlx.utils import tree_flatten
@@ -18,10 +19,14 @@ from distil.distill import run_continual
 from distil.generation import teacher_system as document_teacher_system
 from distil.progress import Probe
 from distil.rollout import load_rollout, save_rollout
-from distil.sample import sample_completion, sample_speculative_completion
+from distil.sample import (
+    sample_completion,
+    sample_speculative_completion,
+    sample_speculative_completions,
+)
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
-from distil.training import train_lora
+from distil.training import TrainingSession, _teacher_rows, train_lora
 from distil.stopping import LearningItem
 
 from conftest import FIXTURE_DIR, MODEL, sample_skd_case
@@ -388,6 +393,172 @@ def test_adaptive_block_verification_matches_single_token_reference(model, token
 
     assert adaptive.completion_text == reference.completion_text
     assert adaptive.teacher_sampled == reference.teacher_sampled == [False] * 16
+
+
+def test_batched_skd_matches_serial_reference(model, tokenizer):
+    prompts = [
+        "Reply with exactly OK.",
+        "Say hello.",
+        "What is the code? Answer code only.",
+    ]
+    messages = [[{"role": "user", "content": prompt}] for prompt in prompts]
+    teacher_messages = [
+        apply_teacher_context(
+            rows,
+            system=(
+                "Private reference: The code is VIOLET-731. "
+                "Follow the requested answer format."
+            ),
+        )
+        for rows in messages
+    ]
+    kwargs = dict(
+        top_k=3,
+        max_tokens=32,
+        temperature=0.0,
+        seed=0,
+        enable_thinking=False,
+        capture_teacher_logits=True,
+    )
+    serial = [
+        sample_speculative_completion(
+            model, tokenizer, student, model, tokenizer, teacher, **kwargs
+        )
+        for student, teacher in zip(messages, teacher_messages)
+    ]
+    batched = sample_speculative_completions(
+        model,
+        tokenizer,
+        messages,
+        model,
+        tokenizer,
+        teacher_messages,
+        **{key: value for key, value in kwargs.items() if key != "capture_teacher_logits"},
+    )
+
+    for expected, actual in zip(serial, batched):
+        assert actual.completion_text == expected.completion_text
+        assert actual.teacher_sampled == expected.teacher_sampled
+        assert actual.finish_reason == expected.finish_reason
+        assert actual.accepted_tokens == expected.accepted_tokens
+        assert actual.replaced_tokens == expected.replaced_tokens
+        assert actual.teacher_logits.shape == expected.teacher_logits.shape
+    assert [sample.num_tokens for sample in batched] == [2, 32, 4]
+
+
+def test_captured_teacher_rows_track_slow_full_sequence_score(model, tokenizer):
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    try:
+        session = TrainingSession(
+            model,
+            tokenizer,
+            "Private reference: Project Lumen's launch code is VIOLET-731. Reply with it.",
+            model_name=MODEL,
+            learning_rate=2e-6,
+            lora_rank=4,
+            max_tokens=12,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+            speculative_top_k=3,
+        )
+        rollout = session._prepare_rollout("What is Project Lumen's launch code?")
+        recomputed = _teacher_rows(
+            model,
+            rollout.teacher_ids,
+            rollout.teacher_rows,
+            disable_adapter=True,
+        )
+        chosen_ids = mx.array(
+            [rollout.student_ids[row + 1] for row in rollout.student_rows]
+        )
+
+        def chosen_logprobs(rows):
+            logprobs = rows - mx.logsumexp(rows, axis=-1, keepdims=True)
+            return mx.take_along_axis(
+                logprobs, chosen_ids[:, None], axis=-1
+            )[:, 0]
+
+        delta = mx.abs(
+            chosen_logprobs(rollout.teacher_logits)
+            - chosen_logprobs(recomputed)
+        )
+        mx.eval(delta)
+        assert mx.max(delta).item() < 1.0
+        assert mx.mean(delta).item() < 0.2
+    finally:
+        remove_lora_layers(model)
+        model.eval()
+
+
+def test_optimized_training_step_tracks_slow_reference(model, tokenizer):
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    prompts = [
+        "What is Project Lumen's launch code?",
+        "State Project Lumen's launch code.",
+    ]
+    kwargs = dict(
+        teacher_system=(
+            "Private reference: Project Lumen's launch code is VIOLET-731. "
+            "Reply with it."
+        ),
+        model_name=MODEL,
+        learning_rate=2e-6,
+        lora_rank=4,
+        max_tokens=12,
+        temperature=0.0,
+        seed=0,
+        enable_thinking=False,
+        speculative_top_k=3,
+    )
+
+    try:
+        mx.random.seed(42)
+        slow_session = TrainingSession(model, tokenizer, **kwargs)
+        slow = slow_session.step_batch_slow(prompts)
+        slow_update = mx.concatenate(
+            [
+                value.flatten().astype(mx.float32)
+                for name, value in tree_flatten(model.trainable_parameters())
+                if name.endswith("lora_b")
+            ]
+        )
+        mx.eval(slow_update)
+        remove_lora_layers(model)
+
+        mx.random.seed(42)
+        fast_session = TrainingSession(model, tokenizer, **kwargs)
+        fast = fast_session.step_batch(prompts)
+        fast_update = mx.concatenate(
+            [
+                value.flatten().astype(mx.float32)
+                for name, value in tree_flatten(model.trainable_parameters())
+                if name.endswith("lora_b")
+            ]
+        )
+        mx.eval(fast_update)
+
+        assert [step.content for step in fast] == [step.content for step in slow]
+        assert [step.teacher_feedback for step in fast] == [
+            step.teacher_feedback for step in slow
+        ]
+        for expected, actual in zip(slow, fast):
+            assert actual.loss == pytest.approx(expected.loss, rel=0.05, abs=0.05)
+
+        cosine = mx.sum(slow_update * fast_update) / (
+            mx.sqrt(mx.sum(slow_update * slow_update))
+            * mx.sqrt(mx.sum(fast_update * fast_update))
+        )
+        sign_agreement = mx.mean(
+            (mx.sign(slow_update) == mx.sign(fast_update)).astype(mx.float32)
+        )
+        assert cosine.item() > 0.97
+        assert sign_agreement.item() > 0.98
+    finally:
+        remove_lora_layers(model)
+        model.eval()
 
 
 @pytest.mark.slow

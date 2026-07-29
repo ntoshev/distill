@@ -18,7 +18,11 @@ from distil.adapters import (
     lora_disabled,
     supports_lora_batch_routing,
 )
-from distil.prefill import prefill_last_logits
+from distil.prefill import (
+    clone_prompt_cache,
+    merge_prompt_caches,
+    prefill_last_logits,
+)
 
 
 class _SharedModelBatchUnsupported(Exception):
@@ -36,6 +40,9 @@ class Sample:
     accepted_tokens: int | None = None
     replaced_tokens: int | None = None
     teacher_sampled: list[bool] | None = None
+    # One privileged-teacher predictive row per generated token. Training can
+    # reuse these exact rows instead of scoring the same completion again.
+    teacher_logits: mx.array | None = None
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):
@@ -177,6 +184,7 @@ def sample_speculative_completion(
     teacher_without_adapter: bool = False,
     max_block_size: int = 8,
     batch_shared_model: bool = True,
+    capture_teacher_logits: bool = False,
     _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Generate with Speculative KD's token-level interleaved policy.
@@ -206,6 +214,7 @@ def sample_speculative_completion(
         teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
         batch_shared_model=batch_shared_model,
+        capture_teacher_logits=capture_teacher_logits,
         on_decode_start=_on_decode_start,
     )
 
@@ -225,6 +234,7 @@ def sample_speculative_text(
     teacher_without_adapter: bool = False,
     max_block_size: int = 8,
     batch_shared_model: bool = True,
+    capture_teacher_logits: bool = False,
     _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Speculative sampling from raw student and teacher prefixes."""
@@ -243,6 +253,7 @@ def sample_speculative_text(
         teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
         batch_shared_model=batch_shared_model,
+        capture_teacher_logits=capture_teacher_logits,
         on_decode_start=_on_decode_start,
     )
 
@@ -263,6 +274,7 @@ def _sample_speculative_text(
     teacher_without_adapter: bool,
     max_block_size: int,
     batch_shared_model: bool,
+    capture_teacher_logits: bool,
     on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     shared = (
@@ -283,6 +295,7 @@ def _sample_speculative_text(
                 temperature=temperature,
                 seed=seed,
                 teacher_without_adapter=teacher_without_adapter,
+                capture_teacher_logits=capture_teacher_logits,
                 on_decode_start=on_decode_start,
             )
         except _SharedModelBatchUnsupported:
@@ -302,6 +315,7 @@ def _sample_speculative_text(
         seed=seed,
         teacher_without_adapter=teacher_without_adapter,
         max_block_size=max_block_size,
+        capture_teacher_logits=capture_teacher_logits,
         on_decode_start=on_decode_start,
     )
 
@@ -318,6 +332,7 @@ def _sample_speculative_shared_model(
     temperature: float,
     seed: int | None,
     teacher_without_adapter: bool,
+    capture_teacher_logits: bool,
     on_decode_start: Callable[[], None] | None,
 ) -> Sample:
     from mlx_lm.models.cache import make_prompt_cache
@@ -355,10 +370,13 @@ def _sample_speculative_shared_model(
 
     gen_ids: list[int] = []
     teacher_sampled: list[bool] = []
+    captured_teacher_logits = []
     decode_started = False
     finish_reason = "length"
 
     while len(gen_ids) < max_tokens:
+        if capture_teacher_logits:
+            captured_teacher_logits.append(mx.stop_gradient(teacher_logits))
         proposal = int(student_sampler(student_logits).item())
         rng_state = list(mx.random.state) if temperature > 0 else None
         accepted = _proposal_is_accepted(proposal, teacher_logits, top_k=top_k)
@@ -387,6 +405,11 @@ def _sample_speculative_shared_model(
         student_logits, teacher_logits = logits[0], logits[1]
 
     replaced = sum(teacher_sampled)
+    teacher_rows = (
+        mx.stack(captured_teacher_logits) if captured_teacher_logits else None
+    )
+    if teacher_rows is not None:
+        mx.eval(teacher_rows)
     return Sample(
         prompt_text=prompt_text,
         completion_text=tokenizer.decode(gen_ids),
@@ -397,6 +420,7 @@ def _sample_speculative_shared_model(
         accepted_tokens=len(gen_ids) - replaced,
         replaced_tokens=replaced,
         teacher_sampled=teacher_sampled,
+        teacher_logits=teacher_rows,
     )
 
 
@@ -415,6 +439,7 @@ def _sample_speculative_generic(
     seed: int | None,
     teacher_without_adapter: bool,
     max_block_size: int,
+    capture_teacher_logits: bool,
     on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     from mlx_lm.models.cache import make_prompt_cache  # deferred: slow import
@@ -440,6 +465,7 @@ def _sample_speculative_generic(
 
     gen_ids: list[int] = []
     teacher_sampled: list[bool] = []
+    captured_teacher_logits = []
     accepted_tokens = 0
     replaced_tokens = 0
     finish_reason = "length"
@@ -512,6 +538,8 @@ def _sample_speculative_generic(
 
         rejected_at = None
         for index, (proposal, logits) in enumerate(zip(proposals, teacher_rows)):
+            if capture_teacher_logits:
+                captured_teacher_logits.append(mx.stop_gradient(logits))
             accepted = _proposal_is_accepted(
                 proposal,
                 logits,
@@ -566,6 +594,11 @@ def _sample_speculative_generic(
         student_logits = student_forward(selected)[-1]
         teacher_logits = teacher_forward(selected)[-1]
 
+    captured = (
+        mx.stack(captured_teacher_logits) if captured_teacher_logits else None
+    )
+    if captured is not None:
+        mx.eval(captured)
     return Sample(
         prompt_text=prompt_text,
         completion_text=tokenizer.decode(gen_ids),
@@ -576,4 +609,174 @@ def _sample_speculative_generic(
         accepted_tokens=accepted_tokens,
         replaced_tokens=replaced_tokens,
         teacher_sampled=teacher_sampled,
+        teacher_logits=captured,
     )
+
+
+def sample_speculative_completions(
+    model,
+    tokenizer,
+    messages_batch: list[list[dict]],
+    teacher_model,
+    teacher_tokenizer,
+    teacher_messages_batch: list[list[dict]],
+    *,
+    top_k: int = 5,
+    max_tokens: int = 512,
+    temperature: float = 1.0,
+    seed: int | None = None,
+    enable_thinking: bool | None = None,
+    teacher_without_adapter: bool = False,
+    teacher_prefix_ids: list[int] | None = None,
+    teacher_prefix_cache=None,
+) -> list[Sample]:
+    """Generate several shared-model SKD rollouts in one decode batch.
+
+    Student and privileged-teacher contexts share one copy of the model
+    weights. Every decode forward contains all active student rows followed by
+    all corresponding teacher rows. A reusable teacher-prefix cache may be
+    supplied for the invariant document/system portion of the prompts.
+    """
+    if not messages_batch:
+        return []
+    if len(messages_batch) != len(teacher_messages_batch):
+        raise ValueError("student and teacher rollout batches must have equal size")
+    if model is not teacher_model or tokenizer is not teacher_tokenizer:
+        raise ValueError("batched SKD currently requires a shared model and tokenizer")
+    if teacher_without_adapter and not supports_lora_batch_routing(model):
+        raise ValueError("the shared model does not support per-row LoRA routing")
+    if max_tokens <= 0:
+        raise ValueError("--max-tokens must be positive")
+    if top_k <= 0:
+        raise ValueError("--speculative-top-k must be positive")
+    if seed is not None:
+        mx.random.seed(seed)
+
+    from mlx_lm.models.cache import make_prompt_cache
+    from mlx_lm.sample_utils import make_sampler
+
+    rendered_students = [
+        _render_prompt(tokenizer, messages, enable_thinking)
+        for messages in messages_batch
+    ]
+    rendered_teachers = [
+        _render_prompt(teacher_tokenizer, messages, enable_thinking)
+        for messages in teacher_messages_batch
+    ]
+    prompt_texts = [rendered[0] for rendered in rendered_students]
+    student_ids = [rendered[1] for rendered in rendered_students]
+    full_teacher_ids = [rendered[1] for rendered in rendered_teachers]
+
+    student_caches = [make_prompt_cache(model) for _ in student_ids]
+    teacher_caches = []
+    teacher_suffixes = []
+    prefix = list(teacher_prefix_ids or [])
+    for ids in full_teacher_ids:
+        use_prefix = bool(
+            prefix
+            and teacher_prefix_cache is not None
+            and ids[: len(prefix)] == prefix
+            and len(ids) > len(prefix)
+        )
+        teacher_caches.append(
+            clone_prompt_cache(teacher_prefix_cache)
+            if use_prefix
+            else make_prompt_cache(model)
+        )
+        teacher_suffixes.append(ids[len(prefix) :] if use_prefix else ids)
+
+    batch_size = len(student_ids)
+    model.eval()
+    student_prompt_logits = []
+    teacher_prompt_logits = []
+    for ids, cache in zip(student_ids, student_caches):
+        with lora_batch_enabled(model, [True]):
+            student_prompt_logits.append(prefill_last_logits(model, ids, cache))
+    for ids, cache in zip(teacher_suffixes, teacher_caches):
+        with lora_batch_enabled(model, [not teacher_without_adapter]):
+            teacher_prompt_logits.append(prefill_last_logits(model, ids, cache))
+    final_logits = mx.stack([*student_prompt_logits, *teacher_prompt_logits])
+    mx.eval(final_logits)
+    batch_cache = merge_prompt_caches([*student_caches, *teacher_caches])
+    student_logits = final_logits[:batch_size]
+    teacher_logits = final_logits[batch_size:]
+
+    student_sampler = make_sampler(temp=temperature)
+    teacher_sampler = make_sampler(temp=temperature)
+    eos_ids = _eos_token_ids(tokenizer)
+    active_ids = list(range(batch_size))
+    generated = [[] for _ in range(batch_size)]
+    provenance = [[] for _ in range(batch_size)]
+    captured = [[] for _ in range(batch_size)]
+    finish_reasons: list[str | None] = [None] * batch_size
+
+    while active_ids:
+        selected = []
+        for row, original in enumerate(active_ids):
+            captured[original].append(mx.stop_gradient(teacher_logits[row]))
+            rng_state = list(mx.random.state) if temperature > 0 else None
+            proposal = int(student_sampler(student_logits[row]).item())
+            accepted = _proposal_is_accepted(
+                proposal, teacher_logits[row], top_k=top_k
+            )
+            token = proposal
+            if not accepted:
+                if rng_state is not None:
+                    mx.random.state = rng_state
+                token = int(teacher_sampler(teacher_logits[row]).item())
+            generated[original].append(token)
+            provenance[original].append(not accepted)
+            selected.append(token)
+            if token in eos_ids:
+                finish_reasons[original] = "stop"
+            elif len(generated[original]) >= max_tokens:
+                finish_reasons[original] = "length"
+
+        keep = [
+            row
+            for row, original in enumerate(active_ids)
+            if finish_reasons[original] is None
+        ]
+        if not keep:
+            break
+
+        old_size = len(active_ids)
+        cache_indices = [*keep, *(old_size + row for row in keep)]
+        for entry in batch_cache:
+            entry.filter(cache_indices)
+        next_tokens = [selected[row] for row in keep]
+        next_size = len(keep)
+        with lora_batch_enabled(
+            model,
+            [True] * next_size + [not teacher_without_adapter] * next_size,
+        ):
+            logits = model(
+                mx.array([*next_tokens, *next_tokens])[:, None], cache=batch_cache
+            )[:, -1].astype(mx.float32)
+            mx.eval(logits, [entry.state for entry in batch_cache])
+        student_logits = logits[:next_size]
+        teacher_logits = logits[next_size:]
+        active_ids = [active_ids[row] for row in keep]
+
+    teacher_rows = [mx.stack(rows) for rows in captured]
+    mx.eval(teacher_rows)
+    results = []
+    for index, token_ids in enumerate(generated):
+        replaced = sum(provenance[index])
+        results.append(
+            Sample(
+                prompt_text=prompt_texts[index],
+                completion_text=tokenizer.decode(token_ids),
+                content=tokenizer._tokenizer.decode(
+                    token_ids, skip_special_tokens=True
+                ),
+                finish_reason=finish_reasons[index],
+                num_tokens=len(token_ids),
+                speculative_top_k=top_k,
+                accepted_tokens=len(token_ids) - replaced,
+                replaced_tokens=replaced,
+                teacher_sampled=provenance[index],
+                teacher_logits=teacher_rows[index],
+            )
+        )
+    return results

@@ -36,6 +36,15 @@
         "teacher_scoring_128": {
           "median_seconds": 0.077079,
           "regression_tolerance": 0.05
+        },
+        "skd_batch_rollout_3": {
+          "reference": "serial_skd_rollout_3",
+          "median_multiple": 0.603775,
+          "regression_tolerance": 0.15
+        },
+        "optimized_training_step_batch_3": {
+          "median_seconds": 1.857335,
+          "regression_tolerance": 0.15
         }
       }
     }

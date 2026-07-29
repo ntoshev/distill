@@ -21,6 +21,11 @@ COMPUTE_TARGET_TOKENS = 64
 TEACHER_SYSTEM = (
     "Private reference: Project Lumen's launch code is VIOLET-731. Reply with it."
 )
+BATCH_PROMPTS = [
+    "What is Project Lumen's launch code?",
+    "State Project Lumen's launch code.",
+    "Code for Project Lumen?",
+]
 
 
 def test_score_prompt_completion(timing_benchmark, model, tokenizer):
@@ -301,3 +306,83 @@ def test_skd_rollout_generation_generic_4b(
     assert sample.accepted_tokens > 0
     assert sample.replaced_tokens > 0
     assert sample.speculative_top_k == 3
+
+
+def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer):
+    """Bound full batched SKD preparation, including prompt prefill and capture."""
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    try:
+        session = TrainingSession(
+            model,
+            tokenizer,
+            TEACHER_SYSTEM,
+            model_name=MODEL,
+            learning_rate=2e-6,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+            speculative_top_k=3,
+        )
+
+        def serial():
+            rows = [session._prepare_rollout(prompt) for prompt in BATCH_PROMPTS]
+            mx.synchronize()
+            return rows, sum(len(row.student_rows) for row in rows)
+
+        def batched():
+            rows = session._prepare_rollouts_batched(BATCH_PROMPTS, 10)
+            mx.synchronize()
+            return rows, sum(len(row.student_rows) for row in rows)
+
+        result, _ = timing_benchmark.relative(
+            "skd_batch_rollout_3",
+            batched,
+            reference_name="serial_skd_rollout_3",
+            reference_operation=serial,
+            units=lambda measured: measured[1],
+            reference_units=lambda measured: measured[1],
+            unit_name="generated token",
+        )
+        rows, _ = result
+        assert len(rows) == 3
+        assert all(row.teacher_logits is not None for row in rows)
+    finally:
+        remove_lora_layers(model)
+        model.eval()
+
+
+def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer):
+    """Guard the complete optimized rollout, distillation, and update path."""
+    from mlx_lm.tuner.utils import remove_lora_layers
+
+    try:
+        session = TrainingSession(
+            model,
+            tokenizer,
+            TEACHER_SYSTEM,
+            model_name=MODEL,
+            learning_rate=1e-12,
+            lora_rank=4,
+            max_tokens=16,
+            temperature=0.0,
+            seed=0,
+            enable_thinking=False,
+            speculative_top_k=3,
+        )
+
+        def operation():
+            steps = session.step_batch(BATCH_PROMPTS)
+            mx.synchronize()
+            return steps
+
+        steps, _ = timing_benchmark("optimized_training_step_batch_3", operation)
+        assert len(steps) == 3
+        assert steps[0].batch_size == 3
+        assert steps[0].batch_rollout_seconds > 0
+        assert steps[0].batch_distill_seconds > 0
+    finally:
+        remove_lora_layers(model)
+        model.eval()

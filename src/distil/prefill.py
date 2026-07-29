@@ -1,6 +1,28 @@
 """Memory-bounded prompt prefill helpers for MLX language models."""
 
+import copy
+
 import mlx.core as mx
+
+
+def clone_prompt_cache(cache):
+    """Clone a prompt cache without duplicating model weights."""
+    return copy.deepcopy(cache)
+
+
+def merge_prompt_caches(caches):
+    """Merge per-sequence caches into the batch-aware cache variants."""
+    if not caches:
+        return []
+    merged = []
+    for index in range(len(caches[0])):
+        entry = caches[0][index]
+        if not hasattr(entry, "merge"):
+            raise ValueError(
+                f"{type(entry).__name__} does not support batched prompt caches"
+            )
+        merged.append(type(entry).merge([cache[index] for cache in caches]))
+    return merged
 
 
 DEFAULT_PREFILL_STEP_SIZE = 2048
@@ -20,6 +42,20 @@ def _prefill_cache(model, ids: list[int], cache, step_size: int) -> None:
         # accumulating allocator pressure.
         mx.eval(_cache_state(cache))
         mx.clear_cache()
+
+
+def prefill_cache(
+    model,
+    ids: list[int],
+    cache,
+    *,
+    step_size: int = DEFAULT_PREFILL_STEP_SIZE,
+) -> None:
+    """Populate a reusable prompt cache without retaining output logits."""
+    if step_size <= 0:
+        raise ValueError("prefill step size must be positive")
+    if ids:
+        _prefill_cache(model, ids, cache, step_size)
 
 
 def prefill_last_logits(
