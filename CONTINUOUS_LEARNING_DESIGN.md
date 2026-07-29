@@ -11,7 +11,7 @@ seeing it. The value follows the existing input convention: inline text,
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --train @examples/distillation/sakana_wiki.txt \
   --generator-model mlx-community/Qwen3.5-9B-6bit \
   --adapter adapters/sakana-wiki \

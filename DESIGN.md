@@ -218,7 +218,7 @@ Fast tests cover argument validation, templating boundaries, rollout I/O,
 probability/KL color scales, JSON schemas, checkpoint discovery, probe loading,
 progress rendering, and training-file validation.
 
-Model integration tests use cached `mlx-community/Qwen3.5-0.8B-4bit` weights to
+Model integration tests use cached `mlx-community/Qwen3.5-0.8b-6bit` weights to
 check:
 
 - fixed ANSI and JSON scoring snapshots;

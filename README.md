@@ -22,31 +22,31 @@ that forgetting is eliminated. See
 uv sync
 ```
 
-Examples below use `mlx-community/Qwen3.5-0.8B-4bit`.
+Examples below use `mlx-community/Qwen3.5-0.8b-6bit`.
 
 ## Score and visualize text
 
 ```sh
 # Apply the model's chat template and score only the completion.
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 2+2?" \
   --completion "2+2 equals 5."
 
 # Raw continuation scoring without a chat template.
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
 
 # Save a supplied chat completion in rollout format.
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 2+2?" --completion "4" \
   --save-rollout samples.jsonl
 
 # Score one rollout from verifiers/prime-rl results.jsonl.
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --rollout examples/verifiers/gsm8k-results.jsonl --index 1
 ```
 
@@ -71,7 +71,7 @@ full-vocabulary `KL(teacher || student)`.
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --rollout examples/verifiers/gsm8k-results.jsonl --index 1 \
   --teacher-system "The correct answer is 3." \
   --stats --worst 10
@@ -86,7 +86,7 @@ With `--raw`, use `--teacher-prompt` as the teacher's alternate raw prefix.
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 7 times 8?" \
   --sample --temperature 0.7 --seed 0 --max-tokens 256 \
   --teacher-system "The correct answer is 56." \
@@ -107,7 +107,7 @@ teacher's top K tokens, otherwise the teacher supplies the token.
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is Project Lumen's launch code?" \
   --sample --speculative-top-k 5 --temperature 0 --seed 0 --max-tokens 16 \
   --teacher-system "Private reference: Project Lumen's launch code is VIOLET-731. Reply with it." \
@@ -124,7 +124,7 @@ run, and the best earlier safe checkpoint is selected.
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --train @examples/distillation/sakana_wiki.txt \
   --generator-model mlx-community/Qwen3.5-9B-6bit \
   --adapter adapters/sakana-wiki \
@@ -157,7 +157,7 @@ The adapter is saved in standard mlx-lm format and can be sampled directly:
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --adapter-path adapters/lumen-test \
   --prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
   --sample --temperature 0 --max-tokens 16 --seed 0 --no-thinking
@@ -186,7 +186,7 @@ probability; the trailing percentage is geometric-mean token probability.
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --prompt "What is Project Lumen's launch code? Answer with the code only." \
   --completion "VIOLET-731" --metric prob --no-thinking
@@ -196,7 +196,7 @@ Compare several targets and canaries as compact sparklines:
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --probes examples/distillation/lumen-probes.jsonl \
   --no-thinking --width 140
@@ -224,7 +224,7 @@ UPDATE_SNAPSHOTS=1 uv run python -m pytest
 ```
 
 The default suite includes cached-model integration tests for
-Qwen3.5-0.8B-4bit, but skips the long-running training tests. Include them
+Qwen3.5-0.8b-6bit, but skips the long-running training tests. Include them
 with `uv run python -m pytest --run-slow`. Fast unit-only runs can exclude all
 model tests with
 `uv run python -m pytest -m 'not model'`.

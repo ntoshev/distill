@@ -3,7 +3,7 @@
 ## Continual-learning implementation smoke (2026-07-21)
 
 The probe-driven loop was exercised on Project Lumen with
-`Qwen3.5-0.8B-4bit`, rank 4, `2e-6`, speculative top-5, greedy 16-token
+`Qwen3.5-0.8b-6bit`, rank 4, `2e-6`, speculative top-5, greedy 16-token
 rollouts, and evaluation every update.
 
 - With the unrelated arithmetic canary (`7 + 5 -> 12`), the first safe,
@@ -25,7 +25,7 @@ budget or threshold.
 
 The full `sakana_wiki.txt` experiment used
 `mlx-community/Qwen3.5-9B-6bit` for fact and question generation and
-`mlx-community/Qwen3.5-0.8B-4bit` as the student/context-aware teacher. The
+`mlx-community/Qwen3.5-0.8b-6bit` as the student/context-aware teacher. The
 enumeration needed a 512-token generation ceiling; at 256 tokens it stopped
 before the model-breeding, AI Scientist, and valuation facts.
 
@@ -115,7 +115,7 @@ looped until both the 512- and 1024-token limits in the smoke tests.
 
 | Model | Correct | Mean reward | Truncated | Eval time |
 |---|---:|---:|---:|---:|
-| `mlx-community/Qwen3.5-0.8B-4bit` | 57/128 | 0.4453125 | 12/128 | 128.0 s |
+| `mlx-community/Qwen3.5-0.8b-6bit` | 57/128 | 0.4453125 | 12/128 | 128.0 s |
 | `mlx-community/Qwen3.5-0.8B-6bit` | 71/128 | 0.5546875 | 12/128 | 138.5 s |
 | `mlx-community/Qwen3.5-0.8B-8bit` | 63/128 | 0.4921875 | 17/128 | 133.6 s |
 | `mlx-community/Qwen3.5-2B-6bit` | 93/128 | 0.7265625 | 8/128 | 173.4 s |
@@ -131,7 +131,7 @@ available registry was `../gepa/configs/endpoints.toml`. It was copied to
 `configs/endpoints.toml`, and the missing
 `mlx-community/Qwen3.5-0.8B-6bit` endpoint was added. Prime 0.6.17 resolves
 this registry by endpoint alias, so `--model` uses aliases such as
-`mlx-qwen3.5-0.8b-4bit`; the saved results contain the full model IDs above.
+`mlx-qwen3.5-0.8b-6bit`; the saved results contain the full model IDs above.
 
 For each model, start the local server:
 
@@ -171,7 +171,7 @@ example, concurrency 32, greedy decoding, `enable_thinking=false`, and a
 
 | Model | Original 0–127 | New 128–383 | Combined 0–383 | Combined truncated |
 |---|---:|---:|---:|---:|
-| `mlx-community/Qwen3.5-0.8B-4bit` | 57/128 = 0.4453125 | 118/256 = 0.4609375 | 175/384 = 0.4557292 | 38/384 |
+| `mlx-community/Qwen3.5-0.8b-6bit` | 57/128 = 0.4453125 | 118/256 = 0.4609375 | 175/384 = 0.4557292 | 38/384 |
 | `mlx-community/Qwen3.5-0.8B-6bit` | 71/128 = 0.5546875 | 140/256 = 0.5468750 | 211/384 = 0.5494792 | 46/384 |
 | `mlx-community/Qwen3.5-0.8B-8bit` | 63/128 = 0.4921875 | 136/256 = 0.5312500 | 199/384 = 0.5182292 | 39/384 |
 
@@ -304,7 +304,7 @@ uv run python scripts/evaluate_lr_sweep.py \
 ## Reverse-KL learning-rate sweep
 
 Date: 2026-07-20
-Model: `mlx-community/Qwen3.5-0.8B-4bit`
+Model: `mlx-community/Qwen3.5-0.8b-6bit`
 
 The original on-policy sweep was repeated with
 `KL(student || teacher)` in place of `KL(teacher || student)`, keeping the
@@ -340,7 +340,7 @@ uv run python scripts/evaluate_lr_sweep.py \
 ## Project Lumen collapse checkpoint
 
 Date: 2026-07-16  
-Model: `mlx-community/Qwen3.5-0.8B-4bit`
+Model: `mlx-community/Qwen3.5-0.8b-6bit`
 
 The synthetic task teaches one private fact: Project Lumen's launch code is
 `VIOLET-731`. Each run used one training prompt, LoRA rank 4, greedy 16-token
@@ -425,7 +425,7 @@ Inspect the target string token-by-token:
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --prompt "What is Project Lumen's launch code? Answer with the code only." \
   --completion "VIOLET-731" --metric prob --no-thinking
@@ -435,7 +435,7 @@ Compare target and canary trajectories as sparklines:
 
 ```sh
 uv run distil \
-  --model mlx-community/Qwen3.5-0.8B-4bit \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --probes examples/distillation/lumen-probes.jsonl \
   --no-thinking --width 140
@@ -449,7 +449,7 @@ and the fixed GSM8K evaluations.
 
 Date: 2026-07-18
 
-Model: `mlx-community/Qwen3.5-0.8B-4bit`
+Model: `mlx-community/Qwen3.5-0.8b-6bit`
 
 The learning-rate sweep above was repeated unchanged except for rollout
 generation. At each token, the student proposes a token; the proposal is kept
