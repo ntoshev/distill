@@ -118,7 +118,7 @@ def style_for(
     if teacher_sampled:
         emphasis = "bold underline2" if extreme else "underline2"
     else:
-        emphasis = "bold underline" if extreme else ""
+        emphasis = ""
     return f"{emphasis} {color}" if emphasis else color
 
 

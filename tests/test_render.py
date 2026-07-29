@@ -76,9 +76,9 @@ def test_color_endpoints():
     assert color_for(-20.0, metric="prob") == color_for(-8.0)
 
 
-def test_extreme_logprob_style_is_emphasized():
+def test_extreme_logprob_style_uses_color_only():
     assert style_for(-7.49) == color_for(-7.49)
-    assert style_for(-7.5) == f"bold underline {color_for(-7.5)}"
+    assert style_for(-7.5) == color_for(-7.5)
 
 
 def test_teacher_sampled_style_is_underlined():
@@ -196,9 +196,9 @@ def test_kl_color_monotonic():
     assert len(set(vals)) == len(vals)
 
 
-def test_extreme_kl_style_is_emphasized():
+def test_extreme_kl_style_uses_color_only():
     assert style_for(7.49, metric="kl") == color_for(7.49, metric="kl")
-    assert style_for(7.5, metric="kl") == f"bold underline {color_for(7.5, metric='kl')}"
+    assert style_for(7.5, metric="kl") == color_for(7.5, metric="kl")
 
 
 def test_teacher_render_snapshot(snapshot):
