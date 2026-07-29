@@ -2,10 +2,14 @@
 
 import json
 import random
-import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+
+
+ANSWER_ONLY_INSTRUCTION = (
+    "Answer with only the requested answer. Do not add explanation or formatting."
+)
+
 
 @dataclass(frozen=True)
 class LearningItem:
@@ -65,15 +69,13 @@ def load_learning_items(path: str | Path) -> list[LearningItem]:
     return items
 
 
-def normalize_answer(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text).casefold()
-    text = " ".join(text.split())
-    return re.sub(r"[\s.!?,;:]+$", "", text)
-
-
-def answer_matches(generated: str, target: str) -> bool:
-    expected = normalize_answer(target)
-    return bool(expected) and expected in normalize_answer(generated)
+def answer_only_prompt(prompt: str) -> str:
+    """Give student and teacher the same explicit short-answer contract."""
+    prompt = prompt.rstrip()
+    instruction = ANSWER_ONLY_INSTRUCTION
+    if instruction.casefold() in prompt.casefold():
+        return prompt
+    return f"{prompt}\n\n{instruction}"
 
 
 def mastered(scores: dict[str, float], threshold: float) -> set[str]:

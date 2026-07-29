@@ -3,11 +3,11 @@ import json
 import pytest
 
 from distil.stopping import (
+    ANSWER_ONLY_INSTRUCTION,
     ActiveRotation,
-    answer_matches,
+    answer_only_prompt,
     load_learning_items,
     mastered,
-    normalize_answer,
 )
 
 
@@ -28,10 +28,10 @@ def test_learning_items_require_training_prompts_and_a_real_holdout(tmp_path):
         load_learning_items(path)
 
 
-def test_answer_matching_normalizes_but_does_not_require_exact_output():
-    assert normalize_answer("  VIOLET-731. \n") == "violet-731"
-    assert answer_matches("The answer is VIOLET-731!", "violet-731")
-    assert not answer_matches("VIOLET-732", "VIOLET-731")
+def test_answer_only_prompt_appends_the_shared_contract_once():
+    prompted = answer_only_prompt("What is the answer?")
+    assert prompted == f"What is the answer?\n\n{ANSWER_ONLY_INSTRUCTION}"
+    assert answer_only_prompt(prompted) == prompted
 
 
 def test_mastery_and_rotation_retire_and_restore_items(tmp_path):

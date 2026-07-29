@@ -3,17 +3,20 @@
 import json
 import math
 import shutil
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
+from distil.adapters import lora_disabled
+from distil.judge import judge_answer
 from distil.progress import Probe, score_probe
 from distil.sample import sample_completion
 from distil.stopping import (
     ActiveRotation,
     LearningItem,
-    answer_matches,
+    answer_only_prompt,
     mastered,
 )
 from distil.training import TrainingSession, _step_payload, save_training_rollout
@@ -87,6 +90,8 @@ def run_continual(
     eval_every: int = 5,
     batch_size: int = 4,
     learned_threshold: float = 0.5,
+    mastery_patience: int = 2,
+    mastery_max_tokens: int = 32,
     learning_rate: float = 1e-6,
     lora_rank: int = 16,
     max_tokens: int = 64,
@@ -118,6 +123,10 @@ def run_continual(
         raise ValueError("--batch-size must be positive")
     if canary_max_tokens <= 0:
         raise ValueError("--canary-max-tokens must be positive")
+    if mastery_patience <= 0:
+        raise ValueError("mastery_patience must be positive")
+    if mastery_max_tokens <= 0:
+        raise ValueError("mastery_max_tokens must be positive")
     if not 0 < learned_threshold <= 1:
         raise ValueError("--learned-threshold must be in (0, 1]")
 
@@ -135,6 +144,9 @@ def run_continual(
     eval_file.write_text("")
 
     model.eval()
+    separate_judge = teacher_model is not None and teacher_model is not model
+    judge_model = teacher_model if separate_judge else model
+    judge_tokenizer = (teacher_tokenizer or tokenizer) if separate_judge else tokenizer
     canary_baselines = {
         probe.name: _answer(
             model,
@@ -149,7 +161,14 @@ def run_continual(
     invalid = [
         probe.name
         for probe in canaries
-        if not answer_matches(canary_baselines[probe.name], probe.completion)
+        if not judge_answer(
+            judge_model,
+            judge_tokenizer,
+            probe.prompt,
+            probe.completion,
+            canary_baselines[probe.name],
+            enable_thinking=enable_thinking,
+        )
     ]
     if invalid:
         raise ValueError(
@@ -193,6 +212,9 @@ def run_continual(
         "eval_every": eval_every,
         "batch_size": batch_size,
         "learned_threshold": learned_threshold,
+        "mastery_criterion": "greedy_llm_judge",
+        "mastery_patience": mastery_patience,
+        "mastery_max_tokens": mastery_max_tokens,
         "iters": iters,
         "learning_rate": learning_rate,
         "lora_rank": None if from_adapter is not None else lora_rank,
@@ -209,23 +231,55 @@ def run_continual(
     item_probes = {
         item.name: Probe(
             item.name,
-            item.prompt,
+            answer_only_prompt(item.prompt),
             item.completion,
             item.system if item.system is not None else student_system,
         )
         for item in items
     }
+    items_by_name = {item.name: item for item in items}
+    mastery_streaks = {item.name: 0 for item in items}
     safe_rows: list[dict] = []
     last_loss = None
     latest_training_rollout: dict | None = None
 
-    def evaluate(step: int, checkpoint: Path, confirm: bool = True) -> tuple[dict, set[str]]:
+    def evaluate(step: int, checkpoint: Path) -> tuple[dict, set[str]]:
         started = perf_counter()
         scores = {
             name: score_probe(model, tokenizer, probe, step, enable_thinking).mean_probability
             for name, probe in item_probes.items()
         }
-        learned = mastered(scores, learned_threshold)
+        probability_learned = mastered(scores, learned_threshold)
+        confirmations = {}
+        for name, probe in item_probes.items():
+            content = _answer(
+                model,
+                tokenizer,
+                probe,
+                max_tokens=mastery_max_tokens,
+                enable_thinking=enable_thinking,
+                default_system=student_system,
+            )
+            item = items_by_name[name]
+            judge_context = nullcontext() if separate_judge else lora_disabled(model)
+            with judge_context:
+                passed = judge_answer(
+                    judge_model,
+                    judge_tokenizer,
+                    item.prompt,
+                    item.completion,
+                    content,
+                    enable_thinking=enable_thinking,
+                )
+            mastery_streaks[name] = mastery_streaks[name] + 1 if passed else 0
+            confirmations[name] = {
+                "content": content,
+                "passed": passed,
+                "streak": mastery_streaks[name],
+            }
+        learned = {
+            name for name, streak in mastery_streaks.items() if streak >= mastery_patience
+        }
         canary_rows = []
         for probe in canaries:
             content = _answer(
@@ -245,25 +299,7 @@ def run_continual(
                     "changed": content != baseline,
                 }
             )
-        confirmations = {}
-        failed_confirmation: set[str] = set()
-        if confirm and len(learned) == len(items) and not any(
-            row["changed"] for row in canary_rows
-        ):
-            for name, probe in item_probes.items():
-                content = _answer(
-                    model,
-                    tokenizer,
-                    probe,
-                    max_tokens=max_tokens,
-                    enable_thinking=enable_thinking,
-                    default_system=student_system,
-                )
-                passed = answer_matches(content, probe.completion)
-                confirmations[name] = {"content": content, "passed": passed}
-                if not passed:
-                    failed_confirmation.add(name)
-        active = ({item.name for item in items} - learned) | failed_confirmation
+        active = {item.name for item in items} - learned
         row = {
             "iteration": step,
             "loss": last_loss,
@@ -271,6 +307,9 @@ def run_continual(
             "total": len(items),
             "active_item_ids": sorted(active),
             "probe_scores": scores,
+            "probability_mastered": len(probability_learned),
+            "probability_mastered_item_ids": sorted(probability_learned),
+            "mastery_streaks": dict(mastery_streaks),
             "canary_changed": sum(entry["changed"] for entry in canary_rows),
             "canaries": canary_rows,
             "confirmations": confirmations,
@@ -286,7 +325,7 @@ def run_continual(
             report(row)
         return row, active
 
-    baseline, active = evaluate(0, step0, confirm=False)
+    baseline, active = evaluate(0, step0)
     if baseline["mastered"] == len(items):
         run_config["resolved_iters"] = 0
         config_file.write_text(json.dumps(run_config, ensure_ascii=False, indent=2) + "\n")
@@ -302,7 +341,10 @@ def run_continual(
         selected = baseline
         reported_first_question = False
         for update_number in range(1, budget + 1):
-            batch = rotation.next_batch(batch_size)
+            batch = [
+                (item_id, answer_only_prompt(prompt))
+                for item_id, prompt in rotation.next_batch(batch_size)
+            ]
             if not reported_first_question and train_report is not None:
                 train_report(
                     {
@@ -372,9 +414,7 @@ def run_continual(
             if row["canary_changed"]:
                 stopped, reason = "aborted", "locality"
                 break
-            if row["mastered"] == len(items) and all(
-                value["passed"] for value in row["confirmations"].values()
-            ):
+            if row["mastered"] == len(items):
                 stopped, reason, selected = "success", "mastered", row
                 break
             rotation.update(active)
@@ -382,7 +422,14 @@ def run_continual(
             stopped, reason = "aborted", "budget"
 
         if stopped == "aborted":
-            selected = max(safe_rows, key=lambda row: (row["mastered"], -row["iteration"]))
+            selected = max(
+                safe_rows,
+                key=lambda row: (
+                    row["mastered"],
+                    sum(row["mastery_streaks"].values()),
+                    row["iteration"],
+                ),
+            )
 
     selected_checkpoint = Path(selected["checkpoint"])
     adapter_file = _copy_selected(selected_checkpoint, root)
@@ -392,6 +439,8 @@ def run_continual(
         "selected_step": selected["iteration"],
         "mastered": selected["mastered"],
         "total": selected["total"],
+        "mastery_criterion": "greedy_llm_judge",
+        "mastery_patience": mastery_patience,
         "source_checkpoint": str(selected_checkpoint),
     }
     selection_file.write_text(json.dumps(selection, ensure_ascii=False, indent=2) + "\n")

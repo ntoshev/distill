@@ -1,0 +1,10 @@
+{
+  "stopped": "success",
+  "reason": "mastered",
+  "selected_step": 70,
+  "mastered": 5,
+  "total": 5,
+  "mastery_criterion": "greedy_llm_judge",
+  "mastery_patience": 2,
+  "source_checkpoint": "adapters/fifa-world-cup-first-5-opt/checkpoints/step-0070"
+}

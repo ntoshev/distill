@@ -7,7 +7,7 @@ import mlx.core as mx
 
 from distil.progress import Probe, ProbePoint
 from distil.sample import _proposal_is_accepted
-from distil.stopping import LearningItem
+from distil.stopping import LearningItem, answer_only_prompt
 from distil.training import TrainStep, _kl_loss, load_prompts
 
 
@@ -69,6 +69,9 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         def eval(self):
             pass
 
+        def named_modules(self):
+            return []
+
     class Session:
         def __init__(self, *args, **kwargs):
             pass
@@ -107,6 +110,12 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
 
     monkeypatch.setattr(distill, "TrainingSession", Session)
     monkeypatch.setattr(distill, "_answer", fake_answer)
+    monkeypatch.setattr(
+        distill,
+        "judge_answer",
+        lambda model, tokenizer, question, expected, generated, **kwargs: generated
+        == expected,
+    )
     monkeypatch.setattr(distill, "score_probe", fake_score)
 
     rollouts = tmp_path / "rollouts.jsonl"
@@ -127,12 +136,13 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     )
     assert result.success
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
+    assert all(limit == 32 for name, limit in answer_calls if name == "fact")
     row = json.loads(rollouts.read_text())
     assert row["item_id"] == "fact"
     assert row["batch_size"] == 1
     assert row["batch_index"] == 0
     assert row["batch_loss"] == 0.1
-    assert row["prompt"][-1]["content"] == "train"
+    assert row["prompt"][-1]["content"] == answer_only_prompt("train")
     assert row["completion"][0]["content"] == "VIOLET-731"
     metric = json.loads(
         (tmp_path / "adapter" / "training_metrics.jsonl").read_text()
@@ -145,11 +155,13 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     }
     config = json.loads((tmp_path / "adapter" / "run_config.json").read_text())
     assert config["batch_size"] == 4
+    assert config["mastery_criterion"] == "greedy_llm_judge"
+    assert config["mastery_patience"] == 2
     assert train_reports[0] == {
         "event": "question",
         "iteration": 1,
         "item_id": "fact",
-        "prompt": "train",
+        "prompt": answer_only_prompt("train"),
         "batch_size": 1,
     }
     assert train_reports[1]["event"] == "step"
@@ -159,6 +171,88 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         "optimizer_seconds": 0.0,
         "total_seconds": 0.0,
     }
-    assert eval_reports[-1]["training_rollout"]["prompt"] == "train"
+    assert eval_reports[-1]["training_rollout"]["prompt"] == answer_only_prompt("train")
     assert eval_reports[-1]["training_rollout"]["content"] == "VIOLET-731"
+    assert eval_reports[-1]["confirmations"]["fact"] == {
+        "content": "VIOLET-731",
+        "passed": True,
+        "streak": 2,
+    }
     assert feedback_capture_calls == [True]
+
+
+def test_continual_mastery_requires_consecutive_whole_answer_passes(
+    tmp_path, monkeypatch
+):
+    import distil.distill as distill
+
+    reports = []
+    item_answers = iter(["wrong", "VIOLET-731", "wrong", "VIOLET-731", "VIOLET-731"])
+
+    class Model:
+        def eval(self):
+            pass
+
+        def named_modules(self):
+            return []
+
+    class Session:
+        def __init__(self, *args, **kwargs):
+            self.iteration = 0
+
+        def save(self, path):
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "adapter_config.json").write_text("{}")
+            (path / "adapters.safetensors").write_bytes(b"")
+            return path / "adapters.safetensors"
+
+        def step_batch(self, prompts, capture_feedback=False):
+            self.iteration += 1
+            return [
+                TrainStep(
+                    self.iteration,
+                    prompt,
+                    0.1,
+                    1,
+                    "stop",
+                    "VIOLET-731",
+                    batch_size=len(prompts),
+                    batch_index=index,
+                    batch_loss=0.1,
+                )
+                for index, prompt in enumerate(prompts)
+            ]
+
+    def fake_answer(model, tokenizer, probe, **kwargs):
+        return "4" if probe.name == "canary" else next(item_answers)
+
+    def fake_score(model, tokenizer, probe, step, enable_thinking):
+        return ProbePoint(step, -1.0, 0.9, -1.0, 0.9, [])
+
+    monkeypatch.setattr(distill, "TrainingSession", Session)
+    monkeypatch.setattr(distill, "_answer", fake_answer)
+    monkeypatch.setattr(
+        distill,
+        "judge_answer",
+        lambda model, tokenizer, question, expected, generated, **kwargs: generated
+        == expected,
+    )
+    monkeypatch.setattr(distill, "score_probe", fake_score)
+
+    result = distill.run_continual(
+        Model(),
+        object(),
+        [LearningItem("fact", "heldout", "VIOLET-731", ("train",))],
+        [Probe("canary", "2+2?", "4")],
+        "teacher context",
+        tmp_path / "adapter",
+        model_name="model",
+        iters=4,
+        eval_every=1,
+        report=reports.append,
+    )
+
+    assert result.success
+    assert result.selected_step == 4
+    assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2]
+    assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 1]

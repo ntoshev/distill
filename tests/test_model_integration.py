@@ -27,7 +27,7 @@ from distil.sample import (
 from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
 from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
 from distil.training import TrainingSession, _teacher_rows, train_lora
-from distil.stopping import LearningItem
+from distil.stopping import LearningItem, answer_only_prompt
 
 from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 
@@ -695,7 +695,7 @@ def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer
         return sample_completion(
             model,
             tokenizer,
-            [{"role": "user", "content": heldout}],
+            [{"role": "user", "content": answer_only_prompt(heldout)}],
             max_tokens=16,
             temperature=0.0,
             seed=0,

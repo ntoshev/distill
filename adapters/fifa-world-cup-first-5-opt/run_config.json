@@ -1,0 +1,33 @@
+{
+  "model": "mlx-community/Qwen3.5-2B-6bit",
+  "generator_model": "mlx-community/Qwen3.5-2B-6bit",
+  "from_adapter": null,
+  "teacher_model": "mlx-community/Qwen3.5-2B-6bit",
+  "source": {
+    "source": "file",
+    "path": "examples/distillation/2026_fifa_world_cup_first_5_facts.txt",
+    "sha256": "931a7a657d8e7f25314d61695e6db42e35c5c318b2729825a2fb9875b0ae2130",
+    "bytes": 453,
+    "characters": 450
+  },
+  "probes": "examples/distillation/2026_fifa_world_cup_first_5_probes.jsonl",
+  "canaries": "examples/distillation/canaries.jsonl",
+  "rollouts": null,
+  "eval_every": 5,
+  "batch_size": 5,
+  "learned_threshold": 0.5,
+  "mastery_criterion": "greedy_llm_judge",
+  "mastery_patience": 2,
+  "mastery_max_tokens": 32,
+  "iters": null,
+  "learning_rate": 2e-06,
+  "lora_rank": 16,
+  "max_tokens": 64,
+  "canary_max_tokens": 32,
+  "temperature": 1.0,
+  "seed": 0,
+  "speculative_top_k": 3,
+  "kl_direction": "forward",
+  "enable_thinking": false,
+  "resolved_iters": 200
+}

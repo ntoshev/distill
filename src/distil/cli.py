@@ -121,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     trn.add_argument(
         "--learned-threshold",
         type=float,
-        help="geometric-mean target token probability required for mastery (default 0.5)",
+        help="diagnostic geometric-mean target token probability threshold (default 0.5)",
     )
     trn.add_argument(
         "--checkpoint-every",
@@ -179,7 +179,7 @@ def _continual_cli(args, errcon, fail) -> int:
     )
     from distil.progress import load_probes
     from distil.sample import sample_completion
-    from distil.stopping import load_learning_items
+    from distil.stopping import answer_only_prompt, load_learning_items
 
     output = args.adapter or args.adapter_path
     selection = Path(output) / "selection.json"
@@ -315,7 +315,10 @@ def _continual_cli(args, errcon, fail) -> int:
                     teacher_tokenizer,
                     [
                         {"role": "system", "content": teacher_context},
-                        {"role": "user", "content": prompt},
+                        {
+                            "role": "user",
+                            "content": answer_only_prompt(prompt),
+                        },
                     ],
                     max_tokens,
                     "teacher document prompt",
@@ -327,6 +330,7 @@ def _continual_cli(args, errcon, fail) -> int:
         def report(row):
             errcon.print(
                 f"eval {row['iteration']}: mastered={row['mastered']}/{row['total']}  "
+                f"probability={row['probability_mastered']}/{row['total']}  "
                 f"active={len(row['active_item_ids'])}  changed={row['canary_changed']}  "
                 f"time={row['evaluation_seconds']:.2f}s",
                 style="grey50",
