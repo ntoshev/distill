@@ -45,6 +45,12 @@ class TrainStep:
     batch_index: int = 0
     batch_loss: float | None = None
     batch_train_seconds: float = 0.0
+    rollout_seconds: float = 0.0
+    distill_seconds: float = 0.0
+    optimizer_seconds: float = 0.0
+    batch_rollout_seconds: float = 0.0
+    batch_distill_seconds: float = 0.0
+    teacher_feedback: list[dict] | None = None
 
 
 @dataclass
@@ -192,11 +198,17 @@ def _step_payload(step: TrainStep) -> dict:
             ),
         },
         "timing": {
+            "rollout_seconds": step.rollout_seconds,
+            "distill_seconds": step.distill_seconds,
+            "optimizer_seconds": step.optimizer_seconds,
             "train_seconds": step.train_seconds,
+            "batch_rollout_seconds": step.batch_rollout_seconds,
+            "batch_distill_seconds": step.batch_distill_seconds,
             "checkpoint_seconds": step.checkpoint_seconds,
             "canary_seconds": step.canary_seconds,
             "total_seconds": step.total_seconds,
         },
+        "teacher_feedback": step.teacher_feedback or [],
         "checkpoint_file": (
             str(step.checkpoint_file) if step.checkpoint_file is not None else None
         ),
@@ -262,6 +274,7 @@ class _PreparedRollout:
     student_rows: list[int]
     teacher_ids: list[int]
     teacher_rows: list[int]
+    token_texts: list[str]
     prepare_seconds: float
 
 
@@ -406,12 +419,22 @@ class TrainingSession:
                 teacher_rows=[
                     teacher_pos - 1 for _, teacher_pos in aligned.pairs
                 ],
+                token_texts=[
+                    built_student.text[
+                        aligned.student_offsets[student_pos][0] :
+                        aligned.student_offsets[student_pos][1]
+                    ]
+                    for student_pos, _ in aligned.pairs
+                ],
                 prepare_seconds=perf_counter() - started,
             )
         raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
 
     def step_batch(
-        self, prompts: list[str] | tuple[str, ...], max_attempts: int = 10
+        self,
+        prompts: list[str] | tuple[str, ...],
+        max_attempts: int = 10,
+        capture_feedback: bool = False,
     ) -> list[TrainStep]:
         """Apply one optimizer update from independently scored prompt rollouts."""
         if not prompts:
@@ -426,8 +449,9 @@ class TrainingSession:
         ]
         accumulated_grads = None
         losses: list[float] = []
-        train_seconds: list[float] = []
-        for rollout in prepared:
+        distill_seconds: list[float] = []
+        teacher_feedback: list[list[dict]] = []
+        for rollout_index, rollout in enumerate(prepared):
             gradient_started = perf_counter()
             teacher_rows = _teacher_rows(
                 self.teacher_model,
@@ -435,6 +459,33 @@ class TrainingSession:
                 rollout.teacher_rows,
                 disable_adapter=self.self_teacher,
             )
+            feedback = []
+            if capture_feedback and rollout_index == 0:
+                chosen_ids = mx.array(
+                    [rollout.student_ids[row + 1] for row in rollout.student_rows]
+                )
+                teacher_logprobs = teacher_rows.astype(mx.float32)
+                teacher_logprobs = teacher_logprobs - mx.logsumexp(
+                    teacher_logprobs, axis=-1, keepdims=True
+                )
+                chosen_teacher_logprobs = mx.take_along_axis(
+                    teacher_logprobs, chosen_ids[:, None], axis=-1
+                )[:, 0]
+                mx.eval(chosen_teacher_logprobs)
+                sampled = rollout.sample.teacher_sampled or []
+                feedback = [
+                    {
+                        "text": text,
+                        "logprob": logprob,
+                        "teacher_sampled": bool(
+                            index < len(sampled) and sampled[index]
+                        ),
+                    }
+                    for index, (text, logprob) in enumerate(
+                        zip(rollout.token_texts, chosen_teacher_logprobs.tolist())
+                    )
+                ]
+            teacher_feedback.append(feedback)
             student_ids = mx.array(rollout.student_ids)
             student_rows = mx.array(rollout.student_rows)
             self.model.train()
@@ -453,20 +504,20 @@ class TrainingSession:
                 )
             )
             mx.eval(accumulated_grads)
-            train_seconds.append(
-                rollout.prepare_seconds + perf_counter() - gradient_started
-            )
+            distill_seconds.append(perf_counter() - gradient_started)
             mx.clear_cache()
 
         batch_size = len(prepared)
-        accumulated_grads = tree_map(
-            lambda grad: grad / batch_size, accumulated_grads
-        )
+        accumulated_grads = tree_map(lambda grad: grad / batch_size, accumulated_grads)
+        optimizer_started = perf_counter()
         self.optimizer.update(self.model, accumulated_grads)
         mx.eval(self.model.trainable_parameters(), self.optimizer.state)
+        optimizer_seconds = perf_counter() - optimizer_started
         self.iteration += 1
         batch_loss = sum(losses) / batch_size
         batch_seconds = perf_counter() - batch_started
+        batch_rollout_seconds = sum(rollout.prepare_seconds for rollout in prepared)
+        batch_distill_seconds = sum(distill_seconds)
         mx.clear_cache()
         return [
             TrainStep(
@@ -476,7 +527,7 @@ class TrainingSession:
                 num_tokens=len(rollout.student_rows),
                 finish_reason=rollout.sample.finish_reason,
                 content=rollout.sample.content,
-                train_seconds=train_seconds[index],
+                train_seconds=(rollout.prepare_seconds + distill_seconds[index]),
                 total_seconds=batch_seconds,
                 speculative_top_k=rollout.sample.speculative_top_k,
                 accepted_tokens=rollout.sample.accepted_tokens,
@@ -486,6 +537,12 @@ class TrainingSession:
                 batch_index=index,
                 batch_loss=batch_loss,
                 batch_train_seconds=batch_seconds,
+                rollout_seconds=rollout.prepare_seconds,
+                distill_seconds=distill_seconds[index],
+                optimizer_seconds=optimizer_seconds,
+                batch_rollout_seconds=batch_rollout_seconds,
+                batch_distill_seconds=batch_distill_seconds,
+                teacher_feedback=teacher_feedback[index],
             )
             for index, rollout in enumerate(prepared)
         ]

@@ -1,0 +1,8 @@
+{
+  "stopped": "aborted",
+  "reason": "budget",
+  "selected_step": 70,
+  "mastered": 2,
+  "total": 5,
+  "source_checkpoint": "adapters/fifa-world-cup-first-5/checkpoints/step-0070"
+}

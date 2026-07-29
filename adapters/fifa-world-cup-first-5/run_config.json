@@ -5,26 +5,26 @@
   "teacher_model": "mlx-community/Qwen3.5-0.8B-4bit",
   "source": {
     "source": "file",
-    "path": "examples/distillation/2026_fifa_world_cup.txt",
-    "sha256": "81de17edafdfe072d6939999c7850214c70ab3e9881691cef2e448cb7e13e026",
-    "bytes": 90151,
-    "characters": 89444
+    "path": "examples/distillation/2026_fifa_world_cup_first_5_facts.txt",
+    "sha256": "931a7a657d8e7f25314d61695e6db42e35c5c318b2729825a2fb9875b0ae2130",
+    "bytes": 453,
+    "characters": 450
   },
-  "probes": "outputs/fifa-world-cup-probes/generated/probes.jsonl",
+  "probes": "examples/distillation/2026_fifa_world_cup_first_5_probes.jsonl",
   "canaries": "examples/distillation/canaries.jsonl",
   "rollouts": null,
   "eval_every": 5,
-  "batch_size": 4,
+  "batch_size": 5,
   "learned_threshold": 0.5,
   "iters": null,
   "learning_rate": 1e-06,
   "lora_rank": 16,
-  "max_tokens": 16,
+  "max_tokens": 64,
   "canary_max_tokens": 32,
-  "temperature": 0.0,
+  "temperature": 1.0,
   "seed": 0,
   "speculative_top_k": 3,
   "kl_direction": "forward",
   "enable_thinking": false,
-  "resolved_iters": 500
+  "resolved_iters": 200
 }

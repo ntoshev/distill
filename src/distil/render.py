@@ -122,6 +122,42 @@ def style_for(
     return f"{emphasis} {color}" if emphasis else color
 
 
+def render_skd_rollout(rollout: dict, console: Console, *, label: str = "skd") -> None:
+    """Render one trained rollout using privileged-teacher token likelihoods."""
+    line = Text(no_wrap=True, overflow="ellipsis")
+    line.append(f"{label}  ", style="grey50")
+    line.append("Q: ", style="grey50")
+    line.append(" ".join(str(rollout.get("prompt", "")).split()), style="bold")
+    line.append("  →  ", style="grey50")
+
+    feedback = rollout.get("teacher_feedback") or []
+    logprobs = []
+    for token in feedback:
+        text = str(token.get("text", "")).replace("\r", "").replace("\n", "↵")
+        logprob = token.get("logprob")
+        if not text or logprob is None:
+            continue
+        value = float(logprob)
+        logprobs.append(value)
+        line.append(
+            text,
+            style=style_for(
+                value,
+                teacher_sampled=bool(token.get("teacher_sampled")),
+            ),
+        )
+
+    if not logprobs:
+        line.append(
+            " ".join(str(rollout.get("content", "")).split()),
+            style="grey70",
+        )
+    else:
+        mean_probability = math.exp(sum(logprobs) / len(logprobs))
+        line.append(f"  teacher p={mean_probability:.1%}", style="grey50")
+    console.print(line, soft_wrap=False)
+
+
 @dataclass
 class RenderOptions:
     metric: str = "logprob"  # logprob | prob | kl (kl needs teacher-mode scores)

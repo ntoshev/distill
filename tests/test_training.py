@@ -61,6 +61,9 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
 
     state = {"learned": False}
     answer_calls = []
+    eval_reports = []
+    train_reports = []
+    feedback_capture_calls = []
 
     class Model:
         def eval(self):
@@ -76,7 +79,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
             (path / "adapters.safetensors").write_bytes(b"")
             return path / "adapters.safetensors"
 
-        def step_batch(self, prompts):
+        def step_batch(self, prompts, capture_feedback=False):
+            feedback_capture_calls.append(capture_feedback)
             state["learned"] = True
             return [
                 TrainStep(
@@ -118,6 +122,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         eval_every=1,
         canary_max_tokens=7,
         save_rollout_path=rollouts,
+        report=eval_reports.append,
+        train_report=train_reports.append,
     )
     assert result.success
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
@@ -139,3 +145,20 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     }
     config = json.loads((tmp_path / "adapter" / "run_config.json").read_text())
     assert config["batch_size"] == 4
+    assert train_reports[0] == {
+        "event": "question",
+        "iteration": 1,
+        "item_id": "fact",
+        "prompt": "train",
+        "batch_size": 1,
+    }
+    assert train_reports[1]["event"] == "step"
+    assert train_reports[1]["timing"] == {
+        "rollout_seconds": 0.0,
+        "distill_seconds": 0.0,
+        "optimizer_seconds": 0.0,
+        "total_seconds": 0.0,
+    }
+    assert eval_reports[-1]["training_rollout"]["prompt"] == "train"
+    assert eval_reports[-1]["training_rollout"]["content"] == "VIOLET-731"
+    assert feedback_capture_calls == [True]

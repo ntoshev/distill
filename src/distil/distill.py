@@ -101,6 +101,7 @@ def run_continual(
     canaries_path: str | Path | None = None,
     save_rollout_path: str | Path | None = None,
     report: Callable[[dict], None] | None = None,
+    train_report: Callable[[dict], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> ContinualResult:
     if not items:
@@ -216,6 +217,7 @@ def run_continual(
     }
     safe_rows: list[dict] = []
     last_loss = None
+    latest_training_rollout: dict | None = None
 
     def evaluate(step: int, checkpoint: Path, confirm: bool = True) -> tuple[dict, set[str]]:
         started = perf_counter()
@@ -274,6 +276,7 @@ def run_continual(
             "confirmations": confirmations,
             "checkpoint": str(checkpoint),
             "evaluation_seconds": perf_counter() - started,
+            "training_rollout": latest_training_rollout,
         }
         with eval_file.open("a") as file:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -297,9 +300,24 @@ def run_continual(
         rotation.update(active)
         stopped = reason = ""
         selected = baseline
-        for _ in range(budget):
+        reported_first_question = False
+        for update_number in range(1, budget + 1):
             batch = rotation.next_batch(batch_size)
-            steps = session.step_batch([prompt for _, prompt in batch])
+            if not reported_first_question and train_report is not None:
+                train_report(
+                    {
+                        "event": "question",
+                        "iteration": 1,
+                        "item_id": batch[0][0],
+                        "prompt": batch[0][1],
+                        "batch_size": len(batch),
+                    }
+                )
+            reported_first_question = True
+            steps = session.step_batch(
+                [prompt for _, prompt in batch],
+                capture_feedback=update_number % eval_every == 0,
+            )
             last_loss = steps[0].batch_loss
             with metrics_file.open("a") as file:
                 for (item_id, prompt), step in zip(batch, steps):
@@ -318,6 +336,34 @@ def run_continual(
                             item_id=item_id,
                         )
             iteration = steps[0].iteration
+            first_item_id, _ = batch[0]
+            first_step = steps[0]
+            latest_training_rollout = {
+                "iteration": iteration,
+                "item_id": first_item_id,
+                "prompt": first_step.prompt,
+                "content": first_step.content,
+                "teacher_feedback": first_step.teacher_feedback or [],
+                "speculative_top_k": first_step.speculative_top_k,
+                "accepted_tokens": first_step.accepted_tokens,
+                "replaced_tokens": first_step.replaced_tokens,
+            }
+            if train_report is not None:
+                train_report(
+                    {
+                        "event": "step",
+                        "iteration": iteration,
+                        "loss": last_loss,
+                        "batch_size": len(steps),
+                        "num_tokens": sum(step.num_tokens for step in steps),
+                        "timing": {
+                            "rollout_seconds": first_step.batch_rollout_seconds,
+                            "distill_seconds": first_step.batch_distill_seconds,
+                            "optimizer_seconds": first_step.optimizer_seconds,
+                            "total_seconds": first_step.batch_train_seconds,
+                        },
+                    }
+                )
             if iteration % eval_every != 0:
                 continue
             checkpoint = checkpoints / f"step-{iteration:04d}"

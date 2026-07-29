@@ -12,6 +12,7 @@ from distil.render import (
     render,
     render_progress,
     render_progress_tokens,
+    render_skd_rollout,
     to_json_dict,
 )
 from distil.rollout import load_rollout, save_rollout
@@ -326,7 +327,36 @@ def _continual_cli(args, errcon, fail) -> int:
         def report(row):
             errcon.print(
                 f"eval {row['iteration']}: mastered={row['mastered']}/{row['total']}  "
-                f"active={len(row['active_item_ids'])}  changed={row['canary_changed']}",
+                f"active={len(row['active_item_ids'])}  changed={row['canary_changed']}  "
+                f"time={row['evaluation_seconds']:.2f}s",
+                style="grey50",
+            )
+            if row.get("training_rollout"):
+                render_skd_rollout(
+                    row["training_rollout"],
+                    errcon,
+                    label=f"skd@{row['iteration']}",
+                )
+
+        def train_report(event):
+            if event["event"] == "question":
+                errcon.print(
+                    f"train batch size: {event['batch_size']}",
+                    style="grey50",
+                )
+                errcon.print(
+                    f"train 1 question: {event['prompt']}",
+                    style="grey50",
+                    markup=False,
+                )
+                return
+            timing = event["timing"]
+            errcon.print(
+                f"train {event['iteration']}: loss={event['loss']:.4f}  "
+                f"tokens={event['num_tokens']}  time={timing['total_seconds']:.2f}s  "
+                f"(rollout={timing['rollout_seconds']:.2f}s  "
+                f"distill={timing['distill_seconds']:.2f}s  "
+                f"update={timing['optimizer_seconds']:.2f}s)",
                 style="grey50",
             )
 
@@ -369,6 +399,7 @@ def _continual_cli(args, errcon, fail) -> int:
             canaries_path=args.canaries,
             save_rollout_path=args.save_rollout,
             report=report,
+            train_report=train_report,
             warn=lambda message: errcon.print(f"[yellow]warning:[/yellow] {message}"),
         )
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:

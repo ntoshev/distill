@@ -12,6 +12,7 @@ from distil.render import (
     render,
     render_progress,
     render_progress_tokens,
+    render_skd_rollout,
     style_for,
     to_json_dict,
 )
@@ -139,6 +140,31 @@ def test_render_underlines_only_teacher_sampled_tokens():
     styled = console.export_text(styles=True)
     assert "\x1b[21;38;2;76;164;36m very" in styled
     assert "\x1b[21;38;2;249;137;22m sentence" in styled
+
+
+def test_render_skd_rollout_is_one_line_with_teacher_feedback_colors():
+    console = Console(
+        record=True, force_terminal=True, color_system="truecolor", width=120
+    )
+    render_skd_rollout(
+        {
+            "prompt": "What happened?\nAnswer briefly.",
+            "content": "Alpha beta",
+            "teacher_feedback": [
+                {"text": "Alpha", "logprob": -0.1, "teacher_sampled": False},
+                {"text": "\n beta", "logprob": -2.0, "teacher_sampled": True},
+            ],
+        },
+        console,
+        label="skd@5",
+    )
+
+    plain = console.export_text(clear=False)
+    assert plain.count("\n") == 1
+    assert "skd@5  Q: What happened? Answer briefly.  →  Alpha↵ beta" in plain
+    assert "teacher p=35.0%" in plain
+    styled = console.export_text(styles=True)
+    assert "\x1b[21;38;2;250;204;21m↵ beta" in styled
 
 
 def test_json_dict():
