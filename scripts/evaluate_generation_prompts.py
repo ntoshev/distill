@@ -15,7 +15,6 @@ from distil.generation import (
     parse_question_block,
     question_prompt,
     question_repair_prompt,
-    sanitize_question_context,
     validate_question_block,
 )
 from distil.sample import sample_completion
@@ -106,17 +105,13 @@ def main() -> None:
                     )
                     question_attempts.append(raw_question)
                     try:
-                        item.subject, item.answer, item.context, item.questions = (
-                            parse_question_block(raw_question)
-                        )
-                        item.context = sanitize_question_context(
-                            fact, item.answer, item.context
+                        item.subject, item.completion, item.questions = parse_question_block(
+                            raw_question
                         )
                         item.error = validate_question_block(
                             fact,
                             item.subject,
-                            item.answer,
-                            item.context,
+                            item.completion,
                             item.questions,
                         )
                     except ValueError as error:

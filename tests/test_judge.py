@@ -30,24 +30,15 @@ def test_judge_answer_parses_verdict(monkeypatch, verdict, expected):
         "Spain won.",
         enable_thinking=False,
     ) is expected
+    message = calls[0][2][0]["content"]
+    assert "Different wording or extra explanation is fine" in message
+    assert "codes, IDs, numbers, dates, names, scores" in message
+    assert "plausible but different code or identifier" in message
     assert calls == [
         (
             model,
             tokenizer,
-            [
-                {
-                    "role": "user",
-                    "content": (
-                        "Question: Who won?\n"
-                        "Reference answer: Spain\n"
-                        "Candidate answer: Spain won.\n\n"
-                        "Does the candidate give the same answer as the reference? "
-                        "Different wording,\n"
-                        "formatting, or extra correct context is fine; a missing, extra, or\n"
-                        "contradicting fact is not. Reply with only YES or NO."
-                    ),
-                }
-            ],
+            [{"role": "user", "content": message}],
             {
                 "max_tokens": 16,
                 "temperature": 0.0,

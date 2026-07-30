@@ -117,7 +117,7 @@ uv run distil \
 ## Continual document learning
 
 `--train` takes the trusted document itself. The tool enumerates its facts,
-generates aligned train/held-out questions plus an exact source-grounded answer,
+generates aligned train/held-out questions plus an exact source-grounded completion,
 then trains only on teacher/student KL. Facts retire from the training rotation
 after their greedy held-out answer passes typed whole-answer matching at two
 consecutive evaluations, and return if they regress. Training and held-out
@@ -137,9 +137,9 @@ uv run distil \
 
 Use `--generate-only` to inspect `generated/facts.jsonl` and
 `generated/probes.jsonl`. `facts.jsonl` preserves each selected subject,
-answer, shared context, and unedited question pair; `probes.jsonl` can be
-reloaded directly with `--probes PATH`. An edited probe row needs
-`train_prompts` plus the held-out `prompt` and `completion`.
+completion, and unedited question pair; `probes.jsonl` can be reloaded directly
+with `--probes PATH`. An edited probe row needs `train_prompts` plus the
+held-out `prompt` and `completion`.
 `--from-adapter PATH` starts from an existing LoRA and preserves it as the
 frozen teacher baseline.
 

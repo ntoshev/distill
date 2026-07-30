@@ -137,12 +137,12 @@ ADAPTER_PATH/
 ```
 
 Document compilation uses greedy generation. Each fact produces a structured
-subject, one exact answer span copied from the fact, optional shared context,
-and distinct train/held-out questions with the same answer scope. Mechanical
-validation rejects unsupported fields, duplicate questions, answer leakage,
-missing subjects, and document-relative wording. The exact answer span becomes
-the probe completion; no second model cleans up or rewrites it. Both JSONL files
-are persistent and can be reloaded with `--probes`.
+subject, one exact completion span copied from the fact, and distinct
+train/held-out questions with the same answer scope. Mechanical validation
+rejects unsupported fields, duplicate questions, completion leakage, missing
+subjects, and document-relative wording. The exact completion span is the probe
+completion; no second model cleans up or rewrites it. Both JSONL files are
+persistent and can be reloaded with `--probes`.
 
 Training rows contain rollout and loss diagnostics. Evaluation rows contain
 probe probabilities, active items, exact canary drift, and confirmation output.

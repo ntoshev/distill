@@ -312,7 +312,9 @@ def test_training_validates_continual_options_before_model_load(tmp_path, capsys
         "--canaries", str(canaries),
     ]
     assert main([*base, "--questions-per-fact", "1"]) == 2
-    assert "at least 2" in capsys.readouterr().err
+    assert "exactly 2" in capsys.readouterr().err
+    assert main([*base, "--questions-per-fact", "3"]) == 2
+    assert "exactly 2" in capsys.readouterr().err
     assert main([*base, "--from-adapter", "adapter"]) == 2
     assert "must differ" in capsys.readouterr().err
 

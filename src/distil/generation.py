@@ -21,12 +21,10 @@ class GeneratedFact:
     fact_id: str
     fact: str
     subject: str = ""
-    answer: str = ""
-    context: list[str] = field(default_factory=list)
+    completion: str = ""
     questions: list[str] = field(default_factory=list)
     train_prompts: list[str] = field(default_factory=list)
     prompt: str = ""
-    completion: str = ""
     error: str | None = None
 
 
@@ -126,125 +124,111 @@ def question_prompt(fact: str, count: int) -> str:
 SOURCE FACT:
 {fact}
 
-Decompose the fact as SUBJECT -- RELATION -- ANSWER. Choose the entity or event being described as SUBJECT and the value supplied by the main relationship as ANSWER. Put only other identifying details in shared CONTEXT. Then write two questions that ask for exactly the same ANSWER.
+Decompose the fact as SUBJECT -- RELATION -- COMPLETION. Choose the entity or event being described as SUBJECT and the value supplied by the main relationship as COMPLETION. Then write two questions that ask for exactly the same COMPLETION.
 
 Output exactly:
 SUBJECT: <explicit named subject copied from the source fact>
-ANSWER: <one exact, contiguous phrase copied from the source fact>
-CONTEXT: <exact phrase> || <exact phrase>  (or NONE)
+COMPLETION: <one exact, contiguous phrase copied from the source fact>
 TRAIN: <question>
 HELDOUT: <different question>
 
 Rules:
-- Copy SUBJECT, ANSWER, and every CONTEXT item exactly, character-for-character, as contiguous text from SOURCE FACT.
+- Copy SUBJECT and COMPLETION exactly, character-for-character, as contiguous text from SOURCE FACT.
 - SUBJECT is the shortest exact proper-name anchor for the entity or event being described, usually the proper name at the start of SOURCE FACT before the first verb. State SUBJECT verbatim in both questions and never ask for SUBJECT.
 - Do not extend SUBJECT with a possessive or role phrase. For \"X's crew comprised A and B\", use X, not \"X's crew\". For \"X match ball was Y\", use X, not \"X match ball\".
-- Keep the grammatical subject as SUBJECT even when another named entity appears later. For \"X awarded Y the prize\", use X as SUBJECT and Y as ANSWER. For \"The manufacturer of X is Y\", use X as SUBJECT and Y as ANSWER. For \"X was recovered by Y\", use X as SUBJECT and Y as ANSWER.
-- ANSWER must be the concise value of the main relationship: a name, complete natural list, amount, date, place, type, work, mechanism, purpose, outcome, or short description. Prefer a short named entity, date, number, or natural list over a long descriptive clause when either would make a useful target.
-- SUBJECT and ANSWER must not overlap.
-- Keep every natural list as one complete ANSWER; never target only one member.
-- Keep equivalent forms of one value together in ANSWER, including converted measurements or the same time in multiple time zones. Do not ask for one form while placing another form in CONTEXT.
-- CONTEXT is optional and should contain only exact source phrases that materially identify the target. Each item must independently occur verbatim in SOURCE FACT. Never create a CONTEXT item by deleting, reordering, joining, or inflecting source words; use separate items around ANSWER when needed. Use NONE rather than an inexact item. ANSWER and CONTEXT must not overlap.
-- Both questions must ask only for ANSWER and have exactly the same answer scope.
-- Both questions must stand alone, contain the exact SUBJECT string verbatim, and express every CONTEXT detail needed to identify the target. A related phrase is not a substitute for the exact SUBJECT string.
-- Never reveal ANSWER or any named member of ANSWER in either question. CONTEXT is allowed in questions.
+- Keep the grammatical subject as SUBJECT even when another named entity appears later. For \"X awarded Y the prize\", use X as SUBJECT and Y as COMPLETION. For \"The manufacturer of X is Y\", use X as SUBJECT and Y as COMPLETION. For \"X was recovered by Y\", use X as SUBJECT and Y as COMPLETION.
+- COMPLETION must be the concise value of the main relationship: a name, complete natural list, amount, date, place, type, work, mechanism, purpose, outcome, or short description. Prefer a short named entity, date, number, or natural list over a long descriptive clause when either would make a useful target.
+- SUBJECT and COMPLETION must not overlap.
+- Keep every natural list as one complete COMPLETION; never target only one member.
+- Keep equivalent forms of one value together in COMPLETION, including converted measurements or the same time in multiple time zones.
+- Both questions must ask only for COMPLETION and have exactly the same answer scope.
+- Both questions must stand alone, contain the exact SUBJECT string verbatim, and include any non-answer identifying details needed to identify the target.
+- Never reveal COMPLETION or any named member of COMPLETION in either question.
 - Never refer to a source, fact, passage, text, document, prompt, or information above.
 - Use meaningfully different wording without requesting extra information.
-- Output only the five lines.
+- Output only the four lines.
 
 Example 1:
 SOURCE FACT: Acme AI was founded by Ana One, Bo Two and Cy Three in 2021.
 SUBJECT: Acme AI
-ANSWER: Ana One, Bo Two and Cy Three
-CONTEXT: 2021
+COMPLETION: Ana One, Bo Two and Cy Three
 TRAIN: Who founded Acme AI in 2021?
 HELDOUT: List Acme AI's complete founding team from 2021.
 
 Example 2:
 SOURCE FACT: Ada One co-authored "Great Paper" while working for Example Corp in 2022.
 SUBJECT: Ada One
-ANSWER: "Great Paper"
-CONTEXT: co-authored || Example Corp || 2022
+COMPLETION: "Great Paper"
 TRAIN: Which paper did Ada One co-author while employed by Example Corp in 2022?
 HELDOUT: Name the work Ada One helped write at Example Corp in 2022.
 
 Example 3:
 SOURCE FACT: Acme AI raised $12M in its seed round from North Fund and South Ventures.
 SUBJECT: Acme AI
-ANSWER: $12M
-CONTEXT: seed round || North Fund and South Ventures
+COMPLETION: $12M
 TRAIN: How much did Acme AI raise in its seed round from North Fund and South Ventures?
 HELDOUT: What was the size of Acme AI's seed financing backed by North Fund and South Ventures?
 
 Example 4:
 SOURCE FACT: The manufacturer of the service module for Mission One is Example Aerospace.
 SUBJECT: Mission One
-ANSWER: Example Aerospace
-CONTEXT: service module
+COMPLETION: Example Aerospace
 TRAIN: Which company manufactures the service module for Mission One?
 HELDOUT: Who is the service-module manufacturer for Mission One?
 
 Example 5:
 SOURCE FACT: Mission One's crew comprised Ana One and Bo Two.
 SUBJECT: Mission One
-ANSWER: Ana One and Bo Two
-CONTEXT: crew
+COMPLETION: Ana One and Bo Two
 TRAIN: Who comprised the crew of Mission One?
 HELDOUT: List the complete Mission One crew.
 
 Example 6:
 SOURCE FACT: Example Games awarded Ana One the Golden Prize as best player.
 SUBJECT: Example Games
-ANSWER: Ana One
-CONTEXT: Golden Prize || best player
+COMPLETION: Ana One
 TRAIN: Who received the Golden Prize as best player at Example Games?
 HELDOUT: Name the best player whom Example Games awarded the Golden Prize.
 
 Example 7:
 SOURCE FACT: Example Games match ball was named Orb.
 SUBJECT: Example Games
-ANSWER: Orb
-CONTEXT: match ball
+COMPLETION: Orb
 TRAIN: What was the Example Games match ball called?
 HELDOUT: Name the match ball used at Example Games.
 
 Leakage correction:
 BAD HELDOUT: Identify the match ball named Orb at Example Games.
 GOOD HELDOUT: Identify the name of the Example Games match ball.
-The bad question is invalid because it contains ANSWER. Descriptive ANSWER phrases are also forbidden verbatim; ask for the category instead of repeating the description.
+The bad question is invalid because it contains COMPLETION. Descriptive COMPLETION phrases are also forbidden verbatim; ask for the category instead of repeating the description.
 
-Before responding, silently run literal substring checks: every SUBJECT, ANSWER, and CONTEXT value must be found unchanged in SOURCE FACT; the exact SUBJECT string must be found in both questions; the ANSWER and every named member of it must be absent from both questions. Then verify that both questions request one identical target and that the output has exactly five nonempty lines."""
+Before responding, silently run literal substring checks: SUBJECT and COMPLETION must be found unchanged in SOURCE FACT; the exact SUBJECT string must be found in both questions; COMPLETION and every named member of it must be absent from both questions. Then verify that both questions request one identical target and that the output has exactly four nonempty lines."""
 
 
 def question_repair_prompt(fact: str, previous: str, error: str) -> str:
     if error == "question omits its explicit subject":
         repair_action = (
-            "Keep SUBJECT, ANSWER, and CONTEXT exactly as they are in FAILED OUTPUT. "
+            "Keep SUBJECT and COMPLETION exactly as they are in FAILED OUTPUT. "
             "Rewrite only TRAIN and HELDOUT so each contains the exact full SUBJECT "
             "string verbatim."
         )
-    elif error == "question reveals its answer":
+    elif error == "question reveals its completion":
         repair_action = (
-            "Keep SUBJECT, ANSWER, and CONTEXT exactly as they are in FAILED OUTPUT. "
-            "Rewrite only TRAIN and HELDOUT so neither contains ANSWER or any named "
-            "member of ANSWER."
+            "Keep SUBJECT and COMPLETION exactly as they are in FAILED OUTPUT. "
+            "Rewrite only TRAIN and HELDOUT so neither contains COMPLETION or any named "
+            "member of COMPLETION."
         )
-    elif error == "subject, answer, or context is not copied from the fact":
+    elif error == "subject or completion is not copied from the fact":
         repair_action = (
-            "Keep any SUBJECT and ANSWER that already occur verbatim in SOURCE FACT, "
-            "and set CONTEXT: NONE. If SUBJECT or ANSWER is not verbatim, replace only "
-            "that field with an exact source span."
+            "Keep any SUBJECT and COMPLETION that already occur verbatim in SOURCE FACT. "
+            "If either field is not verbatim, replace only that field with an exact "
+            "source span."
         )
-    elif error == "answer duplicates context":
+    elif error == "completion duplicates the subject":
         repair_action = (
-            "Keep SUBJECT and ANSWER exactly as they are in FAILED OUTPUT, set "
-            "CONTEXT: NONE, and rewrite the questions only if needed."
-        )
-    elif error == "answer duplicates the subject":
-        repair_action = (
-            "Keep ANSWER if it is a useful exact target. Replace SUBJECT with the "
-            "leading named entity before any possessive suffix or role phrase, set "
-            "CONTEXT: NONE, and rewrite both questions."
+            "Keep COMPLETION if it is a useful exact target. Replace SUBJECT with the "
+            "leading named entity before any possessive suffix or role phrase, and "
+            "rewrite both questions."
         )
     else:
         repair_action = (
@@ -265,25 +249,24 @@ VALIDATION ERROR:
 REQUIRED REPAIR ACTION:
 {repair_action}
 
-Return a corrected block with exactly five nonempty lines:
+Return a corrected block with exactly four nonempty lines:
 SUBJECT: <shortest leading proper-name anchor copied exactly from SOURCE FACT>
-ANSWER: <one concise exact contiguous phrase copied from SOURCE FACT>
-CONTEXT: <exact contiguous phrase> || <exact contiguous phrase>  (or NONE)
+COMPLETION: <one concise exact contiguous phrase copied from SOURCE FACT>
 TRAIN: <question>
 HELDOUT: <different question>
 
 Non-negotiable repair rules:
 - Follow REQUIRED REPAIR ACTION exactly; do not replace fields that it says to keep.
 - When a new SUBJECT is required, copy the leading proper name from SOURCE FACT. If SOURCE FACT begins with \"X's\", SUBJECT is exactly X before the apostrophe. Never choose a proper name that first appears later in the sentence.
-- Every SUBJECT, ANSWER, and CONTEXT value must occur verbatim in SOURCE FACT. Use CONTEXT: NONE instead of paraphrasing, deleting, joining, reordering, or inflecting source words.
+- SUBJECT and COMPLETION must occur verbatim in SOURCE FACT.
 - Both questions must contain the exact SUBJECT string verbatim.
-- Neither question may contain ANSWER or any named member of ANSWER. If the failed output leaked ANSWER, rewrite the entire question to ask for its category without naming it.
-- Both questions must ask for exactly the same single ANSWER and must not refer to a source or text.
-- Output only the corrected five-line block."""
+- Neither question may contain COMPLETION or any named member of COMPLETION. If the failed output leaked COMPLETION, rewrite the entire question to ask for its category without naming it.
+- Both questions must ask for exactly the same single COMPLETION and must not refer to a source or text.
+- Output only the corrected four-line block."""
 
 
-def parse_question_block(text: str) -> tuple[str, str, list[str], list[str]]:
-    """Parse the exact five-line question-generation contract."""
+def parse_question_block(text: str) -> tuple[str, str, list[str]]:
+    """Parse the exact four-line question-generation contract."""
     fields = {}
     for line in text.strip().splitlines():
         if ":" not in line:
@@ -293,20 +276,12 @@ def parse_question_block(text: str) -> tuple[str, str, list[str], list[str]]:
         if key in fields:
             raise ValueError(f"duplicate question field: {key}")
         fields[key] = value
-    expected = {"SUBJECT", "ANSWER", "CONTEXT", "TRAIN", "HELDOUT"}
+    expected = {"SUBJECT", "COMPLETION", "TRAIN", "HELDOUT"}
     if set(fields) != expected or not all(fields.values()):
         raise ValueError(f"invalid question fields: {sorted(fields)}")
-    context = (
-        []
-        if fields["CONTEXT"].upper() == "NONE"
-        else [value.strip() for value in fields["CONTEXT"].split("||")]
-    )
-    if any(not value for value in context):
-        raise ValueError("empty context component")
     return (
         fields["SUBJECT"],
-        fields["ANSWER"],
-        context,
+        fields["COMPLETION"],
         [fields["TRAIN"], fields["HELDOUT"]],
     )
 
@@ -314,23 +289,18 @@ def parse_question_block(text: str) -> tuple[str, str, list[str], list[str]]:
 def validate_question_block(
     fact: str,
     subject: str,
-    answer: str,
-    context: list[str],
+    completion: str,
     questions: list[str],
 ) -> str | None:
     normalized_fact = fact.casefold()
-    if any(
-        value.casefold() not in normalized_fact for value in [subject, answer, *context]
-    ):
-        return "subject, answer, or context is not copied from the fact"
+    if any(value.casefold() not in normalized_fact for value in [subject, completion]):
+        return "subject or completion is not copied from the fact"
     if (
-        answer.casefold() == subject.casefold()
-        or answer.casefold() in subject.casefold()
-        or subject.casefold() in answer.casefold()
+        completion.casefold() == subject.casefold()
+        or completion.casefold() in subject.casefold()
+        or subject.casefold() in completion.casefold()
     ):
-        return "answer duplicates the subject"
-    if answer.casefold() in {value.casefold() for value in context}:
-        return "answer duplicates context"
+        return "completion duplicates the subject"
     if questions[0].casefold() == questions[1].casefold():
         return "held-out prompt duplicates a training prompt"
     subject_terms = {
@@ -343,22 +313,11 @@ def validate_question_block(
         for question in questions
     ):
         return "question omits its explicit subject"
-    if any(answer.casefold() in question.casefold() for question in questions):
-        return "question reveals its answer"
+    if any(completion.casefold() in question.casefold() for question in questions):
+        return "question reveals its completion"
     if any(_META_REFERENCE.search(question) for question in questions):
         return "question contains a document-relative reference"
     return None
-
-
-def sanitize_question_context(fact: str, answer: str, context: list[str]) -> list[str]:
-    """Drop optional context fields that are inexact or duplicate the answer."""
-    normalized_fact = fact.casefold()
-    normalized_answer = answer.casefold()
-    return [
-        value
-        for value in context
-        if value.casefold() in normalized_fact and value.casefold() != normalized_answer
-    ]
 
 
 def teacher_system(document: str) -> str:
@@ -415,14 +374,9 @@ def generate_facts(
         for attempt in range(2):
             previous = generate_questions(prompt)
             try:
-                item.subject, item.answer, item.context, item.questions = (
-                    parse_question_block(previous)
-                )
-                item.context = sanitize_question_context(
-                    fact, item.answer, item.context
-                )
+                item.subject, item.completion, item.questions = parse_question_block(previous)
                 item.error = validate_question_block(
-                    fact, item.subject, item.answer, item.context, item.questions
+                    fact, item.subject, item.completion, item.questions
                 )
             except ValueError as error:
                 item.error = str(error)
@@ -434,14 +388,6 @@ def generate_facts(
                 prompt = question_repair_prompt(fact, previous, item.error)
         generated.append(item)
     return generated
-
-
-def answer_facts(facts: list[GeneratedFact], answer: Callable[[str], str]) -> None:
-    for item in facts:
-        if item.error is None:
-            item.completion = item.answer.strip() or answer(item.prompt).strip()
-            if not item.completion:
-                item.error = "teacher produced an empty answer"
 
 
 def write_generation(
@@ -473,8 +419,6 @@ def write_generation(
                 "fact_id": item.fact_id,
                 "fact": item.fact,
                 "subject": item.subject,
-                "answer": item.answer,
-                "context": item.context,
                 "train_prompts": item.train_prompts,
                 "prompt": item.prompt,
                 "completion": item.completion,

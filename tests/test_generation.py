@@ -3,7 +3,6 @@ import json
 import pytest
 
 from distil.generation import (
-    answer_facts,
     ensure_fits,
     fact_prompt,
     generate_facts,
@@ -11,7 +10,6 @@ from distil.generation import (
     question_prompt,
     question_repair_prompt,
     resolve_context,
-    sanitize_question_context,
     validate_question_block,
     write_generation,
 )
@@ -43,14 +41,13 @@ def test_parse_and_compile_use_last_question_as_heldout():
     outputs = iter(
         [
             "1. Alpha is red.\n- Beta is blue.",
-            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
             "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color.",
-            "SUBJECT: Beta\nANSWER: blue\nCONTEXT: NONE\n"
+            "SUBJECT: Beta\nCOMPLETION: blue\n"
             "TRAIN: What color is Beta?\nHELDOUT: How is Beta colored?",
         ]
     )
     facts = generate_facts("doc", 2, lambda _: next(outputs))
-    answer_facts(facts, lambda prompt: "red" if "Alpha" in prompt else "blue")
     assert [fact.fact for fact in facts] == ["Alpha is red.", "Beta is blue."]
     assert facts[0].train_prompts == ["What color is Alpha?"]
     assert facts[0].prompt == "Name Alpha's color."
@@ -68,7 +65,7 @@ def test_fact_and_question_generation_can_use_distinct_policies():
     def question(prompt):
         questions.append(prompt)
         return (
-            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
             "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color."
         )
 
@@ -78,18 +75,45 @@ def test_fact_and_question_generation_can_use_distinct_policies():
     assert facts[0].train_prompts == ["What color is Alpha?"]
 
 
-def test_selected_source_answer_is_used_without_teacher_cleanup():
+def test_selected_source_completion_is_used_without_teacher_cleanup():
     facts = generate_facts(
         "doc",
         2,
         lambda _: "Alpha is red.",
         lambda _: (
-            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
             "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color."
         ),
     )
-    answer_facts(facts, lambda _: pytest.fail("teacher should not be called"))
     assert facts[0].completion == "red"
+
+
+def test_generation_artifacts_use_completion_only_schema(tmp_path):
+    facts = generate_facts(
+        "doc",
+        2,
+        lambda _: "Alpha is red.",
+        lambda _: (
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
+            "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color."
+        ),
+    )
+    write_generation(
+        tmp_path,
+        "doc",
+        {"sha256": "x"},
+        facts,
+        generator_model="g",
+        questions_per_fact=2,
+        seed=0,
+    )
+    fact_row = json.loads((tmp_path / "facts.jsonl").read_text())
+    probe_row = json.loads((tmp_path / "probes.jsonl").read_text())
+    assert "answer" not in fact_row
+    assert "context" not in fact_row
+    assert "answer" not in probe_row
+    assert "context" not in probe_row
+    assert probe_row["completion"] == "red"
 
 
 def test_fact_prompt_requires_bounded_whole_document_study_facts():
@@ -113,34 +137,32 @@ def test_fact_prompt_requires_bounded_whole_document_study_facts():
 def test_question_prompt_and_parser_use_auditable_aligned_fields():
     prompt = question_prompt("Alpha is red.", 2)
     assert "SUBJECT:" in prompt
-    assert "Both questions must ask only for ANSWER" in prompt
+    assert "Both questions must ask only for COMPLETION" in prompt
     assert "Never refer to a source, fact, passage" in prompt
     assert "The manufacturer of X is Y" in prompt
-    assert "exactly five nonempty lines" in prompt
+    assert "exactly four nonempty lines" in prompt
     assert "shortest exact proper-name anchor" in prompt
-    assert "Never create a CONTEXT item by deleting, reordering" in prompt
     assert "silently run literal substring checks" in prompt
-    repair = question_repair_prompt("Alpha is red.", "bad", "answer leak")
-    assert "VALIDATION ERROR:\nanswer leak" in repair
-    assert "Use CONTEXT: NONE instead of paraphrasing" in repair
+    repair = question_repair_prompt("Alpha is red.", "bad", "question reveals its completion")
+    assert "VALIDATION ERROR:\nquestion reveals its completion" in repair
+    assert "COMPLETION: <one concise exact contiguous phrase" in repair
     omitted = question_repair_prompt(
         "Alpha is red.", "bad", "question omits its explicit subject"
     )
-    assert "Keep SUBJECT, ANSWER, and CONTEXT exactly" in omitted
+    assert "Keep SUBJECT and COMPLETION exactly" in omitted
     copied = question_repair_prompt(
         "Alpha is red.",
         "bad",
-        "subject, answer, or context is not copied from the fact",
+        "subject or completion is not copied from the fact",
     )
-    assert "set CONTEXT: NONE" in copied
+    assert "replace only that field with an exact source span" in copied
     parsed = parse_question_block(
-        "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+        "SUBJECT: Alpha\nCOMPLETION: red\n"
         "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color."
     )
     assert parsed == (
         "Alpha",
         "red",
-        [],
         ["What color is Alpha?", "Name Alpha's color."],
     )
     assert validate_question_block("Alpha is red.", *parsed) is None
@@ -153,36 +175,30 @@ def test_question_generation_rejects_unsupported_counts_and_answer_leaks():
         "Alpha is red.",
         "Alpha",
         "red",
-        [],
         ["Is Alpha red?", "What color is Alpha?"],
     )
-    assert error == "question reveals its answer"
+    assert error == "question reveals its completion"
 
 
-def test_question_validation_allows_natural_subject_reordering_and_sanitizes_context():
+def test_question_validation_allows_natural_subject_reordering():
     parsed = (
         "SpaceX IPO voting control",
         "Elon Musk",
-        ["remained with", "Elon Musk", "not copied"],
         [
             "Who retained voting control of the SpaceX IPO?",
             "Which person held the SpaceX IPO voting control?",
         ],
     )
     fact = "SpaceX IPO voting control remained with Elon Musk."
-    context = sanitize_question_context(fact, parsed[1], parsed[2])
-    assert context == ["remained with"]
-    assert (
-        validate_question_block(fact, parsed[0], parsed[1], context, parsed[3]) is None
-    )
+    assert validate_question_block(fact, parsed[0], parsed[1], parsed[2]) is None
 
 
 def test_question_generation_repairs_one_invalid_attempt():
     outputs = iter(
         [
-            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
             "TRAIN: Is Alpha red?\nHELDOUT: What color is Alpha?",
-            "SUBJECT: Alpha\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: Alpha\nCOMPLETION: red\n"
             "TRAIN: What color is Alpha?\nHELDOUT: Name Alpha's color.",
         ]
     )
@@ -195,7 +211,7 @@ def test_question_generation_repairs_one_invalid_attempt():
     facts = generate_facts("doc", 2, lambda _: "Alpha is red.", questions)
     assert facts[0].error is None
     assert len(prompts) == 2
-    assert "VALIDATION ERROR:\nquestion reveals its answer" in prompts[1]
+    assert "VALIDATION ERROR:\nquestion reveals its completion" in prompts[1]
 
 
 def test_generation_artifacts_record_validation_errors(tmp_path):
@@ -204,11 +220,10 @@ def test_generation_artifacts_record_validation_errors(tmp_path):
         2,
         lambda _: "A is red.",
         lambda _: (
-            "SUBJECT: A\nANSWER: red\nCONTEXT: NONE\n"
+            "SUBJECT: A\nCOMPLETION: red\n"
             "TRAIN: What color is A?\nHELDOUT: What color is A?"
         ),
     )
-    answer_facts(facts, lambda _: "answer")
     with pytest.raises(ValueError, match="duplicates"):
         write_generation(
             tmp_path,

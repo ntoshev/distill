@@ -2,6 +2,7 @@
 
 - Render math properly.
 - Build intuition when explaining concepts.
+- Run not only correctness, but also benchmark tests after implementation changes that alter decoding or training performance
 
 ## Distillation visualizations
 

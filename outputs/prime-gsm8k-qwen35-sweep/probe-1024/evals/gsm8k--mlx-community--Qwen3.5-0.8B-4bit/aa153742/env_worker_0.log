@@ -1,9 +1,0 @@
-2026-07-21 14:15:42 - verifiers.utils.env_utils - INFO - Loading environment: gsm8k
-2026-07-21 14:15:42 - verifiers.utils.env_utils - INFO - Using default args: num_eval_examples=-1, num_train_examples=-1, system_prompt='Please reason step by step, and put your final answer within \\boxed{}.'
-2026-07-21 14:15:42 - verifiers.utils.env_utils - INFO - Successfully loaded environment 'gsm8k'
-2026-07-21 14:15:42 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4648327824=1)
-2026-07-21 14:15:42 - verifiers.serve.server.env_worker.EnvWorker - INFO - Initialized worker gsm8k-0 on ipc:///tmp/vf-4c64b8658da7-gsm8k-0
-2026-07-21 14:15:42 - verifiers.utils.thread_utils - INFO - Scaled default executor and 1 registered executor(s) (math-verify-4648327824=4)
-2026-07-21 14:15:42 - verifiers.serve.server.env_worker.EnvWorker - INFO - Starting worker gsm8k-0
-2026-07-21 14:15:59 - verifiers.utils.process_utils - INFO - Death pipe closed — parent is gone, sending SIGTERM to self
-2026-07-21 14:15:59 - verifiers.serve.server.env_worker.EnvWorker - INFO - Shut down worker gsm8k-0

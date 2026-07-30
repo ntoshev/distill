@@ -27,8 +27,8 @@ Lumen's single synthetic fact as the end-to-end document experiment.
 The document becomes:
 
 - a **syllabus**: generated training questions;
-- an **exam**: one held-out question per fact with a teacher-produced target
-  answer;
+- an **exam**: one held-out question per fact with a source-grounded target
+  completion;
 - a set of **tripwires**: unrelated canaries that detect answer changes.
 
 Training stops when the student passes the exam without the document and while
@@ -65,9 +65,9 @@ teacher and is outside this trust model.
 | Starting model | `--model` plus optional `--from-adapter`. Unless an explicit `--teacher-model` is supplied, the frozen teacher, step-0 baseline, and canary references all use that complete starting model. |
 | Generator | Default same as the training model; `--generator-model` overrides it. The generator need not share the student tokenizer. |
 | Generation timing | Generate a static dataset before training. Adaptive question regeneration is later work. |
-| Question strategy | The generator enumerates the document's distinct facts, then writes `--questions-per-fact` questions per fact; the last question of each fact is the held-out probe. No code-side chunking. |
+| Question strategy | The generator enumerates the document's distinct facts, then writes one source-copied completion, one training question, and one held-out probe per fact. No code-side chunking. |
 | Quality control | Put semantic judgment in prompts. V1 applies no filtering beyond line parsing; any future quality check is a model prompt, not a code heuristic. |
-| Target answers | The privileged teacher greedily answers each fact's held-out probe question. Answers are evaluation targets only, never NLL/SFT targets. |
+| Target completions | The generator selects each fact's exact source-grounded `completion` span. Completions are evaluation targets only, never NLL/SFT targets. |
 | Teacher context | The teacher receives the whole document in its system prompt; the student never receives it. V1 rejects documents that do not fit instead of truncating them. |
 | Already-known facts | Use the same mastery rule for every item. Items mastered at step 0 sit out; regressed items return. If all items are mastered at step 0, save an adapter identical to the starting state and return success without optimizer updates. |
 | Mastery | Geometric-mean target-token probability with greedy normalized-containment confirmation at the stop boundary. |
@@ -122,7 +122,7 @@ The training substrate already exists:
 The missing pieces are:
 
 1. fact enumeration and question generation;
-2. teacher-produced probe answers and the train/held-out split;
+2. source-grounded probe completions and the train/held-out split;
 3. baseline probe scoring and a dynamic training rotation;
 4. in-loop evaluation, stopping, and checkpoint selection;
 5. orchestration and persisted generation/evaluation artifacts;
@@ -159,14 +159,13 @@ if a learned adapter answers unrelated questions with document content.
   ├─ 1. resolve       inline text, @file, or stdin; trusted, non-empty UTF-8
   ├─ 2. validate      fits generator and teacher context
   ├─ 3. enumerate     generator lists the context's distinct facts
-  ├─ 4. generate      generator writes questions per fact; the last is held out
-  ├─ 5. answer        teacher answers each held-out probe with full context
-  ├─ 6. baseline      score every probe at step 0; retire already-mastered facts
-  ├─ 7. train         current KL-only LoRA loop over the active rotation
-  ├─ 8. monitor       probe probability and greedy canaries every E steps;
+  ├─ 4. generate      generator writes completion and questions per fact
+  ├─ 5. baseline      score every probe at step 0; retire already-mastered facts
+  ├─ 6. train         current KL-only LoRA loop over the active rotation
+  ├─ 7. monitor       probe probability and greedy canaries every E steps;
   │                   record loss as a diagnostic
-  ├─ 9. stop          confirmed mastery, locality abort, or update-budget abort
-  └─10. select        copy the best checkpoint to the adapter root
+  ├─ 8. stop          confirmed mastery, locality abort, or update-budget abort
+  └─ 9. select        copy the best checkpoint to the adapter root
 ```
 
 Stages 1–5 resolve or generate the structured probe dataset and write every
@@ -239,76 +238,52 @@ recommended: a preliminary local comparison found
 which is why the canonical command passes it explicitly.
 
 Fact enumeration is greedy for stable coverage and uses a dedicated 512-token
-output budget. For each enumerated fact, generate `--questions-per-fact`
-questions at a fixed moderate temperature (0.7) and fixed seed. Both stage
-temperatures are recorded in `generation.json`:
+output budget. For each enumerated fact, generate one structured block with an
+exact source-copied `COMPLETION` span, one training question, and one held-out
+question. Both stage temperatures are recorded in `generation.json`:
 
 ```text
-Here is a fact:
+SOURCE FACT:
 
 {fact}
 
-Write {n} short questions that this fact answers.
-Rules:
-- Every question must be fully self-contained: name its subject explicitly
-  (never "the company", "it", "they", or another reference that needs
-  context to resolve).
-- The fact must fully answer each question.
-- Prefer questions with short, specific answers: a name, number, date, or
-  short phrase.
-- Vary the wording between questions.
-One question per line, no numbering.
+Output exactly:
+SUBJECT: <explicit named subject copied from the source fact>
+COMPLETION: <one exact, contiguous phrase copied from the source fact>
+TRAIN: <question>
+HELDOUT: <different question>
 ```
 
-The last parsed question of each fact becomes the held-out probe; the rest
-enter the training rotation. With the default of two questions per fact this
-mirrors the Lumen train/held-out pair, generated instead of hand-written.
+The `TRAIN` question enters the training rotation; `HELDOUT` becomes the probe.
 Each fact is one item: mastery, rotation, and the update budget count facts.
-Every fact must yield at least two questions, and its held-out question must
-not exactly duplicate a training question. Otherwise compilation fails after
+Every fact must yield a non-empty source-copied completion, one training
+question, and a distinct held-out question. Otherwise compilation fails after
 writing the generation artifacts; training and evaluating on the same prompt
 would not demonstrate transfer.
 
 The prompt owns the semantic quality criteria. The code does not attempt to
 prove self-containment or groundedness.
 
-### A4. Teacher answer generation
+### A4. Target completion selection
 
-The generator writes questions, but the privileged teacher writes the target
-answers. This ensures that probes measure behavior the actual teacher can
-produce and that the distillation target and evaluation target share the same
-interpretation.
+The generator writes both questions and the exact target `completion` copied
+from the source fact. The student receives only the question text; the source is
+never present in the student context during training or evaluation.
 
-Only probe questions need target answers — training is KL-only and never
-uses them. For each held-out probe, sample greedily from the teacher — the
-frozen starting model with the document in its system prompt:
+The target completion is used for probes and stopping only. There is no
+target-NLL or completion cross-entropy loss. All training gradients come from
+teacher/student KL. Canary completions are likewise evaluation-only.
 
-```text
-system: Private reference document:
-
-        {full_document}
-
-        Answer questions using this reference. Be accurate and concise.
-user:   {question}
-```
-
-The student receives only `{question}`. The source is never present in the
-student context during training or evaluation.
-
-The target answer is used for probes and stopping only. There is no target-NLL
-or answer cross-entropy loss. All training gradients come from teacher/student
-KL. Canary answers are likewise evaluation-only.
-
-If the teacher misreads the document, the adapter can internalize that
-misreading. V1 treats teacher-with-context quality as the ceiling of the
-method; it does not add a second semantic verifier.
+If the generator picks a poor completion span, the adapter can internalize that
+misreading. V1 treats generation quality as the ceiling of the method; it does
+not add a second semantic verifier.
 
 ### A5. Parsing and validation
 
 Parsing is the only mechanical processing: strip bullets, list numbers, and
 surrounding whitespace; drop empty lines. After parsing, every enumerated fact
-must have at least one training question, a distinct held-out question, and a
-non-empty teacher answer. Any violation fails compilation and is recorded in
+must have a non-empty source-copied completion, one training question, and a
+distinct held-out question. Any violation fails compilation and is recorded in
 the generation artifacts; facts are never silently dropped from the document
 learning claim.
 
@@ -350,7 +325,7 @@ non-empty `train_prompts` list. It must not silently train on `prompt`, because
 that field is the held-out exam question.
 
 `--generate-only` stops after compilation. `--probes PATH` skips fact,
-question, and answer generation and uses a hand-authored or previously edited
+question, and completion generation and uses a hand-authored or previously edited
 dataset. Downstream training should not care whether the probe file was
 generated or written manually.
 
@@ -422,14 +397,14 @@ p_{S,\phi}(\cdot\mid x_i,\hat y_{<t})
 \right).
 \]
 
-Only LoRA parameters update. Canonical probe answers do not appear in the
+Only LoRA parameters update. Canonical probe completions do not appear in the
 loss. Forward KL is the v1 default because it produced a cleaner locality
 trade-off than reverse KL in the repository's Project Lumen experiments.
 
 Speculative top-3 generation remains enabled: a student token is retained if
 it lies in the teacher's top three; otherwise a teacher-policy token replaces
 it. This exposes useful suffixes before the student can generate the complete
-answer independently.
+response independently.
 
 ### B4. Training defaults
 
@@ -612,7 +587,7 @@ New train-mode flags:
 
 ```text
 --generator-model MODEL       default: the model being trained
---questions-per-fact N        default 2; the last question is the held-out probe
+--questions-per-fact N        default 2; structured generation currently requires 2
 --generate-only
 ```
 
@@ -636,7 +611,7 @@ Training controls:
 ```
 
 When `--probes` is absent, facts, train prompts, held-out prompts, and target
-answers are generated from `CONTEXT`. When present, it supplies that complete
+completions are generated from `CONTEXT`. When present, it supplies that complete
 dataset and generation is skipped. Every row therefore requires non-empty
 `train_prompts`, `prompt`, and `completion` fields.
 
@@ -732,7 +707,7 @@ Run the command at the top of this document and record in `EXPERIMENTS.md`:
 
 - the enumerated facts and their count;
 - parsed question counts per fact;
-- generated questions and probe teacher answers;
+- generated questions and probe completions;
 - number of probes mastered at step 0;
 - per-probe probability trajectories;
 - active-rotation changes;
@@ -748,7 +723,7 @@ Expected risks to inspect first:
 1. enumeration that misses facts or invents unsupported ones;
 2. near-duplicate questions surviving without deduplication;
 3. context-dependent wording despite the prompt;
-4. teacher answers that are too long or inconsistent, with no answer cap;
+4. completion spans that are too long or inconsistent;
 5. a probe that targets a different attribute of its fact than the training
    questions;
 6. one stubborn fact consuming the update budget;
@@ -768,7 +743,7 @@ Fast tests with injectable fake generator/teacher functions:
 - fact and question line parsing, including bullets and empty lines;
 - deterministic last-question held-out split;
 - compilation fails if any fact lacks a training question, a distinct
-  held-out question, or a non-empty teacher answer;
+  held-out question, or a non-empty source-copied completion;
 - extended probe rows load in train mode and remain compatible with
   `--progress`;
 - train mode rejects probe rows without non-empty `train_prompts` rather
@@ -812,7 +787,7 @@ Cached-model integration tests:
 - retention machinery for sequential ingestion — replay buffers,
   KL-to-previous-adapter regularization, prior-document retention probes;
   chaining runs through `--from-adapter` works but is unprotected;
-- target-answer NLL or supervised answer training;
+- target-completion NLL or supervised answer training;
 - question filtering of any kind, mechanical or semantic — a future check
   would be a model/prompt judgment;
 - structured claim schemas with exact evidence spans;

@@ -13,12 +13,19 @@ def judge_answer(
     enable_thinking: bool | None,
 ) -> bool:
     prompt = (
+        "You are checking whether a candidate answer is correct. Reply with "
+        "exactly YES or NO.\n\n"
         f"Question: {question}\n"
         f"Reference answer: {expected}\n"
         f"Candidate answer: {generated}\n\n"
-        "Does the candidate give the same answer as the reference? Different wording,\n"
-        "formatting, or extra correct context is fine; a missing, extra, or\n"
-        "contradicting fact is not. Reply with only YES or NO."
+        "Mark YES only if the candidate gives the same value as the reference.\n"
+        "Different wording or extra explanation is fine only when the actual "
+        "answer value is unchanged.\n"
+        "For codes, IDs, numbers, dates, names, scores, and other exact values, "
+        "any different value is NO.\n"
+        "If the candidate gives a plausible but different code or identifier, "
+        "reply NO.\n"
+        "Answer:"
     )
     sample = sample_completion(
         model,

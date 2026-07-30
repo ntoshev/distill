@@ -170,7 +170,6 @@ def build_parser() -> argparse.ArgumentParser:
 def _continual_cli(args, errcon, fail) -> int:
     """Compile the document, load the starting policies, and run continual training."""
     from distil.generation import (
-        answer_facts,
         ensure_fits,
         generate_facts,
         resolve_context,
@@ -266,7 +265,6 @@ def _continual_cli(args, errcon, fail) -> int:
                 generate_inventory,
                 generate_questions,
             )
-            answer_facts(facts, lambda _: "")
             probes_path = write_generation(
                 Path(output) / "generated",
                 document,
@@ -541,8 +539,8 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--checkpoint-every must be positive")
         if args.canary_max_tokens is not None and args.canary_max_tokens <= 0:
             return fail("--canary-max-tokens must be positive")
-        if args.questions_per_fact is not None and args.questions_per_fact < 2:
-            return fail("--questions-per-fact must be at least 2")
+        if args.questions_per_fact is not None and args.questions_per_fact != 2:
+            return fail("--questions-per-fact must be exactly 2")
         if args.eval_every is not None and args.eval_every <= 0:
             return fail("--eval-every must be positive")
         if args.learned_threshold is not None and not 0 < args.learned_threshold <= 1:
