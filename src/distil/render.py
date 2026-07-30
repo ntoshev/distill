@@ -202,45 +202,21 @@ def _progress_text(value: float, metric: str) -> str:
 def render_progress(
     result: ProgressResult, console: Console, metric: str = "prob"
 ) -> None:
-    """Render a checkpoint metric for several fixed completions."""
-    label_width = min(30, max(len(probe.name) for probe in result.probes))
-    chart_width = min(len(result.steps), max(12, console.width - label_width - 40))
-    console.print(
-        f"steps [bold]{result.steps[0]}[/bold] → [bold]{result.steps[-1]}[/bold]  "
-        f"({len(result.steps)} checkpoints including base)"
-    )
-    labels = {
-        "prob": "geometric-mean token probability",
-        "logprob": "mean token log probability",
-        "kl": "mean KL(teacher ‖ student)",
-    }
-    console.print(f"{labels[metric]} of each fixed completion", style="grey50")
-    console.print()
-
+    """Render checkpoint probe rows token-by-token."""
+    layout = render_progress_rows_header(result, console, metric)
     for probe in result.probes:
         points = result.series[probe.name]
-        values = [_progress_value(point, metric) for point in points]
-        levels = _downsample([_progress_level(point, metric) for point in points], chart_width)
-        colors = _downsample(
-            [point.mean_kl if metric == "kl" else point.mean_logprob for point in points],
-            chart_width,
-        )
-        line = Text(f"{probe.name[:label_width]:<{label_width}}  ")
-        for level, color in zip(levels, colors):
-            index = min(len(_SPARK_CHARS) - 1, int(level * len(_SPARK_CHARS)))
-            line.append(_SPARK_CHARS[index], style=color_for(color, metric))
-        peak_index = max(range(len(values)), key=values.__getitem__)
-        line.append(
-            f"  {_progress_text(values[0], metric)} → {_progress_text(values[-1], metric)}  "
-            f"max {_progress_text(values[peak_index], metric)}@{result.steps[peak_index]}"
-        )
-        console.print(line)
+        for point in points:
+            render_progress_row_point(probe, point, console, metric, layout)
 
 
-def render_progress_tokens(
-    result: ProgressResult, console: Console, metric: str = "prob"
-) -> None:
-    """Render one fixed completion token-by-token at every checkpoint."""
+def render_progress_tokens_header(
+    result: ProgressResult,
+    console: Console,
+    metric: str = "prob",
+    *,
+    sampled: bool | None = None,
+) -> tuple[int, bool]:
     if len(result.probes) != 1:
         raise ValueError("token progress rendering requires exactly one probe")
     probe = result.probes[0]
@@ -251,19 +227,150 @@ def render_progress_tokens(
         "logprob": "token log probability",
         "kl": "token KL(teacher ‖ student)",
     }
-    console.print(f"{labels[metric]} within the fixed completion", style="grey50")
+    sampled = (
+        any(point.completion is not None for point in points)
+        if sampled is None
+        else sampled
+    )
+    subject = "sampled completion" if sampled else "fixed completion"
+    console.print(f"{labels[metric]} within the {subject}", style="grey50")
+    if sampled:
+        has_teacher = result.teacher_model is not None or any(
+            point.mean_teacher_logprob is not None for point in points
+        )
+        metric_columns = "teacher p  student p  KL      tokens  finish"
+        if not has_teacher:
+            metric_columns = "student p  tokens  finish"
+        console.print(f"{'step':<{label_width}}  completion  {metric_columns}", style="grey50")
     console.print()
+    return label_width, sampled
 
-    for point in points:
-        label = "base" if point.step == 0 else f"step-{point.step:04d}"
-        line = Text(f"{label:<{label_width}}  ")
-        for token in point.tokens:
-            value = token["kl"] if metric == "kl" else token["logprob"]
-            line.append(token["text"], style=style_for(value, metric))
+
+def render_progress_token_point(
+    point,
+    console: Console,
+    metric: str = "prob",
+    *,
+    label_width: int,
+    sampled: bool,
+) -> None:
+    label = "base" if point.step == 0 else f"step-{point.step:04d}"
+    line = Text(f"{label:<{label_width}}  ")
+    for token in point.tokens:
+        if metric == "kl":
+            value = token["kl"]
+        else:
+            value = token["logprob"]
+        line.append(token["text"], style=style_for(value, metric))
+    if sampled:
+        student_p = math.exp(point.mean_logprob)
+        if point.mean_teacher_logprob is not None:
+            teacher_p = math.exp(point.mean_teacher_logprob)
+            kl = point.mean_kl if point.mean_kl is not None else float("nan")
+            line.append(
+                f"  teacher p={teacher_p:5.1%}  student p={student_p:5.1%}  "
+                f"KL={kl:6.3f}",
+                style="grey50",
+            )
+        else:
+            line.append(f"  student p={student_p:5.1%}", style="grey50")
+        if point.num_tokens is not None:
+            line.append(f"  n={point.num_tokens}", style="grey50")
+        if point.finish_reason:
+            line.append(f"  {point.finish_reason}", style="grey50")
+    else:
         line.append(
             f"  {_progress_text(_progress_value(point, metric), metric)}", style="grey50"
         )
-        console.print(line)
+    console.print(line)
+
+
+def render_progress_rows_header(
+    result: ProgressResult,
+    console: Console,
+    metric: str = "prob",
+    *,
+    sampled: bool | None = None,
+) -> dict:
+    if len(result.probes) == 1:
+        label_width, sampled = render_progress_tokens_header(
+            result, console, metric, sampled=sampled
+        )
+        return {"single": True, "label_width": label_width, "sampled": sampled}
+
+    step_width = max(4, len(f"step-{result.steps[-1]:04d}"))
+    probe_width = min(30, max(len(probe.name) for probe in result.probes))
+    labels = {
+        "prob": "student token probability",
+        "logprob": "student token log probability",
+        "kl": "token KL(teacher ‖ student)",
+    }
+    console.print(f"{labels[metric]} over checkpoint probes", style="grey50")
+    console.print(
+        f"{'step':<{step_width}}  {'probe':<{probe_width}}  completion  "
+        "teacher p  student p  KL",
+        style="grey50",
+    )
+    console.print()
+    return {
+        "single": False,
+        "step_width": step_width,
+        "probe_width": probe_width,
+        "sampled": bool(sampled),
+    }
+
+
+def render_progress_row_point(
+    probe,
+    point,
+    console: Console,
+    metric: str,
+    layout: dict,
+) -> None:
+    if layout["single"]:
+        render_progress_token_point(
+            point,
+            console,
+            metric,
+            label_width=layout["label_width"],
+            sampled=layout["sampled"],
+        )
+        return
+
+    label = "base" if point.step == 0 else f"step-{point.step:04d}"
+    line = Text(
+        f"{label:<{layout['step_width']}}  "
+        f"{probe.name[:layout['probe_width']]:<{layout['probe_width']}}  "
+    )
+    for token in point.tokens:
+        value = token["kl"] if metric == "kl" else token["logprob"]
+        line.append(token["text"], style=style_for(value, metric))
+    if point.mean_teacher_logprob is not None:
+        line.append(
+            f"  teacher p={math.exp(point.mean_teacher_logprob):5.1%}  "
+            f"student p={math.exp(point.mean_logprob):5.1%}  "
+            f"KL={point.mean_kl:6.3f}",
+            style="grey50",
+        )
+    else:
+        line.append(f"  student p={math.exp(point.mean_logprob):5.1%}", style="grey50")
+    console.print(line)
+
+
+def render_progress_tokens(
+    result: ProgressResult, console: Console, metric: str = "prob"
+) -> None:
+    """Render one fixed completion token-by-token at every checkpoint."""
+    if len(result.probes) != 1:
+        raise ValueError("token progress rendering requires exactly one probe")
+    probe = result.probes[0]
+    points = result.series[probe.name]
+    label_width, sampled = render_progress_tokens_header(result, console, metric)
+
+    for point in points:
+        render_progress_token_point(
+            point, console, metric, label_width=label_width, sampled=sampled
+        )
 
 
 def _token_value(tok: TokenScore, metric: str) -> float | None:

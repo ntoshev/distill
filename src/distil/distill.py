@@ -96,7 +96,7 @@ def run_continual(
     lora_rank: int = 16,
     max_tokens: int = 64,
     canary_max_tokens: int = 32,
-    temperature: float = 1.0,
+    temperature: float = 0.0,
     seed: int = 0,
     enable_thinking: bool | None = None,
     speculative_top_k: int | None = 3,

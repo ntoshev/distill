@@ -11,6 +11,8 @@ from distil.render import (
     RenderOptions,
     render,
     render_progress,
+    render_progress_row_point,
+    render_progress_rows_header,
     render_progress_tokens,
     render_skd_rollout,
     to_json_dict,
@@ -43,6 +45,31 @@ def _prompt_messages(system: str | None, prompt: str | None) -> list[dict]:
     if prompt is not None:
         messages.append({"role": "user", "content": prompt})
     return messages
+
+
+def _teacher_system_from_progress_run(path: str | Path) -> str | None:
+    """Rebuild the training teacher context from a progress run directory."""
+    root = Path(path)
+    config_path = root / "run_config.json"
+    if not config_path.is_file():
+        return None
+    try:
+        config = json.loads(config_path.read_text())
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid progress run config: {config_path}: {error}") from error
+    source = config.get("source")
+    if not isinstance(source, dict) or source.get("source") != "file":
+        return None
+    source_path = source.get("path")
+    if not isinstance(source_path, str) or not source_path:
+        return None
+    document_path = Path(source_path)
+    if not document_path.is_absolute():
+        document_path = Path.cwd() / document_path
+    document = document_path.read_text()
+    from distil.generation import teacher_system as document_teacher_system
+
+    return document_teacher_system(document)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     smp = p.add_argument_group("sampling (generate the completion from the student)")
     smp.add_argument("--sample", action="store_true", help="sample a completion from --model")
     smp.add_argument("--max-tokens", type=int, help="sampling length limit (default 512)")
-    smp.add_argument("--temperature", type=float, help="sampling temperature (default 1.0)")
+    smp.add_argument("--temperature", type=float, help="sampling temperature (default 0.0)")
     smp.add_argument("--seed", type=int, help="random seed for sampling")
     smp.add_argument(
         "--speculative-top-k",
@@ -389,7 +416,7 @@ def _continual_cli(args, errcon, fail) -> int:
             canary_max_tokens=(
                 args.canary_max_tokens if args.canary_max_tokens is not None else 32
             ),
-            temperature=args.temperature if args.temperature is not None else 1.0,
+            temperature=args.temperature if args.temperature is not None else 0.0,
             seed=seed,
             enable_thinking=enable_thinking,
             speculative_top_k=(
@@ -447,7 +474,10 @@ def main(argv: list[str] | None = None) -> int:
     training = args.train is not None
     progress = args.progress is not None
     standalone_completion = args.completion is not None and not progress
-    if sum([bool(args.rollout), standalone_completion, args.sample, training, progress]) != 1:
+    sampled_progress_mode = args.sample and progress
+    if sum(
+        [bool(args.rollout), standalone_completion, args.sample and not progress, training, progress]
+    ) != 1:
         return fail(
             "provide exactly one of --completion, --rollout, --sample, --train or --progress"
         )
@@ -460,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.speculative_top_k is not None:
         if not (args.sample or training):
             return fail("--speculative-top-k only combines with --sample or --train")
+        if sampled_progress_mode:
+            return fail("--speculative-top-k does not combine with --progress")
         if args.speculative_top_k <= 0:
             return fail("--speculative-top-k must be positive")
         if args.sample and not teacher_mode:
@@ -551,8 +583,10 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--contamination-regex is not used in continual mode")
     if progress:
         target_progress = args.completion is not None
-        if target_progress == (args.probes is not None):
-            return fail("--progress requires exactly one of --completion or --probes")
+        sampled_progress = args.sample
+        progress_inputs = sum([target_progress, args.probes is not None, sampled_progress])
+        if progress_inputs != 1:
+            return fail("--progress requires exactly one of --completion, --probes or --sample")
         if args.adapter_path:
             return fail("--adapter-path does not combine with --progress")
         if args.raw:
@@ -564,6 +598,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.probes is not None:
             if args.prompt is not None:
                 return fail("--progress with --probes takes prompts from each probe")
+        if sampled_progress and args.completion is not None:
+            return fail("--completion does not combine with --progress --sample")
     if args.raw and (args.system or args.rollout or training or args.no_thinking):
         return fail(
             "--raw does not combine with system, rollout, training or chat-template options"
@@ -572,6 +608,13 @@ def main(argv: list[str] | None = None) -> int:
         return fail("--teacher-system does not combine with --raw; use --teacher-prompt")
     if args.raw and args.save_rollout is not None:
         return fail("--save-rollout does not combine with --raw")
+    auto_teacher_system = None
+    if progress and not teacher_mode:
+        try:
+            auto_teacher_system = _teacher_system_from_progress_run(args.progress)
+        except (OSError, ValueError) as e:
+            return fail(str(e))
+        teacher_mode = auto_teacher_system is not None
     if args.metric == "kl" and not teacher_mode:
         return fail("--metric kl needs teacher-mode scoring (a --teacher-* flag)")
     metric = args.metric or ("kl" if teacher_mode else "logprob")
@@ -583,7 +626,12 @@ def main(argv: list[str] | None = None) -> int:
     if progress:
         from distil.progress import Probe, load_probes
 
-        if target_progress:
+        if args.sample:
+            prompt = _read_input(args.prompt) or ""
+            system = _read_input(args.system)
+            probes = [Probe("sample", prompt, "", system)]
+            completion = None
+        elif target_progress:
             completion = _read_input(args.completion)
             prompt = _read_input(args.prompt) or ""
             system = _read_input(args.system)
@@ -611,6 +659,8 @@ def main(argv: list[str] | None = None) -> int:
         prompt = _read_input(args.prompt)
         system = _read_input(args.system)
     teacher_system = _read_input(args.teacher_system)
+    if teacher_system is None:
+        teacher_system = auto_teacher_system
     teacher_prompt = _read_input(args.teacher_prompt)
 
     if progress:
@@ -633,19 +683,40 @@ def main(argv: list[str] | None = None) -> int:
         teacher_model, teacher_tokenizer = model, tokenizer
 
     max_tokens = args.max_tokens if args.max_tokens is not None else 512
-    temperature = args.temperature if args.temperature is not None else 1.0
+    temperature = args.temperature if args.temperature is not None else 0.0
     top_k = args.top_k if args.top_k is not None else 3
     enable_thinking = False if args.no_thinking else None
 
     if progress:
-        from distil.progress import progress_to_json, score_progress
+        from distil.progress import progress_to_json, sample_progress, score_progress
 
         try:
-            progress_result = score_progress(
-                model,
-                tokenizer,
-                args.progress,
-                probes,
+            progress_metric = args.metric or ("kl" if teacher_mode else "prob")
+            stream_progress = not args.json
+            stream_layout = {}
+
+            def on_start(result):
+                if not stream_progress:
+                    return
+                stream_layout["layout"] = render_progress_rows_header(
+                    result,
+                    console,
+                    progress_metric,
+                    sampled=args.sample,
+                )
+
+            def on_point(probe, point):
+                if not stream_progress:
+                    return
+                render_progress_row_point(
+                    probe,
+                    point,
+                    console,
+                    progress_metric,
+                    stream_layout["layout"],
+                )
+
+            progress_kwargs = dict(
                 enable_thinking=enable_thinking,
                 top_k=args.top_k if args.top_k is not None else 0,
                 default_system=system,
@@ -654,22 +725,45 @@ def main(argv: list[str] | None = None) -> int:
                 teacher_system=teacher_system,
                 teacher_prompt=teacher_prompt,
                 teacher_name=teacher_name if teacher_mode else None,
+                on_start=on_start,
+                on_point=on_point,
             )
+            if args.sample:
+                progress_result = sample_progress(
+                    model,
+                    tokenizer,
+                    args.progress,
+                    probes,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=args.seed,
+                    **progress_kwargs,
+                )
+            else:
+                progress_result = score_progress(
+                    model,
+                    tokenizer,
+                    args.progress,
+                    probes,
+                    **progress_kwargs,
+                )
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as e:
             return fail(str(e))
         if args.json:
             print(json.dumps(progress_to_json(progress_result), ensure_ascii=False, indent=2))
-        elif target_progress:
+        elif stream_progress:
+            pass
+        elif len(progress_result.probes) == 1:
             render_progress_tokens(
                 progress_result,
                 console,
-                metric=args.metric or ("kl" if teacher_mode else "prob"),
+                metric=progress_metric,
             )
         else:
             render_progress(
                 progress_result,
                 console,
-                metric=args.metric or ("kl" if teacher_mode else "prob"),
+                metric=progress_metric,
             )
         return 0
 

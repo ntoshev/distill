@@ -395,7 +395,9 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
 
     def fake_score(model, tokenizer, root, probes, **kwargs):
         point = distil.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, [])
-        return distil.progress.ProgressResult(str(root), [0], probes, {"target": [point]})
+        return distil.progress.ProgressResult(
+            str(root), [0], probes, {"target": [point]}, teacher_model="m"
+        )
 
     monkeypatch.setattr(distil.progress, "score_progress", fake_score)
     assert main([
@@ -404,6 +406,216 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
     ]) == 0
     assert disabled == [True]
     assert '"completion": "VIOLET-731"' in capsys.readouterr().out
+
+
+def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
+        captured["root"] = root
+        captured["probes"] = probes
+        captured.update(kwargs)
+        point = distil.progress.ProbePoint(
+            0, -1.0, 0.37, -1.0, 0.37, [],
+            completion="sampled", content="sampled", finish_reason="stop", num_tokens=1
+        )
+        return distil.progress.ProgressResult(str(root), [0], probes, {"sample": [point]})
+
+    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    assert main([
+        "--model", "m", "--progress", "run", "--prompt", "When?",
+        "--sample", "--metric", "prob", "--no-thinking", "--json",
+    ]) == 0
+    assert captured["root"] == "run"
+    assert captured["probes"][0] == distil.progress.Probe("sample", "When?", "")
+    assert captured["temperature"] == 0.0
+    assert captured["max_tokens"] == 512
+    assert captured["enable_thinking"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["series"]["sample"][0]["completion"] == "sampled"
+
+
+def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    source = tmp_path / "facts.txt"
+    source.write_text("The answer is VIOLET-731.")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "run_config.json").write_text(json.dumps({
+        "source": {"source": "file", "path": str(source)}
+    }))
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    model = object()
+    tokenizer = object()
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
+    captured = {}
+
+    def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
+        captured.update(kwargs)
+        point = distil.progress.ProbePoint(
+            0, -2.0, 0.14, -2.0, 0.14, [],
+            mean_teacher_logprob=-0.1,
+            mean_kl=0.2,
+            completion="sampled",
+            content="sampled",
+            finish_reason="stop",
+            num_tokens=1,
+        )
+        result = distil.progress.ProgressResult(
+            str(root), [0], probes, {"sample": []}, teacher_model="m"
+        )
+        kwargs["on_start"](result)
+        result.series["sample"].append(point)
+        kwargs["on_point"](probes[0], point)
+        return result
+
+    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+
+    assert main([
+        "--model", "m", "--progress", str(run), "--prompt", "When?",
+        "--sample", "--metric", "prob", "--no-thinking",
+    ]) == 0
+    assert captured["teacher_model"] is model
+    assert "Private reference document" in captured["teacher_system"]
+    assert "The answer is VIOLET-731." in captured["teacher_system"]
+    output = capsys.readouterr().out
+    assert "token probability within the sampled completion" in output
+    assert "teacher p=90.5%" in output
+
+
+def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    source = tmp_path / "facts.txt"
+    source.write_text("The answer is VIOLET-731.")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "run_config.json").write_text(json.dumps({
+        "source": {"source": "file", "path": str(source)}
+    }))
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    model = object()
+    tokenizer = object()
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
+
+    def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
+        point = distil.progress.ProbePoint(
+            0, -2.0, 0.14, -2.0, 0.14,
+            [{"text": "sampled", "logprob": -2.0, "probability": 0.14, "kl": 0.2}],
+            mean_teacher_logprob=-0.1,
+            mean_kl=0.2,
+            completion="sampled",
+            content="sampled",
+            finish_reason="stop",
+            num_tokens=1,
+        )
+        result = distil.progress.ProgressResult(
+            str(root), [0], probes, {"sample": []}, teacher_model="m"
+        )
+        kwargs["on_start"](result)
+        result.series["sample"].append(point)
+        kwargs["on_point"](probes[0], point)
+        return result
+
+    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+
+    assert main([
+        "--model", "m", "--progress", str(run), "--prompt", "When?",
+        "--sample", "--no-thinking",
+    ]) == 0
+    output = capsys.readouterr().out
+    assert "teacher ‖ student" in output
+    assert "sampled completion" in output
+    assert "KL= 0.200" in output
+
+
+def test_progress_completion_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    source = tmp_path / "facts.txt"
+    source.write_text("The answer is VIOLET-731.")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "run_config.json").write_text(json.dumps({
+        "source": {"source": "file", "path": str(source)}
+    }))
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    model = object()
+    tokenizer = object()
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
+    captured = {}
+
+    def fake_score_progress(model, tokenizer, root, probes, **kwargs):
+        captured.update(kwargs)
+        point = distil.progress.ProbePoint(
+            0, -2.0, 0.14, -2.0, 0.14, [], mean_teacher_logprob=-0.1, mean_kl=0.2
+        )
+        return distil.progress.ProgressResult(
+            str(root), [0], probes, {"target": [point]}, teacher_model="m"
+        )
+
+    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+    assert main([
+        "--model", "m", "--progress", str(run), "--prompt", "When?",
+        "--completion", "VIOLET-731", "--json",
+    ]) == 0
+    assert captured["teacher_model"] is model
+    assert "Private reference document" in captured["teacher_system"]
+    assert "The answer is VIOLET-731." in captured["teacher_system"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["teacher_model"] == "m"
+
+
+def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    probes_path = tmp_path / "probes.jsonl"
+    probes_path.write_text(
+        '{"name":"a","prompt":"A?","completion":"one"}\n'
+        '{"name":"b","prompt":"B?","completion":"two"}\n'
+    )
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+
+    def fake_score_progress(model, tokenizer, root, probes, **kwargs):
+        result = distil.progress.ProgressResult(
+            str(root), [0], probes, {probe.name: [] for probe in probes}
+        )
+        kwargs["on_start"](result)
+        for index, probe in enumerate(probes):
+            point = distil.progress.ProbePoint(
+                0, -1.0, 0.37, -1.0, 0.37,
+                [{"text": str(index), "logprob": -1.0, "probability": 0.37}],
+            )
+            result.series[probe.name].append(point)
+            kwargs["on_point"](probe, point)
+        return result
+
+    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+
+    assert main([
+        "--model", "m", "--progress", "run", "--probes", str(probes_path)
+    ]) == 0
+    output = capsys.readouterr().out
+    assert "checkpoint probes" in output
+    assert "a" in output
+    assert "b" in output
+    assert "student p=36.8%" in output
 
 
 def test_progress_top_k_is_forwarded_and_emitted_in_json(monkeypatch, capsys):

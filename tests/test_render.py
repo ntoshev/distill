@@ -223,9 +223,15 @@ def test_teacher_json_dict():
 def test_render_progress():
     probe = Probe("lumen/fact", "Code?", "VIOLET-731")
     points = [
-        ProbePoint(0, -4.0, 0.02, -8.0, 0.0, []),
-        ProbePoint(1, -1.0, 0.37, -2.0, 0.14, []),
-        ProbePoint(2, -0.1, 0.90, -0.2, 0.82, []),
+        ProbePoint(0, -4.0, 0.02, -8.0, 0.0, [
+            {"text": "VIOLET", "logprob": -4.0, "probability": 0.02},
+        ]),
+        ProbePoint(1, -1.0, 0.37, -2.0, 0.14, [
+            {"text": "VIOLET", "logprob": -1.0, "probability": 0.37},
+        ]),
+        ProbePoint(2, -0.1, 0.90, -0.2, 0.82, [
+            {"text": "VIOLET", "logprob": -0.1, "probability": 0.90},
+        ]),
     ]
     result = ProgressResult("run", [0, 1, 2], [probe], {probe.name: points})
     console = Console(
@@ -233,9 +239,11 @@ def test_render_progress():
     )
     render_progress(result, console)
     output = console.export_text()
-    assert "lumen/fact" in output
-    assert "2.0% →  90.0%" in output
-    assert "max  90.0%@2" in output
+    assert "token probability within the fixed completion" in output
+    assert "base" in output
+    assert "step-0002" in output
+    assert "VIOLET" in output
+    assert "90.0%" in output
 
 
 def test_render_progress_tokens():
@@ -275,6 +283,37 @@ def test_render_teacher_progress_uses_kl():
     output = console.export_text()
     assert "token KL(teacher ‖ student)" in output
     assert "0.250" in output
+
+
+def test_render_sampled_teacher_progress_prob_uses_student_likelihood():
+    probe = Probe("sample", "When?", "")
+    points = [
+        ProbePoint(
+            0, -10.0, 0.0, -10.0, 0.0,
+            [
+                {
+                    "text": "June",
+                    "logprob": -10.0,
+                    "probability": 0.0,
+                    "teacher_logprob": -0.1,
+                    "kl": 0.25,
+                }
+            ],
+            mean_teacher_logprob=-0.1,
+            mean_kl=0.25,
+            completion="June",
+            content="June",
+            finish_reason="stop",
+            num_tokens=1,
+        )
+    ]
+    result = ProgressResult("run", [0], [probe], {probe.name: points}, "teacher")
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=80)
+    render_progress_tokens(result, console, metric="prob")
+    output = console.export_text()
+    assert "sampled completion" in output
+    assert "teacher p=90.5%" in output
+    assert "student p= 0.0%" in output
 
 
 def test_render_progress_tokens_requires_one_probe():

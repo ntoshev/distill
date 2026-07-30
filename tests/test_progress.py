@@ -11,6 +11,7 @@ from distil.progress import (
     find_checkpoints,
     load_probes,
     progress_to_json,
+    sample_progress,
     score_progress,
     score_probe,
 )
@@ -100,6 +101,41 @@ def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, mon
     assert len(loaded) == 2
 
 
+def test_score_progress_reports_points_incrementally(tmp_path, monkeypatch):
+    checkpoints = tmp_path / "checkpoints"
+    for step in (0, 5):
+        directory = checkpoints / f"step-{step:04d}"
+        directory.mkdir(parents=True)
+        (directory / "adapters.safetensors").touch()
+
+    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr(
+        "distil.progress.score_probe",
+        lambda model, tokenizer, probe, step, enable_thinking, **kwargs: ProbePoint(
+            step, -1.0, 0.37, -1.0, 0.37, []
+        ),
+    )
+
+    class Model:
+        def eval(self):
+            pass
+
+    starts = []
+    points = []
+    score_progress(
+        Model(),
+        object(),
+        tmp_path,
+        [Probe("x", "p", "c")],
+        on_start=lambda result: starts.append((result.steps, len(result.series["x"]))),
+        on_point=lambda probe, point: points.append((probe.name, point.step)),
+    )
+
+    assert starts == [([0, 5], 0)]
+    assert points == [("x", 0), ("x", 5)]
+
+
 def test_score_probe_applies_default_and_teacher_context(monkeypatch):
     import distil.progress
 
@@ -139,3 +175,108 @@ def test_score_probe_applies_default_and_teacher_context(monkeypatch):
     assert point.mean_teacher_logprob == -0.5
     assert point.mean_kl == 0.2
     assert point.tokens[0]["teacher_top"] == [["B", -0.3]]
+
+
+def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch):
+    import distil.progress
+    from distil.sample import Sample
+
+    checkpoints = tmp_path / "checkpoints"
+    for step in (0, 5):
+        directory = checkpoints / f"step-{step:04d}"
+        directory.mkdir(parents=True)
+        (directory / "adapters.safetensors").touch()
+
+    class Model:
+        def eval(self):
+            pass
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return "prompt>"
+
+    loaded = []
+    samples = []
+    scored = []
+    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: loaded.append(path))
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+
+    def fake_sample(model, tokenizer, messages, **kwargs):
+        text = f"answer-{len(samples)}"
+        samples.append((messages, kwargs))
+        return Sample("prompt>", text, text, "stop", 1)
+
+    def fake_score(model, tokenizer, text, spans, **kwargs):
+        scored.append((text, spans))
+        token = TokenScore(1, text[-1], len("prompt>answer-"), len(text), True, -0.5)
+        return ScoreResult(text, [token], "student", [])
+
+    monkeypatch.setattr(distil.progress, "sample_completion", fake_sample)
+    monkeypatch.setattr(distil.progress, "score_text", fake_score)
+    result = sample_progress(
+        Model(),
+        Tokenizer(),
+        tmp_path,
+        [Probe("x", "question", "")],
+        max_tokens=7,
+        temperature=0.0,
+        seed=3,
+    )
+
+    assert result.steps == [0, 5]
+    assert len(loaded) == 2
+    assert samples[0][0] == [{"role": "user", "content": "question"}]
+    assert samples[0][1]["temperature"] == 0.0
+    assert samples[0][1]["seed"] == 3
+    assert scored[0] == ("prompt>answer-0", [(7, 15)])
+    points = result.series["x"]
+    assert [point.completion for point in points] == ["answer-0", "answer-1"]
+    assert points[0].finish_reason == "stop"
+
+
+def test_sample_progress_reports_points_incrementally(tmp_path, monkeypatch):
+    import distil.progress
+    from distil.sample import Sample
+
+    checkpoints = tmp_path / "checkpoints"
+    for step in (0, 5):
+        directory = checkpoints / f"step-{step:04d}"
+        directory.mkdir(parents=True)
+        (directory / "adapters.safetensors").touch()
+
+    class Model:
+        def eval(self):
+            pass
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return "prompt>"
+
+    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr(
+        distil.progress,
+        "sample_completion",
+        lambda *args, **kwargs: Sample("prompt>", "answer", "answer", "stop", 1),
+    )
+    monkeypatch.setattr(
+        distil.progress,
+        "score_text",
+        lambda model, tokenizer, text, spans, **kwargs: ScoreResult(
+            text, [TokenScore(1, "answer", 7, 13, True, -0.5)], "student", []
+        ),
+    )
+
+    starts = []
+    points = []
+    sample_progress(
+        Model(),
+        Tokenizer(),
+        tmp_path,
+        [Probe("x", "p", "")],
+        on_start=lambda result: starts.append((result.steps, len(result.series["x"]))),
+        on_point=lambda probe, point: points.append((probe.name, point.step, point.content)),
+    )
+
+    assert starts == [([0, 5], 0)]
+    assert points == [("x", 0, "answer"), ("x", 5, "answer")]
