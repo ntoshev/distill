@@ -101,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="visualize a completion or probe set over PATH/checkpoints/step-*",
     )
+    src.add_argument(
+        "--progress-prompt",
+        choices=["test", "train"],
+        default="test",
+        help="which probe prompts to use with --progress --probes (default test)",
+    )
     src.add_argument("--probes", metavar="PATH", help="JSONL probes for --progress or manual training")
     tch = p.add_argument_group("teacher (two-pass KL scoring; any flag enables it)")
     tch.add_argument("--teacher-model", help="teacher weights (default: same as --model)")
@@ -334,21 +340,29 @@ def _continual_cli(args, errcon, fail) -> int:
         teacher_context = document_teacher_system(document)
 
         for item in items:
-            for prompt in (*item.train_prompts, item.prompt):
+            for prompt in item.train_prompts:
                 ensure_fits(
                     teacher,
                     teacher_tokenizer,
                     [
                         {"role": "system", "content": teacher_context},
-                        {
-                            "role": "user",
-                            "content": answer_only_prompt(prompt),
-                        },
+                        {"role": "user", "content": prompt},
                     ],
                     max_tokens,
                     "teacher document prompt",
                     enable_thinking,
                 )
+            ensure_fits(
+                teacher,
+                teacher_tokenizer,
+                [
+                    {"role": "system", "content": teacher_context},
+                    {"role": "user", "content": answer_only_prompt(item.prompt)},
+                ],
+                max_tokens,
+                "teacher document prompt",
+                enable_thinking,
+            )
 
         from distil.distill import run_continual
 
@@ -453,7 +467,12 @@ def _continual_cli(args, errcon, fail) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    progress_prompt_explicit = any(
+        value == "--progress-prompt" or value.startswith("--progress-prompt=")
+        for value in raw_argv
+    )
+    args = build_parser().parse_args(raw_argv)
     force = True if args.color == "always" else None
     console = Console(
         force_terminal=force,
@@ -527,6 +546,8 @@ def main(argv: list[str] | None = None) -> int:
             return fail(f"{name} only combines with --train")
     if args.probes is not None and not (progress or training):
         return fail("--probes only combines with --progress or --train")
+    if progress_prompt_explicit and not progress:
+        return fail("--progress-prompt only combines with --progress")
     if training:
         output = args.adapter or args.adapter_path
         if not output:
@@ -598,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.probes is not None:
             if args.prompt is not None:
                 return fail("--progress with --probes takes prompts from each probe")
+        if args.progress_prompt == "train" and args.probes is None:
+            return fail("--progress-prompt train requires --probes")
         if sampled_progress and args.completion is not None:
             return fail("--completion does not combine with --progress --sample")
     if args.raw and (args.system or args.rollout or training or args.no_thinking):
@@ -640,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
             probes = [Probe("target", prompt, completion, system)]
         else:
             try:
-                probes = load_probes(args.probes)
+                probes = load_probes(args.probes, prompt_mode=args.progress_prompt)
             except (FileNotFoundError, ValueError) as e:
                 return fail(str(e))
             completion = None

@@ -363,6 +363,13 @@ def test_probes_require_progress(capsys):
     assert "only combines with --progress or --train" in capsys.readouterr().err
 
 
+def test_progress_prompt_requires_progress(capsys):
+    assert main([
+        "--model", "m", "--completion", "x", "--progress-prompt", "test"
+    ]) == 2
+    assert "only combines with --progress" in capsys.readouterr().err
+
+
 def test_progress_validates_probe_file_before_model_load(tmp_path, capsys):
     probes = tmp_path / "probes.jsonl"
     probes.write_text("\n")
@@ -378,6 +385,48 @@ def test_progress_rejects_other_mode_flags(tmp_path):
     base = ["--model", "m", "--progress", "run", "--probes", str(probes)]
     for flag in (["--adapter-path", "a"],):
         assert main([*base, *flag]) == 2
+
+
+def test_progress_prompt_train_requires_probes(capsys):
+    assert main([
+        "--model", "m", "--progress", "run", "--prompt", "p",
+        "--completion", "c", "--progress-prompt", "train",
+    ]) == 2
+    assert "requires --probes" in capsys.readouterr().err
+
+
+def test_progress_prompt_train_expands_probe_train_prompts(tmp_path, monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+    from distil.stopping import ANSWER_ONLY_INSTRUCTION
+
+    probes = tmp_path / "probes.jsonl"
+    probes.write_text(json.dumps({
+        "name": "fact",
+        "prompt": "Heldout?",
+        "completion": "VIOLET-731",
+        "train_prompts": ["Train one?", "Train two?"],
+    }) + "\n")
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_score_progress(model, tokenizer, root, probes, **kwargs):
+        captured["probes"] = probes
+        result = distil.progress.ProgressResult(
+            str(root), [0], probes, {probe.name: [] for probe in probes}
+        )
+        kwargs["on_start"](result)
+        return result
+
+    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+    assert main([
+        "--model", "m", "--progress", "run", "--probes", str(probes),
+        "--progress-prompt", "train",
+    ]) == 0
+    assert [probe.name for probe in captured["probes"]] == ["fact/train-1", "fact/train-2"]
+    assert captured["probes"][0].prompt == f"Train one?\n\n{ANSWER_ONLY_INSTRUCTION}"
 
 
 def test_progress_accepts_prompt_completion_and_suppresses_download_bars(

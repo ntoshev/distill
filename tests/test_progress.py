@@ -16,6 +16,7 @@ from distil.progress import (
     score_probe,
 )
 from distil.scoring import ScoreResult, TokenScore, TopToken
+from distil.stopping import ANSWER_ONLY_INSTRUCTION
 
 
 def test_load_probes(tmp_path):
@@ -28,6 +29,23 @@ def test_load_probes(tmp_path):
     assert probes == [
         Probe("fact", "Code?", "VIOLET-731"),
         Probe("canary", "2+2?", "4", "Be terse"),
+    ]
+
+
+def test_load_probes_can_expand_training_prompts(tmp_path):
+    path = tmp_path / "probes.jsonl"
+    path.write_text(
+        json.dumps({
+            "name": "fact",
+            "prompt": "Heldout?",
+            "completion": "VIOLET-731",
+            "train_prompts": ["Train one?", "Train two?"],
+        }) + "\n"
+    )
+    probes = load_probes(path, prompt_mode="train")
+    assert probes == [
+        Probe("fact/train-1", f"Train one?\n\n{ANSWER_ONLY_INSTRUCTION}", "VIOLET-731"),
+        Probe("fact/train-2", f"Train two?\n\n{ANSWER_ONLY_INSTRUCTION}", "VIOLET-731"),
     ]
 
 

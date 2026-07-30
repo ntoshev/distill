@@ -10,6 +10,7 @@ from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
 from distil.sample import sample_completion
 from distil.scoring import score_text, score_text_pair
+from distil.stopping import answer_only_prompt
 from distil.templating import apply_teacher_context, build_raw
 
 
@@ -49,8 +50,10 @@ class ProgressResult:
     teacher_model: str | None = None
 
 
-def load_probes(path: str | Path) -> list[Probe]:
+def load_probes(path: str | Path, prompt_mode: str = "test") -> list[Probe]:
     """Load one JSON probe per non-empty line."""
+    if prompt_mode not in {"test", "train"}:
+        raise ValueError("prompt_mode must be 'test' or 'train'")
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"probe file not found or not a file: {path}")
@@ -62,25 +65,45 @@ def load_probes(path: str | Path) -> list[Probe]:
             continue
         try:
             row = json.loads(line)
-            probe = Probe(
-                name=row["name"],
-                prompt=row["prompt"],
-                completion=row["completion"],
-                system=row.get("system"),
-            )
+            name = row["name"]
+            completion = row["completion"]
+            system = row.get("system")
+            if prompt_mode == "train":
+                raw_prompts = row["train_prompts"]
+                if not isinstance(raw_prompts, list) or not raw_prompts:
+                    raise ValueError("train_prompts must be a non-empty list")
+                row_probes = [
+                    Probe(
+                        name=f"{name}/train-{index}",
+                        prompt=answer_only_prompt(prompt),
+                        completion=completion,
+                        system=system,
+                    )
+                    for index, prompt in enumerate(raw_prompts, 1)
+                ]
+            else:
+                row_probes = [
+                    Probe(
+                        name=name,
+                        prompt=row["prompt"],
+                        completion=completion,
+                        system=system,
+                    )
+                ]
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             raise ValueError(f"invalid probe on line {line_number}: {error}") from error
-        required = (probe.name, probe.prompt, probe.completion)
-        if not all(isinstance(value, str) and value for value in required):
-            raise ValueError(
-                f"invalid probe on line {line_number}: fields must be non-empty strings"
-            )
-        if probe.system is not None and not isinstance(probe.system, str):
-            raise ValueError(f"invalid probe on line {line_number}: system must be a string")
-        if probe.name in names:
-            raise ValueError(f"duplicate probe name: {probe.name}")
-        names.add(probe.name)
-        probes.append(probe)
+        for probe in row_probes:
+            required = (probe.name, probe.prompt, probe.completion)
+            if not all(isinstance(value, str) and value for value in required):
+                raise ValueError(
+                    f"invalid probe on line {line_number}: fields must be non-empty strings"
+                )
+            if probe.system is not None and not isinstance(probe.system, str):
+                raise ValueError(f"invalid probe on line {line_number}: system must be a string")
+            if probe.name in names:
+                raise ValueError(f"duplicate probe name: {probe.name}")
+            names.add(probe.name)
+            probes.append(probe)
     if not probes:
         raise ValueError(f"probe file is empty: {path}")
     return probes

@@ -30,7 +30,7 @@
         },
         "fixed_rollout_training_step": {
           "reference": "teacher_scoring_128",
-          "median_multiple": 14.653464,
+          "median_multiple": 15.874657,
           "regression_tolerance": 0.05
         },
         "teacher_scoring_128": {

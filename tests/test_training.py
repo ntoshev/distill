@@ -7,7 +7,7 @@ import mlx.core as mx
 
 from distil.progress import Probe, ProbePoint
 from distil.sample import _proposal_is_accepted
-from distil.stopping import LearningItem, answer_only_prompt
+from distil.stopping import LearningItem
 from distil.training import TrainStep, _kl_loss, load_prompts
 
 
@@ -64,6 +64,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     eval_reports = []
     train_reports = []
     feedback_capture_calls = []
+    scored_prompts = []
 
     class Model:
         def eval(self):
@@ -105,6 +106,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         return probe.completion
 
     def fake_score(model, tokenizer, probe, step, enable_thinking):
+        scored_prompts.append(probe.prompt)
         probability = 0.9 if state["learned"] else 0.1
         return ProbePoint(step, -1.0, probability, -1.0, probability, [])
 
@@ -137,12 +139,16 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     assert result.success
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
     assert all(limit == 32 for name, limit in answer_calls if name == "fact")
+    assert scored_prompts == [
+        "heldout\n\nAnswer with only the requested answer. Do not add explanation or formatting.",
+        "heldout\n\nAnswer with only the requested answer. Do not add explanation or formatting.",
+    ]
     row = json.loads(rollouts.read_text())
     assert row["item_id"] == "fact"
     assert row["batch_size"] == 1
     assert row["batch_index"] == 0
     assert row["batch_loss"] == 0.1
-    assert row["prompt"][-1]["content"] == answer_only_prompt("train")
+    assert row["prompt"][-1]["content"] == "train"
     assert row["completion"][0]["content"] == "VIOLET-731"
     metric = json.loads(
         (tmp_path / "adapter" / "training_metrics.jsonl").read_text()
@@ -161,7 +167,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         "event": "question",
         "iteration": 1,
         "item_id": "fact",
-        "prompt": answer_only_prompt("train"),
+        "prompt": "train",
         "batch_size": 1,
     }
     assert train_reports[1]["event"] == "step"
@@ -171,7 +177,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         "optimizer_seconds": 0.0,
         "total_seconds": 0.0,
     }
-    assert eval_reports[-1]["training_rollout"]["prompt"] == answer_only_prompt("train")
+    assert eval_reports[-1]["training_rollout"]["prompt"] == "train"
     assert eval_reports[-1]["training_rollout"]["content"] == "VIOLET-731"
     assert eval_reports[-1]["confirmations"]["fact"] == {
         "content": "VIOLET-731",

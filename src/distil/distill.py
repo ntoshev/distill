@@ -341,10 +341,9 @@ def run_continual(
         selected = baseline
         reported_first_question = False
         for update_number in range(1, budget + 1):
-            batch = [
-                (item_id, answer_only_prompt(prompt))
-                for item_id, prompt in rotation.next_batch(batch_size)
-            ]
+            # Keep on-policy rollouts in the original training-prompt distribution.
+            # The answer-only contract is reserved for held-out mastery evaluation.
+            batch = rotation.next_batch(batch_size)
             if not reported_first_question and train_report is not None:
                 train_report(
                     {
