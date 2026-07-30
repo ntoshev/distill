@@ -410,13 +410,14 @@ def write_generation(
     )
     with (root / "facts.jsonl").open("w") as file:
         for item in facts:
-            file.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
+            row = asdict(item)
+            row["name"] = row.pop("fact_id")
+            file.write(json.dumps(row, ensure_ascii=False) + "\n")
     valid = [item for item in facts if item.error is None]
     with (root / "probes.jsonl").open("w") as file:
         for item in valid:
             row = {
                 "name": item.fact_id,
-                "fact_id": item.fact_id,
                 "fact": item.fact,
                 "train_prompts": item.train_prompts,
                 "prompt": item.prompt,
@@ -436,7 +437,7 @@ def write_generation(
                 "valid_facts": len(valid),
                 "questions": sum(len(item.questions) for item in facts),
                 "errors": [
-                    {"fact_id": item.fact_id, "error": item.error}
+                    {"name": item.fact_id, "error": item.error}
                     for item in facts
                     if item.error is not None
                 ],

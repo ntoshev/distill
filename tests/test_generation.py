@@ -111,9 +111,11 @@ def test_generation_artifacts_use_completion_only_schema(tmp_path):
     probe_row = json.loads((tmp_path / "probes.jsonl").read_text())
     assert "answer" not in fact_row
     assert "context" not in fact_row
+    assert "fact_id" not in fact_row
     assert "answer" not in probe_row
     assert "context" not in probe_row
     assert "subject" not in probe_row
+    assert "fact_id" not in probe_row
     assert probe_row["completion"] == "red"
 
 
