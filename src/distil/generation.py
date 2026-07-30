@@ -418,7 +418,6 @@ def write_generation(
                 "name": item.fact_id,
                 "fact_id": item.fact_id,
                 "fact": item.fact,
-                "subject": item.subject,
                 "train_prompts": item.train_prompts,
                 "prompt": item.prompt,
                 "completion": item.completion,
