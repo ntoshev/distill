@@ -399,7 +399,6 @@ def test_progress_prompt_train_expands_probe_train_prompts(tmp_path, monkeypatch
     import huggingface_hub.utils
     import mlx_lm
     import distil.progress
-    from distil.stopping import ANSWER_ONLY_INSTRUCTION
 
     probes = tmp_path / "probes.jsonl"
     probes.write_text(json.dumps({
@@ -426,7 +425,7 @@ def test_progress_prompt_train_expands_probe_train_prompts(tmp_path, monkeypatch
         "--progress-prompt", "train",
     ]) == 0
     assert [probe.name for probe in captured["probes"]] == ["fact/train-1", "fact/train-2"]
-    assert captured["probes"][0].prompt == f"Train one?\n\n{ANSWER_ONLY_INSTRUCTION}"
+    assert captured["probes"][0].prompt == "Train one?"
 
 
 def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
@@ -488,6 +487,53 @@ def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
     assert captured["enable_thinking"] is False
     payload = json.loads(capsys.readouterr().out)
     assert payload["series"]["sample"][0]["completion"] == "sampled"
+
+
+def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, capsys):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    probes_path = tmp_path / "probes.jsonl"
+    probes_path.write_text(
+        json.dumps({
+            "name": "fact",
+            "prompt": "Held out?",
+            "completion": "Short target",
+            "train_prompts": ["Train one?", "Train two?"],
+        }) + "\n"
+    )
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+
+    def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
+        captured["probes"] = probes
+        points = {
+            probe.name: [
+                distil.progress.ProbePoint(
+                    0, -1.0, 0.37, -1.0, 0.37, [],
+                    completion="A full sampled sentence.",
+                    content="A full sampled sentence.",
+                    finish_reason="stop",
+                    num_tokens=5,
+                )
+            ]
+            for probe in probes
+        }
+        return distil.progress.ProgressResult(str(root), [0], probes, points)
+
+    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    assert main([
+        "--model", "m", "--progress", "run", "--probes", str(probes_path),
+        "--progress-prompt", "train", "--sample", "--json",
+    ]) == 0
+    assert captured["probes"] == [
+        distil.progress.Probe("fact/train-1", "Train one?", "Short target"),
+        distil.progress.Probe("fact/train-2", "Train two?", "Short target"),
+    ]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["series"]["fact/train-1"][0]["completion"] == "A full sampled sentence."
 
 
 def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):

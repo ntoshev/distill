@@ -2,7 +2,7 @@
 
 - Render math properly.
 - Build intuition when explaining concepts.
-- Run not only correctness, but also benchmark tests after implementation changes that alter decoding or training performance
+- Run not only correctness, but also benchmark tests after implementation changes that alter decoding or training performance. Use DISTIL_BENCHMARK_SYSTEM_ID=mac15-6-m3-pro-11cpu-14gpu-36gb
 
 ## Distillation visualizations
 

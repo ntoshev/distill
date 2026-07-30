@@ -113,7 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
     tch.add_argument("--teacher-system", help="teacher's system prompt, replacing the student's")
     tch.add_argument("--teacher-prompt", help="replace the first user message for the teacher")
     smp = p.add_argument_group("sampling (generate the completion from the student)")
-    smp.add_argument("--sample", action="store_true", help="sample a completion from --model")
+    smp.add_argument(
+        "--sample",
+        action="store_true",
+        help="sample a completion from --model; with --progress --probes, sample every probe",
+    )
     smp.add_argument("--max-tokens", type=int, help="sampling length limit (default 512)")
     smp.add_argument("--temperature", type=float, help="sampling temperature (default 0.0)")
     smp.add_argument("--seed", type=int, help="random seed for sampling")
@@ -504,7 +508,12 @@ def main(argv: list[str] | None = None) -> int:
         return fail("--index only combines with --rollout")
     if args.top_k is not None and args.top_k < 0:
         return fail("--top-k must be nonnegative")
-    if args.sample and args.prompt is None and (args.raw or args.system is None):
+    if (
+        args.sample
+        and args.probes is None
+        and args.prompt is None
+        and (args.raw or args.system is None)
+    ):
         return fail("--sample requires --prompt, or --system in chat mode")
     if args.speculative_top_k is not None:
         if not (args.sample or training):
@@ -604,8 +613,11 @@ def main(argv: list[str] | None = None) -> int:
             return fail("--contamination-regex is not used in continual mode")
     if progress:
         target_progress = args.completion is not None
+        probe_progress = args.probes is not None
         sampled_progress = args.sample
-        progress_inputs = sum([target_progress, args.probes is not None, sampled_progress])
+        # Sampling modifies a probe progress run when --probes is supplied;
+        # otherwise it is the source of the one ad-hoc progress prompt.
+        progress_inputs = sum([target_progress, probe_progress, sampled_progress and not probe_progress])
         if progress_inputs != 1:
             return fail("--progress requires exactly one of --completion, --probes or --sample")
         if args.adapter_path:
@@ -649,7 +661,15 @@ def main(argv: list[str] | None = None) -> int:
     if progress:
         from distil.progress import Probe, load_probes
 
-        if args.sample:
+        if args.probes is not None:
+            try:
+                probes = load_probes(args.probes, prompt_mode=args.progress_prompt)
+            except (FileNotFoundError, ValueError) as e:
+                return fail(str(e))
+            completion = None
+            prompt = None
+            system = _read_input(args.system)
+        elif args.sample:
             prompt = _read_input(args.prompt) or ""
             system = _read_input(args.system)
             probes = [Probe("sample", prompt, "", system)]
@@ -661,14 +681,6 @@ def main(argv: list[str] | None = None) -> int:
             if not completion:
                 return fail("--completion must not be empty")
             probes = [Probe("target", prompt, completion, system)]
-        else:
-            try:
-                probes = load_probes(args.probes, prompt_mode=args.progress_prompt)
-            except (FileNotFoundError, ValueError) as e:
-                return fail(str(e))
-            completion = None
-            prompt = None
-            system = _read_input(args.system)
     elif args.rollout:
         try:
             rollout = load_rollout(args.rollout, args.index if args.index is not None else 0)

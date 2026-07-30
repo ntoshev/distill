@@ -10,7 +10,6 @@ from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
 from distil.sample import sample_completion
 from distil.scoring import score_text, score_text_pair
-from distil.stopping import answer_only_prompt
 from distil.templating import apply_teacher_context, build_raw
 
 
@@ -75,7 +74,10 @@ def load_probes(path: str | Path, prompt_mode: str = "test") -> list[Probe]:
                 row_probes = [
                     Probe(
                         name=f"{name}/train-{index}",
-                        prompt=answer_only_prompt(prompt),
+                        # Match the on-policy training distribution exactly.
+                        # The answer-only contract is used only for held-out
+                        # mastery evaluation, not for training prompts.
+                        prompt=prompt,
                         completion=completion,
                         system=system,
                     )

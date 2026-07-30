@@ -213,6 +213,19 @@ per-token values. Add `--top-k K --json` to include each scored token's top-K
 alternatives. Progress mode performs inference over saved checkpoints but does
 not retrain.
 
+To inspect the actual generated response rather than score the fixed
+`completion`, add `--sample`. With probes, it samples every probe at every
+checkpoint and scores that exact generated text. For the same distribution used
+by continual training:
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-4b-6bit \
+  --progress outputs/fifa-first-5 \
+  --probes examples/distillation/2026_fifa_world_cup_first_5_probes.jsonl \
+  --progress-prompt train --sample --no-thinking
+```
+
 For probe sets, `--system` is the default for rows without their own `system`,
 and `--metric prob|logprob` selects the rendered summary. Teacher flags enable
 checkpoint-by-checkpoint KL scoring; its default metric is `kl`.
