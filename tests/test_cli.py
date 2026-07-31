@@ -249,6 +249,53 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     assert payload["selected_step"] == 3
 
 
+def test_training_reuses_student_as_judge_when_model_names_match(
+    tmp_path, monkeypatch
+):
+    import mlx_lm
+    import distil.distill
+
+    probes = tmp_path / "probes.jsonl"
+    probes.write_text(json.dumps({
+        "name": "fact",
+        "prompt": "heldout",
+        "completion": "answer",
+        "train_prompts": ["train"],
+    }) + "\n")
+    canaries = tmp_path / "canaries.jsonl"
+    canaries.write_text('{"name":"math","prompt":"2+2?","completion":"4"}\n')
+    student = object()
+    tokenizer = object()
+    loads = []
+
+    def fake_load(*args, **kwargs):
+        loads.append((args, kwargs))
+        return student, tokenizer
+
+    monkeypatch.setattr(mlx_lm, "load", fake_load)
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["student"] = args[0]
+        captured["tokenizer"] = args[1]
+        captured.update(kwargs)
+        root = tmp_path / "adapter"
+        return distil.distill.ContinualResult(
+            True, "mastered", 3, root / "adapters.safetensors", root / "selection.json"
+        )
+
+    monkeypatch.setattr(distil.distill, "run_continual", fake_run)
+    assert main([
+        "--model", "same-model", "--train", "context", "--adapter", str(tmp_path / "adapter"),
+        "--probes", str(probes), "--canaries", str(canaries),
+        "--judge-model", "same-model", "--json",
+    ]) == 0
+
+    assert loads == [(('same-model',), {"adapter_path": None})]
+    assert captured["judge_model"] is student
+    assert captured["judge_tokenizer"] is tokenizer
+
+
 def test_training_rejects_prompt_and_teacher_prompts(tmp_path, capsys):
     base = [
         "--model", "m", "--train", "context", "--adapter", "adapter",

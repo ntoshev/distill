@@ -349,7 +349,10 @@ def _continual_cli(args, errcon, fail) -> int:
         if args.generate_only:
             return generated()
 
-        judge, judge_tokenizer = load(args.judge_model)
+        if args.judge_model == args.model:
+            judge, judge_tokenizer = student, student_tokenizer
+        else:
+            judge, judge_tokenizer = load(args.judge_model)
         teacher_context = document_teacher_system(document)
 
         for item in items:

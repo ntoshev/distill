@@ -166,18 +166,20 @@ def run_continual(
         )
         for probe in canaries
     }
-    invalid = [
-        probe.name
-        for probe in canaries
-        if not judge_answer(
-            judge_model,
-            judge_tokenizer,
-            probe.prompt,
-            probe.completion,
-            canary_baselines[probe.name],
-            enable_thinking=enable_thinking,
-        )
-    ]
+    judge_context = nullcontext() if separate_judge else lora_disabled(model)
+    with judge_context:
+        invalid = [
+            probe.name
+            for probe in canaries
+            if not judge_answer(
+                judge_model,
+                judge_tokenizer,
+                probe.prompt,
+                probe.completion,
+                canary_baselines[probe.name],
+                enable_thinking=enable_thinking,
+            )
+        ]
     if invalid:
         raise ValueError(
             "starting model does not satisfy canary completion: " + ", ".join(invalid)
