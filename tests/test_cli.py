@@ -2,7 +2,7 @@
 
 import json
 
-from distil.cli import DEFAULT_JUDGE_MODEL, main
+from distil.cli import DEFAULT_JUDGE_MODEL, DEFAULT_TEMPERATURE, main
 
 
 def test_requires_an_input_mode(capsys):
@@ -534,7 +534,7 @@ def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
     ]) == 0
     assert captured["root"] == "run"
     assert captured["probes"][0] == distil.progress.Probe("sample", "When?", "")
-    assert captured["temperature"] == 0.0
+    assert captured["temperature"] == DEFAULT_TEMPERATURE
     assert captured["max_tokens"] == 512
     assert captured["enable_thinking"] is False
     payload = json.loads(capsys.readouterr().out)

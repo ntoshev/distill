@@ -29,6 +29,7 @@ from distil.templating import apply_teacher_context, build_raw, build_rollout
 
 
 DEFAULT_JUDGE_MODEL = "mlx-community/Qwen3.5-4B-6bit"
+DEFAULT_TEMPERATURE = 1.0
 
 
 def _read_input(value: str | None) -> str | None:
@@ -122,7 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="sample a completion from --model; with --progress --probes, sample every probe",
     )
     smp.add_argument("--max-tokens", type=int, help="sampling length limit (default 512)")
-    smp.add_argument("--temperature", type=float, help="sampling temperature (default 0.0)")
+    smp.add_argument(
+        "--temperature",
+        type=float,
+        help=f"sampling temperature (default {DEFAULT_TEMPERATURE:g})",
+    )
     smp.add_argument("--seed", type=int, help="random seed for sampling")
     smp.add_argument(
         "--speculative-top-k",
@@ -449,7 +454,9 @@ def _continual_cli(args, errcon, fail) -> int:
             canary_max_tokens=(
                 args.canary_max_tokens if args.canary_max_tokens is not None else 32
             ),
-            temperature=args.temperature if args.temperature is not None else 0.0,
+            temperature=(
+                args.temperature if args.temperature is not None else DEFAULT_TEMPERATURE
+            ),
             seed=seed,
             enable_thinking=enable_thinking,
             speculative_top_k=(
@@ -739,7 +746,9 @@ def main(argv: list[str] | None = None) -> int:
         teacher_model, teacher_tokenizer = model, tokenizer
 
     max_tokens = args.max_tokens if args.max_tokens is not None else 512
-    temperature = args.temperature if args.temperature is not None else 0.0
+    temperature = (
+        args.temperature if args.temperature is not None else DEFAULT_TEMPERATURE
+    )
     top_k = args.top_k if args.top_k is not None else 3
     enable_thinking = False if args.no_thinking else None
 
