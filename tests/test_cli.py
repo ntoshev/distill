@@ -2,7 +2,7 @@
 
 import json
 
-from distil.cli import main
+from distil.cli import DEFAULT_JUDGE_MODEL, main
 
 
 def test_requires_an_input_mode(capsys):
@@ -202,6 +202,7 @@ def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
     assert captured["batch_size"] is None
     assert captured["save_rollout"] == "rollouts.jsonl"
     assert captured["json"] is True
+    assert captured["judge_model"] == DEFAULT_JUDGE_MODEL
 
 
 def test_training_json_reports_result_and_forwards_rollout_options(
@@ -234,12 +235,15 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     assert main([
         "--model", "m", "--train", "context", "--adapter", str(tmp_path / "adapter"),
         "--probes", str(probes), "--canaries", str(canaries),
-        "--canary-max-tokens", "9", "--save-rollout", str(rollouts), "--json",
+        "--canary-max-tokens", "9", "--save-rollout", str(rollouts),
+        "--judge-model", "judge", "--json",
     ]) == 0
     assert captured["canary_max_tokens"] == 9
     assert captured["batch_size"] == 4
     assert captured["save_rollout_path"] == str(rollouts)
     assert captured["speculative_top_k"] == 3
+    assert captured["judge_model_name"] == "judge"
+    assert captured["judge_model"] is not None
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     assert payload["selected_step"] == 3
@@ -268,6 +272,7 @@ def test_training_flags_require_train(capsys):
         ["--kl-direction", "reverse"],
         ["--from-adapter", "old"],
         ["--generator-model", "g"],
+        ["--judge-model", "j"],
         ["--questions-per-fact", "2"],
         ["--generate-only"],
         ["--eval-every", "5"],

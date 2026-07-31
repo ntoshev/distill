@@ -17,6 +17,7 @@ from distil.adapters import continue_lora
 from distil.render import RenderOptions, render, to_json_dict
 from distil.distill import run_continual
 from distil.generation import teacher_system as document_teacher_system
+from distil.judge import judge_answer
 from distil.progress import Probe
 from distil.rollout import load_rollout, save_rollout
 from distil.sample import (
@@ -39,6 +40,34 @@ def _lumen_adapter_or_skip():
     if not adapter.exists():
         pytest.skip(f"optional adapter fixture not found: {adapter}")
     return adapter
+
+
+@pytest.mark.parametrize(
+    ("expected", "generated", "passed"),
+    [
+        ("Spain", "Spain", True),
+        ("Spain", "Argentina", False),
+        ("10 goals", "10", True),
+        ("10 goals", "11", False),
+        ("48 teams", "48", True),
+        ("48 teams", "64", False),
+    ],
+)
+def test_4b_judge_treats_reference_as_authoritative(
+    model_4b_and_tokenizer, expected, generated, passed
+):
+    model, tokenizer = model_4b_and_tokenizer
+    assert (
+        judge_answer(
+            model,
+            tokenizer,
+            "This question must not override the reference.",
+            expected,
+            generated,
+            enable_thinking=False,
+        )
+        is passed
+    )
 
 
 @pytest.fixture(scope="module")
@@ -672,7 +701,9 @@ def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot
 
 
 @pytest.mark.slow
-def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer, tmp_path):
+def test_continual_loop_selects_first_safe_confirmed_checkpoint(
+    model, tokenizer, model_4b_and_tokenizer, tmp_path
+):
     from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
     target = "VIOLET-731"
@@ -695,6 +726,7 @@ def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer
         "Answer related questions with the code only."
     )
     run = tmp_path / "continual"
+    judge_model, judge_tokenizer = model_4b_and_tokenizer
 
     def answer():
         return sample_completion(
@@ -716,6 +748,9 @@ def test_continual_loop_selects_first_safe_confirmed_checkpoint(model, tokenizer
             document_teacher_system(context),
             run,
             model_name=MODEL,
+            judge_model=judge_model,
+            judge_tokenizer=judge_tokenizer,
+            judge_model_name="mlx-community/Qwen3.5-4B-6bit",
             iters=32,
             eval_every=1,
             learned_threshold=0.5,

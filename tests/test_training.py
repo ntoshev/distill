@@ -56,7 +56,10 @@ def test_interleaved_token_accepts_only_inside_teacher_top_k():
     assert _proposal_is_accepted(1, teacher, top_k=2)
 
 
-def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("separate_judge", [False, True])
+def test_continual_training_uses_canary_limit_and_saves_rollouts(
+    tmp_path, monkeypatch, separate_judge
+):
     import distil.distill as distill
 
     state = {"learned": False}
@@ -65,6 +68,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
     train_reports = []
     feedback_capture_calls = []
     scored_prompts = []
+    judge_calls = []
 
     class Model:
         def eval(self):
@@ -110,25 +114,31 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         probability = 0.9 if state["learned"] else 0.1
         return ProbePoint(step, -1.0, probability, -1.0, probability, [])
 
+    def fake_judge(model, tokenizer, question, expected, generated, **kwargs):
+        judge_calls.append((question, kwargs.get("system")))
+        return generated == expected
+
     monkeypatch.setattr(distill, "TrainingSession", Session)
     monkeypatch.setattr(distill, "_answer", fake_answer)
     monkeypatch.setattr(
         distill,
         "judge_answer",
-        lambda model, tokenizer, question, expected, generated, **kwargs: generated
-        == expected,
+        fake_judge,
     )
     monkeypatch.setattr(distill, "score_probe", fake_score)
 
     rollouts = tmp_path / "rollouts.jsonl"
+    student = Model()
     result = distill.run_continual(
-        Model(),
+        student,
         object(),
         [LearningItem("fact", "heldout", "VIOLET-731", ("train",))],
         [Probe("canary", "2+2?", "4")],
         "teacher context",
         tmp_path / "adapter",
         model_name="model",
+        teacher_model=Model() if separate_judge else student,
+        teacher_tokenizer=object() if separate_judge else None,
         iters=1,
         eval_every=1,
         canary_max_tokens=7,
@@ -185,6 +195,11 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(tmp_path, monke
         "streak": 2,
     }
     assert feedback_capture_calls == [True]
+    assert judge_calls == [
+        ("2+2?", None),
+        ("heldout", None),
+        ("heldout", None),
+    ]
 
 
 def test_continual_mastery_requires_consecutive_whole_answer_passes(

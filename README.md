@@ -119,8 +119,11 @@ uv run distil \
 `--train` takes the trusted document itself. The tool enumerates its facts,
 generates aligned train/held-out questions plus an exact source-grounded completion,
 then trains only on teacher/student KL. Facts retire from the training rotation
-after their greedy held-out answer passes typed whole-answer matching at two
-consecutive evaluations, and return if they regress. Training and held-out
+after their greedy held-out answer passes a frozen LLM equivalence judge at two
+consecutive evaluations, and return if they regress. The judge treats the
+source-grounded reference as authoritative and compares values without seeing
+the factual question or document, preventing its world knowledge from replacing
+the reference. Training and held-out
 questions share an explicit answer-only instruction, so extra explanations or
 contradictory text cannot satisfy mastery. Any changed canary output stops the
 run, and the best earlier safe checkpoint is selected.
@@ -145,7 +148,9 @@ frozen teacher baseline.
 
 Training defaults to forward `KL(teacher || student)`, speculative top-3
 rollouts, logical batches of four distinct active facts, evaluation every five
-optimizer updates, and a `1e-6` learning rate. Each evaluation also records the
+optimizer updates, a `1e-6` learning rate, and the frozen
+`mlx-community/Qwen3.5-4B-6bit` mastery judge. Override the latter with
+`--judge-model MODEL`. Each evaluation also records the
 target completion's geometric-mean token probability; `--learned-threshold`
 controls only the diagnostic probability count, not stopping. Batch members are
 generated from the same pre-update student, scored independently, and

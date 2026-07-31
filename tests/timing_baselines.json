@@ -47,6 +47,52 @@
           "regression_tolerance": 0.15
         }
       }
+    },
+    "my-system": {
+      "benchmarks": {
+        "score_prompt_completion": {
+          "median_seconds": 0.393637,
+          "regression_tolerance": 0.2
+        },
+        "teacher_scoring_128": {
+          "median_seconds": 0.075797,
+          "regression_tolerance": 0.2
+        },
+        "lora_update": {
+          "reference": "teacher_scoring_128",
+          "median_multiple": 15.811134,
+          "regression_tolerance": 0.2
+        },
+        "fixed_rollout_training_step": {
+          "reference": "teacher_scoring_128",
+          "median_multiple": 15.716449,
+          "regression_tolerance": 0.2
+        },
+        "skd_rollout_generation": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 1.398485,
+          "regression_tolerance": 0.2
+        },
+        "skd_rollout_generation_4b": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 1.359603,
+          "regression_tolerance": 0.2
+        },
+        "skd_rollout_generation_generic_4b": {
+          "reference": "student_rollout_generation",
+          "median_multiple": 2.222115,
+          "regression_tolerance": 0.2
+        },
+        "skd_batch_rollout_3": {
+          "reference": "serial_skd_rollout_3",
+          "median_multiple": 0.567792,
+          "regression_tolerance": 0.2
+        },
+        "optimized_training_step_batch_3": {
+          "median_seconds": 1.7895,
+          "regression_tolerance": 0.2
+        }
+      }
     }
   }
 }

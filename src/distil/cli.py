@@ -28,6 +28,9 @@ from distil.scoring import score_text, score_text_pair
 from distil.templating import apply_teacher_context, build_raw, build_rollout
 
 
+DEFAULT_JUDGE_MODEL = "mlx-community/Qwen3.5-4B-6bit"
+
+
 def _read_input(value: str | None) -> str | None:
     """Inline string, @path to read a file, or "-" for stdin."""
     if value is None:
@@ -148,6 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
     trn.add_argument("--lora-rank", type=int, help="LoRA rank (default 16)")
     trn.add_argument("--from-adapter", metavar="PATH", help="continue an existing LoRA adapter")
     trn.add_argument("--generator-model", help="model used to enumerate facts and questions")
+    trn.add_argument(
+        "--judge-model",
+        default=DEFAULT_JUDGE_MODEL,
+        help=f"frozen model used for mastery judgments (default: {DEFAULT_JUDGE_MODEL})",
+    )
     trn.add_argument(
         "--questions-per-fact",
         type=int,
@@ -341,6 +349,7 @@ def _continual_cli(args, errcon, fail) -> int:
         if args.generate_only:
             return generated()
 
+        judge, judge_tokenizer = load(args.judge_model)
         teacher_context = document_teacher_system(document)
 
         for item in items:
@@ -419,6 +428,9 @@ def _continual_cli(args, errcon, fail) -> int:
             student_system=student_system,
             teacher_model=teacher,
             teacher_tokenizer=teacher_tokenizer,
+            judge_model=judge,
+            judge_tokenizer=judge_tokenizer,
+            judge_model_name=args.judge_model,
             from_adapter=args.from_adapter,
             iters=args.iters,
             eval_every=args.eval_every if args.eval_every is not None else 5,
@@ -476,6 +488,10 @@ def main(argv: list[str] | None = None) -> int:
         value == "--progress-prompt" or value.startswith("--progress-prompt=")
         for value in raw_argv
     )
+    judge_model_explicit = any(
+        value == "--judge-model" or value.startswith("--judge-model=")
+        for value in raw_argv
+    )
     args = build_parser().parse_args(raw_argv)
     force = True if args.color == "always" else None
     console = Console(
@@ -504,6 +520,8 @@ def main(argv: list[str] | None = None) -> int:
         return fail(
             "provide exactly one of --completion, --rollout, --sample, --train or --progress"
         )
+    if judge_model_explicit and not training:
+        return fail("--judge-model only combines with --train")
     if args.index is not None and not args.rollout:
         return fail("--index only combines with --rollout")
     if args.top_k is not None and args.top_k < 0:

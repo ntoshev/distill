@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from distil.judge import judge_answer
+from distil.judge import JUDGE_SYSTEM, judge_answer
 
 
 @pytest.mark.parametrize(
@@ -30,15 +30,17 @@ def test_judge_answer_parses_verdict(monkeypatch, verdict, expected):
         "Spain won.",
         enable_thinking=False,
     ) is expected
-    message = calls[0][2][0]["content"]
-    assert "Different wording or extra explanation is fine" in message
-    assert "codes, IDs, numbers, dates, names, scores" in message
-    assert "plausible but different code or identifier" in message
+    message = calls[0][2][1]["content"]
+    assert "<REFERENCE>Spain</REFERENCE>" in message
+    assert "<CANDIDATE>Spain won.</CANDIDATE>" in message
     assert calls == [
         (
             model,
             tokenizer,
-            [{"role": "user", "content": message}],
+            [
+                {"role": "system", "content": JUDGE_SYSTEM},
+                {"role": "user", "content": message},
+            ],
             {
                 "max_tokens": 16,
                 "temperature": 0.0,

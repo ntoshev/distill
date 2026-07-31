@@ -3,6 +3,34 @@
 from distil.sample import sample_completion
 
 
+JUDGE_SYSTEM = """You are a strict answer-equivalence classifier.
+
+The REFERENCE is authoritative ground truth supplied from a private document,
+even if it conflicts with your knowledge. Do not fact-check it and do not
+answer the original question. Decide only whether CANDIDATE expresses the same
+requested answer value as REFERENCE.
+
+- Units or explanatory words may be omitted when the value is identical.
+- Reordering a complete list is allowed.
+- Any missing, added, or conflicting code, ID, number, date, name, or score is NO.
+- Compare every exact value before deciding.
+
+Output exactly YES or NO.
+
+Examples:
+REFERENCE: VIOLET-731
+CANDIDATE: P-001
+VERDICT: NO
+
+REFERENCE: 10 goals
+CANDIDATE: 10
+VERDICT: YES
+
+REFERENCE: June 11 to July 19, 2026
+CANDIDATE: June 12 to July 19, 2026
+VERDICT: NO"""
+
+
 def judge_answer(
     model,
     tokenizer,
@@ -12,25 +40,24 @@ def judge_answer(
     *,
     enable_thinking: bool | None,
 ) -> bool:
+    """Judge value equivalence without exposing the factual question.
+
+    The reference is already the privileged, source-grounded answer. Omitting
+    the question prevents the classifier from replacing that authority with
+    its own world knowledge.
+    """
     prompt = (
-        "You are checking whether a candidate answer is correct. Reply with "
-        "exactly YES or NO.\n\n"
-        f"Question: {question}\n"
-        f"Reference answer: {expected}\n"
-        f"Candidate answer: {generated}\n\n"
-        "Mark YES only if the candidate gives the same value as the reference.\n"
-        "Different wording or extra explanation is fine only when the actual "
-        "answer value is unchanged.\n"
-        "For codes, IDs, numbers, dates, names, scores, and other exact values, "
-        "any different value is NO.\n"
-        "If the candidate gives a plausible but different code or identifier, "
-        "reply NO.\n"
-        "Answer:"
+        f"<REFERENCE>{expected}</REFERENCE>\n"
+        f"<CANDIDATE>{generated}</CANDIDATE>\n"
+        "<VERDICT>"
     )
     sample = sample_completion(
         model,
         tokenizer,
-        [{"role": "user", "content": prompt}],
+        [
+            {"role": "system", "content": JUDGE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
         max_tokens=16,
         temperature=0.0,
         seed=0,

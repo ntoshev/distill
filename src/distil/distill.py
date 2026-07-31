@@ -85,6 +85,9 @@ def run_continual(
     student_system: str | None = None,
     teacher_model=None,
     teacher_tokenizer=None,
+    judge_model=None,
+    judge_tokenizer=None,
+    judge_model_name: str | None = None,
     from_adapter: str | Path | None = None,
     iters: int | None = None,
     eval_every: int = 5,
@@ -144,9 +147,14 @@ def run_continual(
     eval_file.write_text("")
 
     model.eval()
-    separate_judge = teacher_model is not None and teacher_model is not model
-    judge_model = teacher_model if separate_judge else model
-    judge_tokenizer = (teacher_tokenizer or tokenizer) if separate_judge else tokenizer
+    judge_model = judge_model or teacher_model or model
+    separate_judge = judge_model is not model
+    if not separate_judge:
+        judge_tokenizer = tokenizer
+    elif judge_tokenizer is None and judge_model is teacher_model:
+        judge_tokenizer = teacher_tokenizer or tokenizer
+    elif judge_tokenizer is None:
+        raise ValueError("a separate judge model requires its tokenizer")
     canary_baselines = {
         probe.name: _answer(
             model,
@@ -205,6 +213,7 @@ def run_continual(
         "generator_model": generator_model or model_name,
         "from_adapter": str(from_adapter) if from_adapter is not None else None,
         "teacher_model": model_name if teacher_model is None or teacher_model is model else "external",
+        "judge_model": judge_model_name or ("external" if separate_judge else model_name),
         "source": source,
         "probes": str(probes_path) if probes_path is not None else None,
         "canaries": str(canaries_path) if canaries_path is not None else None,
