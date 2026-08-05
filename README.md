@@ -181,6 +181,35 @@ Each run writes:
   `selection.json`;
 - source, fact, and probe audit artifacts under `generated/`.
 
+## Evaluate an adapter with Prime/verifiers
+
+`scripts/eval_prime.sh` starts an OpenAI-compatible MLX server, runs the
+Prime/verifiers environment once with the base model and once with the adapter,
+then prints a paired comparison and diff. Without `--output-dir`, intermediate
+results are temporary; with it, results are saved under `base/` and
+`with-adapter/`.
+
+```sh
+# Paired base-versus-adapter comparison, terminal-only results.
+scripts/eval_prime.sh \
+  --environment gsm8k \
+  --num-examples 16 \
+  --adapter outputs/fifa-first-5
+
+# The same comparison, with both result sets saved.
+scripts/eval_prime.sh \
+  --environment gsm8k \
+  --num-examples 16 \
+  --adapter outputs/fifa-first-5 \
+  --output-dir outputs/prime-gsm8k/fifa-vs-base-16
+
+# A local environment package, such as environments/gsm8k_slice.
+scripts/eval_prime.sh \
+  --environment gsm8k-slice \
+  --env-dir-path environments \
+  --num-examples 16
+```
+
 `--batch-size` controls the number of distinct facts in each logical batch.
 `training_metrics.jsonl` contains one row per batch member; rows from the same
 optimizer update share an iteration and include their batch index, size, and
@@ -219,9 +248,23 @@ alternatives. Progress mode performs inference over saved checkpoints but does
 not retrain.
 
 To inspect the actual generated response rather than score the fixed
-`completion`, add `--sample`. With probes, it samples every probe at every
-checkpoint and scores that exact generated text. For the same distribution used
-by continual training:
+`completion`, point `--progress --rollout` at a saved training rollout. It
+replays that row's recorded prompt and context at every checkpoint, then scores
+and colors the exact freshly generated text. The displayed output therefore
+preserves the model's actual token boundaries; it is not a fixed answer colored
+with another string's probabilities.
+
+```sh
+uv run distil \
+  --model mlx-community/Qwen3.5-0.8b-6bit \
+  --progress outputs/lr-sweep-v014/lr-2e-6 \
+  --rollout outputs/lr-sweep-v014/lr-2e-6/rollouts.jsonl --index 0 \
+  --temperature 0 --max-tokens 16 --seed 0 --metric prob --no-thinking
+```
+
+`--rollout` requires the saved rollout path so the sampling prompt cannot drift
+from the training distribution. `--sample` remains available for ad-hoc prompt
+or probe exploration. For the same distribution used by continual training:
 
 ```sh
 uv run distil \

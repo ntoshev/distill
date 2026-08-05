@@ -251,6 +251,60 @@ def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch)
     assert points[0].finish_reason == "stop"
 
 
+def test_sample_progress_replays_saved_rollout_messages(tmp_path, monkeypatch):
+    import distil.progress
+    from distil.sample import Sample
+
+    checkpoints = tmp_path / "checkpoints"
+    directory = checkpoints / "step-0000"
+    directory.mkdir(parents=True)
+    (directory / "adapters.safetensors").touch()
+
+    class Model:
+        def eval(self):
+            pass
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return "prompt>"
+
+    captured = {}
+    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+
+    def fake_sample(model, tokenizer, messages, **kwargs):
+        captured["messages"] = messages
+        return Sample("prompt>", "answer", "answer", "stop", 1)
+
+    monkeypatch.setattr(
+        distil.progress,
+        "sample_completion",
+        fake_sample,
+    )
+    monkeypatch.setattr(
+        distil.progress,
+        "score_text",
+        lambda model, tokenizer, text, spans, **kwargs: ScoreResult(
+            text, [TokenScore(1, "answer", 7, 13, True, -0.5)], "student", []
+        ),
+    )
+
+    saved_messages = (
+        {"role": "system", "content": "Saved system."},
+        {"role": "user", "content": "Saved question?"},
+        {"role": "assistant", "content": "Earlier turn."},
+        {"role": "user", "content": "Final question?"},
+    )
+    sample_progress(
+        Model(),
+        Tokenizer(),
+        tmp_path,
+        [Probe("rollout-0", "Final question?", "saved", messages=saved_messages)],
+    )
+
+    assert captured["messages"] == list(saved_messages)
+
+
 def test_sample_progress_reports_points_incrementally(tmp_path, monkeypatch):
     import distil.progress
     from distil.sample import Sample

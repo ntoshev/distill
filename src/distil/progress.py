@@ -22,6 +22,9 @@ class Probe:
     prompt: str
     completion: str
     system: str | None = None
+    # A saved rollout can carry a full multi-turn prompt.  When present, use it
+    # verbatim rather than reconstructing a one-user-message conversation.
+    messages: tuple[dict, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,16 @@ def _token_payload(token) -> dict:
     return payload
 
 
+def _probe_messages(probe: Probe, default_system: str | None) -> list[dict]:
+    """Return the exact saved prompt when a probe originated from a rollout."""
+    if probe.messages is not None:
+        return [dict(message) for message in probe.messages]
+    system = probe.system if probe.system is not None else default_system
+    messages = [] if system is None else [{"role": "system", "content": system}]
+    messages.append({"role": "user", "content": probe.prompt})
+    return messages
+
+
 def score_probe(
     model,
     tokenizer,
@@ -163,9 +176,7 @@ def score_probe(
     teacher_prompt: str | None = None,
     teacher_without_adapter: bool = False,
 ) -> ProbePoint:
-    system = probe.system if probe.system is not None else default_system
-    messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": probe.prompt})
+    messages = _probe_messages(probe, default_system)
     template_kwargs = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
     prompt_text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True, **template_kwargs
@@ -224,9 +235,7 @@ def sample_probe(
     teacher_prompt: str | None = None,
     teacher_without_adapter: bool = False,
 ) -> ProbePoint:
-    system = probe.system if probe.system is not None else default_system
-    messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": probe.prompt})
+    messages = _probe_messages(probe, default_system)
     sample = sample_completion(
         model,
         tokenizer,
@@ -428,7 +437,10 @@ def progress_to_json(result: ProgressResult) -> dict:
         "checkpoint_root": result.checkpoint_root,
         **({"teacher_model": result.teacher_model} if result.teacher_model else {}),
         "steps": result.steps,
-        "probes": [asdict(probe) for probe in result.probes],
+        "probes": [
+            {key: value for key, value in asdict(probe).items() if key != "messages"}
+            for probe in result.probes
+        ],
         "series": {
             name: [point_payload(point) for point in points]
             for name, points in result.series.items()

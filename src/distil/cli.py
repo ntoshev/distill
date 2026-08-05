@@ -51,6 +51,32 @@ def _prompt_messages(system: str | None, prompt: str | None) -> list[dict]:
     return messages
 
 
+def _rollout_progress_probe(rollout, index: int):
+    """Replay the prompt recorded in a saved training rollout exactly."""
+    from distil.progress import Probe
+
+    messages = tuple(dict(message) for message in rollout.prompt)
+    prompt = next(
+        (
+            message["content"]
+            for message in reversed(messages)
+            if message.get("role") == "user" and isinstance(message.get("content"), str)
+        ),
+        None,
+    )
+    if not prompt:
+        raise ValueError(f"rollout row {index} has no user prompt to replay")
+    completion = next(
+        (
+            message["content"]
+            for message in reversed(rollout.completion)
+            if message.get("role") == "assistant" and isinstance(message.get("content"), str)
+        ),
+        "",
+    )
+    return Probe(f"rollout-{index}", prompt, completion, messages=messages)
+
+
 def _teacher_system_from_progress_run(path: str | Path) -> str | None:
     """Rebuild the training teacher context from a progress run directory."""
     root = Path(path)
@@ -97,7 +123,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="pass enable_thinking=False to chat templates that support it",
     )
-    src.add_argument("--rollout", help="verifiers/prime-rl results.jsonl")
+    src.add_argument(
+        "--rollout",
+        metavar="PATH",
+        help=(
+            "verifiers/prime-rl results.jsonl; with --progress, replay its saved prompt "
+            "at every checkpoint"
+        ),
+    )
     src.add_argument("--index", type=int, help="rollout row (default 0)")
     src.add_argument("--train", metavar="CONTEXT", help="distill trusted inline, @file, or stdin context")
     src.add_argument(
@@ -354,7 +387,7 @@ def _continual_cli(args, errcon, fail) -> int:
         if args.generate_only:
             return generated()
 
-        if args.judge_model == args.model:
+        if args.judge_model.casefold() == args.model.casefold():
             judge, judge_tokenizer = student, student_tokenizer
         else:
             judge, judge_tokenizer = load(args.judge_model)
@@ -522,17 +555,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     training = args.train is not None
     progress = args.progress is not None
+    rollout_file = args.rollout is not None
+    rollout_progress = progress and rollout_file
+    standalone_rollout = rollout_file and not progress
     standalone_completion = args.completion is not None and not progress
-    sampled_progress_mode = args.sample and progress
+    sampled_progress_mode = (args.sample or rollout_progress) and progress
     if sum(
-        [bool(args.rollout), standalone_completion, args.sample and not progress, training, progress]
+        [standalone_rollout, standalone_completion, args.sample and not progress, training, progress]
     ) != 1:
         return fail(
             "provide exactly one of --completion, --rollout, --sample, --train or --progress"
         )
     if judge_model_explicit and not training:
         return fail("--judge-model only combines with --train")
-    if args.index is not None and not args.rollout:
+    if args.index is not None and not rollout_file:
         return fail("--index only combines with --rollout")
     if args.top_k is not None and args.top_k < 0:
         return fail("--top-k must be nonnegative")
@@ -557,8 +593,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.temperature, "--temperature"),
         (args.seed, "--seed"),
     ):
-        if value is not None and not (args.sample or training):
-            return fail(f"{name} only combines with --sample or --train")
+        if value is not None and not (args.sample or rollout_progress or training):
+            return fail(f"{name} only combines with --sample, --progress --rollout or --train")
     if args.save_rollout is not None and not (args.sample or training or standalone_completion):
         return fail("--save-rollout only combines with --sample, --completion or --train")
     for value, name in (
@@ -642,12 +678,21 @@ def main(argv: list[str] | None = None) -> int:
     if progress:
         target_progress = args.completion is not None
         probe_progress = args.probes is not None
-        sampled_progress = args.sample
+        sampled_progress = args.sample or rollout_progress
+        if args.sample and rollout_progress:
+            return fail("--sample does not combine with --progress --rollout")
         # Sampling modifies a probe progress run when --probes is supplied;
         # otherwise it is the source of the one ad-hoc progress prompt.
-        progress_inputs = sum([target_progress, probe_progress, sampled_progress and not probe_progress])
+        progress_inputs = sum([
+            target_progress,
+            probe_progress,
+            args.sample and not probe_progress,
+            rollout_progress,
+        ])
         if progress_inputs != 1:
-            return fail("--progress requires exactly one of --completion, --probes or --sample")
+            return fail(
+                "--progress requires exactly one of --completion, --probes, --sample or --rollout"
+            )
         if args.adapter_path:
             return fail("--adapter-path does not combine with --progress")
         if args.raw:
@@ -659,11 +704,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.probes is not None:
             if args.prompt is not None:
                 return fail("--progress with --probes takes prompts from each probe")
+        if rollout_progress and (args.prompt is not None or args.system is not None):
+            return fail("--progress --rollout replays the saved prompt; do not pass --prompt or --system")
         if args.progress_prompt == "train" and args.probes is None:
             return fail("--progress-prompt train requires --probes")
         if sampled_progress and args.completion is not None:
-            return fail("--completion does not combine with --progress --sample")
-    if args.raw and (args.system or args.rollout or training or args.no_thinking):
+            return fail("--completion does not combine with a sampled --progress run")
+    if args.raw and (args.system or rollout_file or training or args.no_thinking):
         return fail(
             "--raw does not combine with system, rollout, training or chat-template options"
         )
@@ -697,7 +744,17 @@ def main(argv: list[str] | None = None) -> int:
             completion = None
             prompt = None
             system = _read_input(args.system)
-        elif args.sample:
+        elif rollout_progress:
+            index = args.index if args.index is not None else 0
+            try:
+                rollout = load_rollout(args.rollout, index)
+                probes = [_rollout_progress_probe(rollout, index)]
+            except (FileNotFoundError, IndexError, ValueError) as e:
+                return fail(str(e))
+            completion = None
+            prompt = None
+            system = None
+        elif sampled_progress_mode:
             prompt = _read_input(args.prompt) or ""
             system = _read_input(args.system)
             probes = [Probe("sample", prompt, "", system)]
@@ -709,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
             if not completion:
                 return fail("--completion must not be empty")
             probes = [Probe("target", prompt, completion, system)]
-    elif args.rollout:
+    elif rollout_file:
         try:
             rollout = load_rollout(args.rollout, args.index if args.index is not None else 0)
         except (FileNotFoundError, IndexError, ValueError) as e:
@@ -767,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
                     result,
                     console,
                     progress_metric,
-                    sampled=args.sample,
+                    sampled=sampled_progress_mode,
                 )
 
             def on_point(probe, point):
@@ -793,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
                 on_start=on_start,
                 on_point=on_point,
             )
-            if args.sample:
+            if sampled_progress_mode:
                 progress_result = sample_progress(
                     model,
                     tokenizer,
@@ -836,7 +893,7 @@ def main(argv: list[str] | None = None) -> int:
     teacher_messages = None
     rollout_prompt = rollout_completion = None
     rollout_extra = {}
-    if args.rollout:
+    if rollout_file:
         try:
             messages = apply_teacher_context(rollout.messages, system=system, prompt=prompt)
         except ValueError as e:
@@ -1029,7 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
         errcon.print(f"[yellow]warning:[/yellow] {w}")
     if meta:
         errcon.print("rollout: " + "  ".join(f"{k}={v}" for k, v in meta.items()), style="grey50")
-    if args.rollout and (system is not None or prompt is not None):
+    if rollout_file and (system is not None or prompt is not None):
         overrides = [
             name for name, value in (("system", system), ("prompt", prompt))
             if value is not None

@@ -541,6 +541,94 @@ def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
     assert payload["series"]["sample"][0]["completion"] == "sampled"
 
 
+def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
+    tmp_path, monkeypatch, capsys
+):
+    import huggingface_hub.utils
+    import mlx_lm
+    import distil.progress
+
+    monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    captured = {}
+    rollout_path = tmp_path / "rollouts.jsonl"
+    rollout_path.write_text(json.dumps({
+        "prompt": [
+            {"role": "system", "content": "Saved system."},
+            {"role": "user", "content": "Saved question?"},
+        ],
+        "completion": [{"role": "assistant", "content": "Saved answer."}],
+    }) + "\n")
+
+    def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
+        captured["root"] = root
+        captured["probes"] = probes
+        captured.update(kwargs)
+        point = distil.progress.ProbePoint(
+            0,
+            -0.2,
+            0.82,
+            -0.2,
+            0.82,
+            [{"text": "fresh", "logprob": -0.2, "probability": 0.82}],
+            completion="fresh",
+            content="fresh",
+            finish_reason="stop",
+            num_tokens=1,
+        )
+        result = distil.progress.ProgressResult(
+            str(root), [0], probes, {probes[0].name: []}
+        )
+        kwargs["on_start"](result)
+        result.series[probes[0].name].append(point)
+        kwargs["on_point"](probes[0], point)
+        return result
+
+    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+
+    assert main([
+        "--model", "m", "--progress", "run", "--rollout", str(rollout_path),
+        "--temperature", "0", "--max-tokens", "8", "--seed", "3", "--metric", "prob",
+    ]) == 0
+    assert captured["root"] == "run"
+    assert captured["probes"] == [distil.progress.Probe(
+        "rollout-0",
+        "Saved question?",
+        "Saved answer.",
+        messages=(
+            {"role": "system", "content": "Saved system."},
+            {"role": "user", "content": "Saved question?"},
+        ),
+    )]
+    assert captured["temperature"] == 0.0
+    assert captured["max_tokens"] == 8
+    assert captured["seed"] == 3
+    output = capsys.readouterr().out
+    assert "token probability within the sampled completion" in output
+    assert "fresh" in output
+    assert "student p=81.9%" in output
+
+
+def test_progress_rejects_sample_and_rollout_together(tmp_path, capsys):
+    rollout_path = tmp_path / "rollouts.jsonl"
+    rollout_path.write_text('{"prompt": [], "completion": []}\n')
+    assert main([
+        "--model", "m", "--progress", "run", "--rollout", str(rollout_path),
+        "--sample", "--prompt", "When?",
+    ]) == 2
+    assert "does not combine" in capsys.readouterr().err
+
+
+def test_progress_rollout_rejects_prompt_override(tmp_path, capsys):
+    rollout_path = tmp_path / "rollouts.jsonl"
+    rollout_path.write_text('{"prompt": [], "completion": []}\n')
+    assert main([
+        "--model", "m", "--progress", "run", "--rollout", str(rollout_path),
+        "--prompt", "Not the saved prompt",
+    ]) == 2
+    assert "replays the saved prompt" in capsys.readouterr().err
+
+
 def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
