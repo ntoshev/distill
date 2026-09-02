@@ -296,7 +296,14 @@ model tests with
 `uv run python -m pytest -m 'not model'`.
 
 Timing regressions are opt-in because absolute runtimes are only comparable on
-the same hardware. Run the committed M3 Pro baseline with:
+the same hardware. Committed baselines are available for these systems:
+
+| System | `DISTIL_BENCHMARK_SYSTEM_ID` |
+|---|---|
+| Mac15,6 — Apple M3 Pro (11-core CPU, 14-core GPU, 36 GB) | `mac15-6-m3-pro-11cpu-14gpu-36gb` |
+| Mac16,9 — Apple M4 Max (14-core CPU, 32-core GPU, 36 GB) | `mac16-9-m4-max-14cpu-32gpu-36gb` |
+
+For example, run the M3 Pro baseline with:
 
 ```sh
 DISTIL_BENCHMARK_SYSTEM_ID=mac15-6-m3-pro-11cpu-14gpu-36gb \
@@ -312,20 +319,32 @@ DISTIL_BENCHMARK_SYSTEM_ID=my-system UPDATE_TIMING_BASELINES=1 \
   uv run python -m pytest -m benchmark
 ```
 
-The SKD rollout benchmark is relative rather than absolute: in the same run,
-its decode-only milliseconds per generated token are compared with the 2.70x
-straight-student baseline in `tests/timing_baselines.json`, with 2% regression
-tolerance. Prompt prefill and the first generated token are excluded from both
-measurements. The Qwen3.5 4B benchmark has a 1.47x baseline with 2% tolerance,
-keeping its effective limit below 1.5x. A separate Qwen3.5 4B benchmark covers
-the generic, unbatched single-token SKD path and anchors it to the same
-straight-student decode; its baseline is 2.24x with 2% tolerance. Training is
-instead anchored to a compute-dense frozen-teacher forward pass over 128 tokens,
-with 64 prediction rows selected. One benchmark isolates the student
-forward-KL LoRA update with teacher rows precomputed, while a second adds the
-teacher scoring pass. Rollout generation, generation prefill, chat rendering,
-tokenization, and alignment are outside both training timers. Training costs
-are reported per target token as multiples of teacher scoring per target token.
+The committed timing values are below. Seconds are absolute medians; multiples
+are relative benchmarks measured against the named reference in the same run.
+The parenthetical percentage is the allowed regression tolerance.
+
+| Benchmark | M3 Pro | M4 Max |
+|---|---:|---:|
+| Prompt/completion scoring | 0.471437 s (2%) | 0.202333 s (20%) |
+| Teacher scoring, 128 tokens | 0.088454 s (5%) | 0.030341 s (20%) |
+| LoRA update / teacher scoring | 14.020422x (5%) | 14.157179x (20%) |
+| Training step / teacher scoring | 15.874657x (5%) | 14.809739x (20%) |
+| Optimized SKD / student rollout | 2.700000x (2%) | 1.679466x (20%) |
+| Optimized 4B SKD / student rollout | 1.470000x (2%) | 1.304027x (20%) |
+| Generic 4B SKD / student rollout | 2.244312x (2%) | 2.113065x (20%) |
+| Batched three-rollout SKD / serial | 0.603775x (15%) | 0.627939x (20%) |
+| Optimized three-item training step | 1.857335 s (15%) | 0.757659 s (20%) |
+
+The SKD rollout benchmarks are relative rather than absolute: their decode-only
+milliseconds per generated token are compared with straight-student generation
+in the same run. Prompt prefill and the first generated token are excluded from
+both measurements. Training is instead anchored to a compute-dense
+frozen-teacher forward pass over 128 tokens, with 64 prediction rows selected.
+One benchmark isolates the student forward-KL LoRA update with teacher rows
+precomputed, while a second adds the teacher scoring pass. Rollout generation,
+generation prefill, chat rendering, tokenization, and alignment are outside both
+training timers. Training costs are reported per target token as multiples of
+teacher scoring per target token.
 
 The Qwen3.5 6-bit comparison below was measured on the committed M3 Pro system
 with two warmups and the median of seven rounds. Student and teacher use the
