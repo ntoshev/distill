@@ -20,6 +20,7 @@ from distil.stopping import (
     mastered,
 )
 from distil.training import TrainingSession, _step_payload, save_training_rollout
+from distil.templating import prompt_messages
 
 
 @dataclass(frozen=True)
@@ -31,14 +32,8 @@ class ContinualResult:
     selection_file: Path
 
 
-def _prompt_messages(prompt: str, system: str | None = None) -> list[dict]:
-    messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": prompt})
-    return messages
-
-
 def _messages(probe: Probe, default_system: str | None = None) -> list[dict]:
-    return _prompt_messages(
+    return prompt_messages(
         probe.prompt, probe.system if probe.system is not None else default_system
     )
 
@@ -379,7 +374,7 @@ def run_continual(
                     if save_rollout_path is not None:
                         save_training_rollout(
                             save_rollout_path,
-                            _prompt_messages(prompt, student_system),
+                            prompt_messages(prompt, student_system),
                             step,
                             model_name=model_name,
                             temperature=temperature,

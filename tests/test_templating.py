@@ -2,7 +2,10 @@
 
 import pytest
 
-from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
+from distil.templating import (
+    apply_teacher_context, build_chat, build_raw, build_rollout, prompt_messages,
+    render_generation_prompt,
+)
 
 
 class FakeTokenizer:
@@ -62,6 +65,27 @@ def test_build_raw():
     assert built.text == "abcdefg"
     assert built.spans == [(3, 7)]
     assert built.warnings == []
+
+
+@pytest.mark.parametrize("thinking", [None, False, True])
+def test_generation_prefix_preserves_messages_and_optional_thinking(thinking):
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            assert messages == [{"role": "user", "content": "", "name": "saved"}]
+            expected = {"tokenize": False, "add_generation_prompt": True}
+            if thinking is not None:
+                expected["enable_thinking"] = thinking
+            assert kwargs == expected
+            return "prefix\n\n"
+
+    assert render_generation_prompt(
+        Tokenizer(), [{"role": "user", "content": "", "name": "saved"}], thinking,
+    ) == "prefix\n\n"
+
+
+def test_prompt_messages_distinguishes_missing_and_empty_turns():
+    assert prompt_messages(None, "") == [{"role": "system", "content": ""}]
+    assert prompt_messages("", None) == [{"role": "user", "content": ""}]
 
 
 def test_build_chat_span_covers_completion():

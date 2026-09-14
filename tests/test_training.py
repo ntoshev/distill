@@ -56,6 +56,50 @@ def test_interleaved_token_accepts_only_inside_teacher_top_k():
     assert _proposal_is_accepted(1, teacher, top_k=2)
 
 
+@pytest.mark.parametrize("captured_rows", [None, 2, 3])
+@pytest.mark.parametrize("empty", [False, True])
+def test_shared_rollout_alignment_preserves_rows_text_and_teacher_logits(
+    monkeypatch, captured_rows, empty
+):
+    import distil.training as training
+    from distil.sample import Sample
+    from distil.scoring import AlignedTokens
+
+    class TeacherTokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            assert messages == [{"role": "user", "content": "question"}]
+            assert kwargs == {"tokenize": False, "add_generation_prompt": True,
+                              "enable_thinking": False}
+            return "TTT"
+
+    session = training.TrainingSession.__new__(training.TrainingSession)
+    session.tokenizer = object()  # The student's saved prefix must not be re-rendered.
+    session.teacher_tokenizer = TeacherTokenizer()
+    session.enable_thinking = False
+    logits = None if captured_rows is None else mx.zeros((captured_rows, 4))
+    sample = Sample("P", "ab", "ab", "length", 2, teacher_logits=logits)
+
+    def align(tokenizer, student, teacher_tokenizer, teacher):
+        assert (student.text, student.spans) == ("Pab", [(1, 3)])
+        assert (teacher.text, teacher.spans) == ("TTTab", [(3, 5)])
+        return AlignedTokens(
+            [10, 11, 12], [(0, 1), (1, 2), (2, 3)],
+            [20, 21, 22, 11, 12], [(i, i + 1) for i in range(5)],
+            [] if empty else [(1, 3), (2, 4)],
+        )
+
+    monkeypatch.setattr(training, "align_scored_tokens", align)
+    result = session._align_rollout("question", [{"role": "user", "content": "question"}], sample)
+    if empty:
+        assert result is None
+    else:
+        assert result.sample is sample
+        assert result.student_rows == [0, 1]
+        assert result.teacher_rows == [2, 3]
+        assert result.token_texts == ["a", "b"]
+        assert result.teacher_logits is (logits if captured_rows == 2 else None)
+
+
 @pytest.mark.parametrize("separate_judge", [False, True])
 def test_continual_training_uses_canary_limit_and_saves_rollouts(
     tmp_path, monkeypatch, separate_judge

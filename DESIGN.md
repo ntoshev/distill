@@ -24,7 +24,8 @@ cli.py
 ### Module responsibilities
 
 - `templating.py` renders chat or raw inputs into `BuiltText(text, spans)`,
-  where spans identify exactly which characters should be scored.
+  where spans identify exactly which characters should be scored. It also owns
+  the generation-prefix rendering shared by sampling, scoring, and training.
 - `scoring.py` tokenizes once with offsets, computes chosen-token log
   probabilities, and optionally computes exact full-vocabulary
   `KL(teacher || student)` at aligned generated positions.
@@ -35,13 +36,15 @@ cli.py
 - `distill.py` owns baseline evaluation, active rotation, stopping, and safe
   checkpoint selection.
 - `training.py` provides the stateful one-update KL optimizer and low-level
-  compatibility helper.
-- `progress.py` rescans the base model and numbered checkpoints against fixed
-  prompt/completion probes.
+  compatibility helper; serial and batched samples share rollout alignment.
+- `progress.py` evaluates fixed or freshly sampled completions through one
+  checkpoint traversal, with shared exact-completion scoring and result assembly.
 - `render.py` provides token-level probability coloring, KL coloring, progress
   rows, sparklines, tables, and JSON output.
 - `rollout.py` reads and writes verifiers-compatible `results.jsonl` files.
-- `cli.py` owns argument validation and keeps slow model imports after validation.
+- `cli_config.py` owns argument parsing, validation, and mode-specific defaults.
+- `cli.py` dispatches to training, progress, and scoring/sampling handlers, keeping
+  model loading after validation.
 
 ## Core scoring representation
 

@@ -63,6 +63,24 @@ def apply_teacher_context(
     return out
 
 
+def prompt_messages(prompt: str | None, system: str | None = None) -> list[dict]:
+    """Build a simple prompt without conflating an absent and an empty user turn."""
+    messages = [] if system is None else [{"role": "system", "content": system}]
+    if prompt is not None:
+        messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def render_generation_prompt(
+    tokenizer, messages: list[dict], enable_thinking: bool | None = None
+) -> str:
+    """Render the exact generation prefix; callers encode the rendered string."""
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
+        **_chat_template_kwargs(enable_thinking),
+    )
+
+
 def build_raw(prompt: str, completion: str) -> BuiltText:
     """No chat template: completion is scored as a continuation of prompt."""
     return BuiltText(text=prompt + completion, spans=[(len(prompt), len(prompt) + len(completion))])
@@ -77,10 +95,7 @@ def build_chat(
 ) -> BuiltText:
     """Render prompt as a user message through the model's chat template and
     score the completion as the assistant turn."""
-    messages = []
-    if system is not None:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    messages = prompt_messages(prompt, system)
     messages.append({"role": "assistant", "content": completion})
     return build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
 

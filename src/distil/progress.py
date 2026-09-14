@@ -4,13 +4,16 @@ import json
 import math
 import re
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 
 from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
-from distil.sample import sample_completion
+from distil.sample import Sample, sample_completion
 from distil.scoring import score_text, score_text_pair
-from distil.templating import apply_teacher_context, build_raw
+from distil.templating import (
+    apply_teacher_context, build_raw, prompt_messages, render_generation_prompt,
+)
 
 
 _STEP_RE = re.compile(r"step-(\d+)$")
@@ -157,9 +160,7 @@ def _probe_messages(probe: Probe, default_system: str | None) -> list[dict]:
     if probe.messages is not None:
         return [dict(message) for message in probe.messages]
     system = probe.system if probe.system is not None else default_system
-    messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": probe.prompt})
-    return messages
+    return prompt_messages(probe.prompt, system)
 
 
 def score_probe(
@@ -177,12 +178,24 @@ def score_probe(
     teacher_without_adapter: bool = False,
 ) -> ProbePoint:
     messages = _probe_messages(probe, default_system)
-    template_kwargs = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
-    prompt_text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True, **template_kwargs
+    prompt_text = render_generation_prompt(tokenizer, messages, enable_thinking)
+    return _completion_point(
+        model, tokenizer, messages, prompt_text, probe.completion, step=step,
+        enable_thinking=enable_thinking, top_k=top_k,
+        teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
+        teacher_system=teacher_system, teacher_prompt=teacher_prompt,
+        teacher_without_adapter=teacher_without_adapter,
     )
-    # Score only the supplied completion, not end-of-turn template tokens.
-    built = build_raw(prompt_text, probe.completion)
+
+
+def _completion_point(
+    model, tokenizer, messages, prompt_text: str, completion: str, *, step: int,
+    enable_thinking: bool | None, top_k: int, teacher_model, teacher_tokenizer,
+    teacher_system: str | None, teacher_prompt: str | None,
+    teacher_without_adapter: bool, sample: Sample | None = None,
+) -> ProbePoint:
+    """Score the displayed string and assemble fixed or sampled progress metadata."""
+    built = build_raw(prompt_text, completion)
     if teacher_model is None:
         result = score_text(model, tokenizer, built.text, built.spans, top_k=top_k)
     else:
@@ -190,8 +203,8 @@ def score_probe(
         teacher_messages = apply_teacher_context(
             messages, system=teacher_system, prompt=teacher_prompt
         )
-        teacher_prefix = teacher_tokenizer.apply_chat_template(
-            teacher_messages, tokenize=False, add_generation_prompt=True, **template_kwargs
+        teacher_prefix = render_generation_prompt(
+            teacher_tokenizer, teacher_messages, enable_thinking,
         )
         result = score_text_pair(
             model,
@@ -199,7 +212,7 @@ def score_probe(
             built,
             teacher_model,
             teacher_tokenizer,
-            build_raw(teacher_prefix, probe.completion),
+            build_raw(teacher_prefix, completion),
             top_k=top_k,
             teacher_without_adapter=teacher_without_adapter,
         )
@@ -214,6 +227,10 @@ def score_probe(
         tokens=[_token_payload(token) for token in scored],
         mean_teacher_logprob=(result.mean_teacher_logprob if teacher_model is not None else None),
         mean_kl=result.mean_kl if teacher_model is not None else None,
+        completion=sample.completion_text if sample is not None else None,
+        content=sample.content if sample is not None else None,
+        finish_reason=sample.finish_reason if sample is not None else None,
+        num_tokens=sample.num_tokens if sample is not None else None,
     )
 
 
@@ -245,45 +262,12 @@ def sample_probe(
         seed=seed,
         enable_thinking=enable_thinking,
     )
-    built = build_raw(sample.prompt_text, sample.completion_text)
-    if teacher_model is None:
-        result = score_text(model, tokenizer, built.text, built.spans, top_k=top_k)
-    else:
-        teacher_tokenizer = teacher_tokenizer or tokenizer
-        teacher_messages = apply_teacher_context(
-            messages, system=teacher_system, prompt=teacher_prompt
-        )
-        template_kwargs = (
-            {} if enable_thinking is None else {"enable_thinking": enable_thinking}
-        )
-        teacher_prefix = teacher_tokenizer.apply_chat_template(
-            teacher_messages, tokenize=False, add_generation_prompt=True, **template_kwargs
-        )
-        result = score_text_pair(
-            model,
-            tokenizer,
-            built,
-            teacher_model,
-            teacher_tokenizer,
-            build_raw(teacher_prefix, sample.completion_text),
-            top_k=top_k,
-            teacher_without_adapter=teacher_without_adapter,
-        )
-    scored = result.scored
-    sequence_logprob = sum(token.logprob for token in scored)
-    return ProbePoint(
-        step=step,
-        mean_logprob=result.mean_logprob,
-        mean_probability=math.exp(result.mean_logprob),
-        sequence_logprob=sequence_logprob,
-        sequence_probability=math.exp(sequence_logprob),
-        tokens=[_token_payload(token) for token in scored],
-        mean_teacher_logprob=(result.mean_teacher_logprob if teacher_model is not None else None),
-        mean_kl=result.mean_kl if teacher_model is not None else None,
-        completion=sample.completion_text,
-        content=sample.content,
-        finish_reason=sample.finish_reason,
-        num_tokens=sample.num_tokens,
+    return _completion_point(
+        model, tokenizer, messages, sample.prompt_text, sample.completion_text, step=step,
+        enable_thinking=enable_thinking, top_k=top_k,
+        teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
+        teacher_system=teacher_system, teacher_prompt=teacher_prompt,
+        teacher_without_adapter=teacher_without_adapter, sample=sample,
     )
 
 
@@ -305,6 +289,22 @@ def score_progress(
     on_point=None,
 ) -> ProgressResult:
     """Score the base model and every checkpoint on each fixed probe."""
+    evaluate = partial(
+        score_probe, model, tokenizer, enable_thinking=enable_thinking,
+        top_k=top_k, default_system=default_system,
+        teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
+        teacher_system=teacher_system, teacher_prompt=teacher_prompt,
+        teacher_without_adapter=teacher_model is model,
+    )
+    return _run_progress(
+        model, checkpoint_root, probes, evaluate, teacher_name, on_start, on_point,
+    )
+
+
+def _run_progress(
+    model, checkpoint_root, probes, evaluate, teacher_name, on_start, on_point,
+) -> ProgressResult:
+    """Own checkpoint ordering, adapter lifetime, and incremental result delivery."""
     checkpoints = find_checkpoints(checkpoint_root)
     has_step_zero = bool(checkpoints and checkpoints[0][0] == 0)
     steps = [step for step, _ in checkpoints]
@@ -321,33 +321,20 @@ def score_progress(
     if on_start is not None:
         on_start(result)
 
-    def score_step(step: int) -> None:
+    def evaluate_step(step: int) -> None:
         model.eval()
         for probe in probes:
-            point = score_probe(
-                model,
-                tokenizer,
-                probe,
-                step,
-                enable_thinking,
-                top_k=top_k,
-                default_system=default_system,
-                teacher_model=teacher_model,
-                teacher_tokenizer=teacher_tokenizer,
-                teacher_system=teacher_system,
-                teacher_prompt=teacher_prompt,
-                teacher_without_adapter=teacher_model is model,
-            )
+            point = evaluate(probe, step)
             series[probe.name].append(point)
             if on_point is not None:
                 on_point(probe, point)
 
     if not has_step_zero:
-        score_step(0)
+        evaluate_step(0)
     for step, checkpoint in checkpoints:
         try:
             load_adapters(model, str(checkpoint))
-            score_step(step)
+            evaluate_step(step)
         finally:
             remove_lora_layers(model)
             model.eval()
@@ -376,57 +363,17 @@ def sample_progress(
     on_point=None,
 ) -> ProgressResult:
     """Sample and then score one generated completion at each checkpoint."""
-    checkpoints = find_checkpoints(checkpoint_root)
-    has_step_zero = bool(checkpoints and checkpoints[0][0] == 0)
-    steps = [step for step, _ in checkpoints]
-    if not has_step_zero:
-        steps.insert(0, 0)
-    series = {probe.name: [] for probe in probes}
-    result = ProgressResult(
-        checkpoint_root=str(checkpoint_root),
-        steps=steps,
-        probes=probes,
-        series=series,
-        teacher_model=teacher_name,
+    evaluate = partial(
+        sample_probe, model, tokenizer, enable_thinking=enable_thinking,
+        max_tokens=max_tokens, temperature=temperature, seed=seed,
+        top_k=top_k, default_system=default_system,
+        teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer,
+        teacher_system=teacher_system, teacher_prompt=teacher_prompt,
+        teacher_without_adapter=teacher_model is model,
     )
-    if on_start is not None:
-        on_start(result)
-
-    def sample_step(step: int) -> None:
-        model.eval()
-        for probe in probes:
-            point = sample_probe(
-                model,
-                tokenizer,
-                probe,
-                step,
-                enable_thinking,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                seed=seed,
-                top_k=top_k,
-                default_system=default_system,
-                teacher_model=teacher_model,
-                teacher_tokenizer=teacher_tokenizer,
-                teacher_system=teacher_system,
-                teacher_prompt=teacher_prompt,
-                teacher_without_adapter=teacher_model is model,
-            )
-            series[probe.name].append(point)
-            if on_point is not None:
-                on_point(probe, point)
-
-    if not has_step_zero:
-        sample_step(0)
-    for step, checkpoint in checkpoints:
-        try:
-            load_adapters(model, str(checkpoint))
-            sample_step(step)
-        finally:
-            remove_lora_layers(model)
-            model.eval()
-
-    return result
+    return _run_progress(
+        model, checkpoint_root, probes, evaluate, teacher_name, on_start, on_point,
+    )
 
 
 def progress_to_json(result: ProgressResult) -> dict:

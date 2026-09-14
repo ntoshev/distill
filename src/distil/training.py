@@ -31,7 +31,9 @@ from distil.sample import (
     sample_speculative_completions,
 )
 from distil.scoring import align_scored_tokens
-from distil.templating import apply_teacher_context, build_raw
+from distil.templating import (
+    apply_teacher_context, build_raw, prompt_messages, render_generation_prompt,
+)
 
 
 @dataclass
@@ -135,12 +137,6 @@ def _teacher_rows(
     return selected
 
 
-def _messages(prompt: str, system: str | None) -> list[dict]:
-    messages = [] if system is None else [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": prompt})
-    return messages
-
-
 def _sample_canaries(
     model,
     tokenizer,
@@ -157,7 +153,7 @@ def _sample_canaries(
         sample = sample_completion(
             model,
             tokenizer,
-            _messages(prompt, system),
+            prompt_messages(prompt, system),
             max_tokens=max_tokens,
             temperature=0.0,
             seed=0,
@@ -377,21 +373,12 @@ class TrainingSession:
 
     def _shared_teacher_prefix_ids(self) -> list[int]:
         """Find the token-stable teacher prefix before user prompt content."""
-        template_kwargs = (
-            {}
-            if self.enable_thinking is None
-            else {"enable_thinking": self.enable_thinking}
-        )
-
         def rendered(prompt: str) -> list[int]:
             messages = apply_teacher_context(
-                _messages(prompt, self.student_system), system=self.teacher_system
+                prompt_messages(prompt, self.student_system), system=self.teacher_system
             )
-            text = self.teacher_tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-                **template_kwargs,
+            text = render_generation_prompt(
+                self.teacher_tokenizer, messages, self.enable_thinking,
             )
             return self.teacher_tokenizer.encode(text, add_special_tokens=False)
 
@@ -408,10 +395,46 @@ class TrainingSession:
         self.model.eval()
         return save_lora_adapter(self.model, path, self.config)
 
+    def _align_rollout(
+        self, prompt: str, teacher_messages: list[dict], sample: Sample
+    ) -> _PreparedRollout | None:
+        """Prepare either a serial or batched sample without regenerating its text."""
+        built_student = build_raw(sample.prompt_text, sample.completion_text)
+        teacher_prefix = render_generation_prompt(
+            self.teacher_tokenizer, teacher_messages, self.enable_thinking,
+        )
+        aligned = align_scored_tokens(
+            self.tokenizer, built_student, self.teacher_tokenizer,
+            build_raw(teacher_prefix, sample.completion_text),
+        )
+        if not aligned.pairs:
+            return None
+        return _PreparedRollout(
+            prompt=prompt,
+            sample=sample,
+            student_ids=aligned.student_ids,
+            student_rows=[pos - 1 for pos, _ in aligned.pairs],
+            teacher_ids=aligned.teacher_ids,
+            teacher_rows=[pos - 1 for _, pos in aligned.pairs],
+            token_texts=[
+                built_student.text[
+                    aligned.student_offsets[pos][0] : aligned.student_offsets[pos][1]
+                ]
+                for pos, _ in aligned.pairs
+            ],
+            prepare_seconds=0.0,
+            teacher_logits=(
+                sample.teacher_logits
+                if sample.teacher_logits is not None
+                and sample.teacher_logits.shape[0] == len(aligned.pairs)
+                else None
+            ),
+        )
+
     def _prepare_rollout(
         self, prompt: str, max_attempts: int = 10
     ) -> _PreparedRollout:
-        messages = _messages(prompt, self.student_system)
+        messages = prompt_messages(prompt, self.student_system)
         teacher_messages = apply_teacher_context(messages, system=self.teacher_system)
         for _ in range(max_attempts):
             started = perf_counter()
@@ -448,63 +471,23 @@ class TrainingSession:
             if sample.num_tokens == 0:
                 continue
 
-            built_student = build_raw(sample.prompt_text, sample.completion_text)
-            template_kwargs = (
-                {} if self.enable_thinking is None else {"enable_thinking": self.enable_thinking}
-            )
-            teacher_prompt_text = self.teacher_tokenizer.apply_chat_template(
-                teacher_messages,
-                tokenize=False,
-                add_generation_prompt=True,
-                **template_kwargs,
-            )
-            built_teacher = build_raw(teacher_prompt_text, sample.completion_text)
             try:
-                aligned = align_scored_tokens(
-                    self.tokenizer,
-                    built_student,
-                    self.teacher_tokenizer,
-                    built_teacher,
-                )
+                prepared = self._align_rollout(prompt, teacher_messages, sample)
             except ValueError as error:
                 if self.warn is not None:
                     self.warn(f"skipping rollout for {prompt!r}: {error}")
                 continue
-            if not aligned.pairs:
+            if prepared is None:
                 continue
-            return _PreparedRollout(
-                prompt=prompt,
-                sample=sample,
-                student_ids=aligned.student_ids,
-                student_rows=[
-                    student_pos - 1 for student_pos, _ in aligned.pairs
-                ],
-                teacher_ids=aligned.teacher_ids,
-                teacher_rows=[
-                    teacher_pos - 1 for _, teacher_pos in aligned.pairs
-                ],
-                token_texts=[
-                    built_student.text[
-                        aligned.student_offsets[student_pos][0] :
-                        aligned.student_offsets[student_pos][1]
-                    ]
-                    for student_pos, _ in aligned.pairs
-                ],
-                prepare_seconds=perf_counter() - started,
-                teacher_logits=(
-                    sample.teacher_logits
-                    if sample.teacher_logits is not None
-                    and sample.teacher_logits.shape[0] == len(aligned.pairs)
-                    else None
-                ),
-            )
+            prepared.prepare_seconds = perf_counter() - started
+            return prepared
         raise RuntimeError(f"could not produce an aligned rollout for {prompt!r}")
 
     def _prepare_rollouts_batched(
         self, prompts: list[str] | tuple[str, ...], max_attempts: int
     ) -> list[_PreparedRollout]:
         """Generate shared-model SKD rollouts across prompts in one batch."""
-        messages_batch = [_messages(prompt, self.student_system) for prompt in prompts]
+        messages_batch = [prompt_messages(prompt, self.student_system) for prompt in prompts]
         teacher_messages_batch = [
             apply_teacher_context(messages, system=self.teacher_system)
             for messages in messages_batch
@@ -527,69 +510,18 @@ class TrainingSession:
                 teacher_prefix_ids=self.teacher_prefix_ids,
                 teacher_prefix_cache=self.teacher_prefix_cache,
             )
-        except (RuntimeError, ValueError) as error:
-            if self.warn is not None:
-                self.warn(f"batched SKD fallback to serial rollouts: {error}")
-            return [
-                self._prepare_rollout(prompt, max_attempts=max_attempts)
-                for prompt in prompts
-            ]
-
-        elapsed_each = (perf_counter() - started) / len(prompts)
-        prepared = []
-        try:
+            elapsed_each = (perf_counter() - started) / len(prompts)
+            prepared = []
             for prompt, teacher_messages, sample in zip(
                 prompts, teacher_messages_batch, samples
             ):
-                built_student = build_raw(sample.prompt_text, sample.completion_text)
-                template_kwargs = (
-                    {}
-                    if self.enable_thinking is None
-                    else {"enable_thinking": self.enable_thinking}
-                )
-                teacher_prompt_text = self.teacher_tokenizer.apply_chat_template(
-                    teacher_messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    **template_kwargs,
-                )
-                built_teacher = build_raw(
-                    teacher_prompt_text, sample.completion_text
-                )
-                aligned = align_scored_tokens(
-                    self.tokenizer,
-                    built_student,
-                    self.teacher_tokenizer,
-                    built_teacher,
-                )
-                if not aligned.pairs:
+                rollout = self._align_rollout(prompt, teacher_messages, sample)
+                if rollout is None:
                     raise RuntimeError(
                         f"batched SKD produced no aligned tokens for {prompt!r}"
                     )
-                prepared.append(
-                    _PreparedRollout(
-                        prompt=prompt,
-                        sample=sample,
-                        student_ids=aligned.student_ids,
-                        student_rows=[pos - 1 for pos, _ in aligned.pairs],
-                        teacher_ids=aligned.teacher_ids,
-                        teacher_rows=[pos - 1 for _, pos in aligned.pairs],
-                        token_texts=[
-                            built_student.text[
-                                aligned.student_offsets[pos][0] :
-                                aligned.student_offsets[pos][1]
-                            ]
-                            for pos, _ in aligned.pairs
-                        ],
-                        prepare_seconds=elapsed_each,
-                        teacher_logits=(
-                            sample.teacher_logits
-                            if sample.teacher_logits is not None
-                            and sample.teacher_logits.shape[0] == len(aligned.pairs)
-                            else None
-                        ),
-                    )
-                )
+                rollout.prepare_seconds = elapsed_each
+                prepared.append(rollout)
         except (RuntimeError, ValueError) as error:
             if self.warn is not None:
                 self.warn(f"batched SKD fallback to serial rollouts: {error}")
@@ -885,7 +817,7 @@ def train_lora(
                 sample = sample_completion(
                     model,
                     tokenizer,
-                    _messages(prompt, student_system),
+                    prompt_messages(prompt, student_system),
                     max_tokens=canary_max_tokens,
                     temperature=0.0,
                     seed=0,
@@ -902,7 +834,7 @@ def train_lora(
     while len(steps) < iters:
         step_started = perf_counter()
         prompt = order[len(steps) % len(order)]
-        messages = _messages(prompt, student_system)
+        messages = prompt_messages(prompt, student_system)
         step = session.step(prompt)
         iteration = step.iteration
         checkpoint_file = None

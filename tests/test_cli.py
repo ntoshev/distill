@@ -242,11 +242,72 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     assert captured["batch_size"] == 4
     assert captured["save_rollout_path"] == str(rollouts)
     assert captured["speculative_top_k"] == 3
+    assert captured["learning_rate"] == 1e-6
+    assert captured["temperature"] == DEFAULT_TEMPERATURE
+    assert captured["max_tokens"] == 64
+    assert captured["seed"] == 0
     assert captured["judge_model_name"] == "judge"
     assert captured["judge_model"] is not None
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     assert payload["selected_step"] == 3
+
+
+def test_generate_only_preserves_distinct_generator_limits(tmp_path, monkeypatch, capsys):
+    import mlx_lm
+    import distil.cli as cli
+    import distil.generation as generation
+    from distil.sample import Sample
+
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
+    calls = []
+
+    def sample(model, tokenizer, messages, **kwargs):
+        calls.append((messages, kwargs))
+        return Sample("prefix", "generated", "generated", "stop", 1)
+
+    def facts(document, count, inventory, questions):
+        assert (document, count) == ("context", 2)
+        assert inventory("inventory") == questions("questions") == "generated"
+        return [generation.GeneratedFact(
+            "fact-0001", "fact", completion="answer", train_prompts=["train"], prompt="heldout",
+        )]
+
+    monkeypatch.setattr(cli, "sample_completion", sample)
+    monkeypatch.setattr(generation, "generate_facts", facts)
+    assert main([
+        "--model", "m", "--train", "context", "--adapter", str(tmp_path),
+        "--generate-only", "--max-tokens", "16", "--json",
+    ]) == 0
+    assert [kwargs["max_tokens"] for _, kwargs in calls] == [512, 256]
+    assert [kwargs["enable_thinking"] for _, kwargs in calls] == [None, False]
+    assert all(kwargs["temperature"] == 0.0 and kwargs["seed"] == 0 for _, kwargs in calls)
+    assert "generated_probes" in json.loads(capsys.readouterr().out)
+
+
+def test_raw_speculative_dispatch_preserves_teacher_and_sampling_options(monkeypatch, capsys):
+    import mlx_lm
+    import distil.cli as cli
+    from distil.sample import Sample
+
+    model, tokenizer = object(), object()
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
+
+    def sample(*args, **kwargs):
+        assert args == (model, tokenizer, "student>", model, tokenizer, "teacher>")
+        assert kwargs == {"max_tokens": 7, "temperature": 0.0, "seed": 3,
+                          "top_k": 2, "teacher_without_adapter": False}
+        return Sample("student>", "answer", "answer", "stop", 1, 2, 1, 0)
+
+    monkeypatch.setattr(cli, "sample_speculative_text", sample)
+    monkeypatch.setattr(cli, "score_text_pair", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "to_json_dict", lambda result: {})
+    assert main([
+        "--model", "m", "--raw", "--sample", "--prompt", "student>",
+        "--teacher-prompt", "teacher>", "--speculative-top-k", "2",
+        "--max-tokens", "7", "--temperature", "0", "--seed", "3", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["sample"]["accepted_tokens"] == 1
 
 
 def test_training_reuses_student_as_judge_when_model_names_match(

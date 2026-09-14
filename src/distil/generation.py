@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from distil.templating import render_generation_prompt
+
 
 PROMPT_VERSION = "continual-v4"
 _LIST_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
@@ -345,10 +347,7 @@ def ensure_fits(
                 candidates.append(value)
     if not candidates:
         return
-    kwargs = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
-    rendered = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True, **kwargs
-    )
+    rendered = render_generation_prompt(tokenizer, messages, enable_thinking)
     tokens = len(tokenizer.encode(rendered, add_special_tokens=False))
     limit = min(candidates)
     if tokens + max_tokens > limit:

@@ -23,6 +23,7 @@ from distil.prefill import (
     merge_prompt_caches,
     prefill_last_logits,
 )
+from distil.templating import render_generation_prompt
 
 
 class _SharedModelBatchUnsupported(Exception):
@@ -46,10 +47,7 @@ class Sample:
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):
-    template_kwargs = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
-    prompt_text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True, **template_kwargs
-    )
+    prompt_text = render_generation_prompt(tokenizer, messages, enable_thinking)
     # Encode the rendered string (not apply_chat_template(tokenize=True)) so the
     # ids match what scoring's tokenize_with_offsets will see for the same text.
     return prompt_text, tokenizer.encode(prompt_text, add_special_tokens=False)

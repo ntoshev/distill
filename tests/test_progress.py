@@ -92,9 +92,13 @@ def test_progress_json_is_serializable():
     json.dumps(payload)
 
 
-def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, monkeypatch):
+@pytest.mark.parametrize("run,evaluator", [
+    (score_progress, "score_probe"), (sample_progress, "sample_probe"),
+])
+@pytest.mark.parametrize("has_zero", [False, True])
+def test_progress_includes_base_exactly_once(tmp_path, monkeypatch, run, evaluator, has_zero):
     checkpoints = tmp_path / "checkpoints"
-    for step in (0, 5):
+    for step in ((0, 5) if has_zero else (5,)):
         directory = checkpoints / f"step-{step:04d}"
         directory.mkdir(parents=True)
         (directory / "adapters.safetensors").touch()
@@ -103,7 +107,7 @@ def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, mon
     monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: loaded.append(path))
     monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
     monkeypatch.setattr(
-        "distil.progress.score_probe",
+        f"distil.progress.{evaluator}",
         lambda model, tokenizer, probe, step, enable_thinking, **kwargs: ProbePoint(
             step, -1.0, 0.37, -1.0, 0.37, []
         ),
@@ -112,10 +116,39 @@ def test_progress_uses_saved_step_zero_instead_of_duplicating_base(tmp_path, mon
         def eval(self):
             pass
 
-    result = score_progress(Model(), object(), tmp_path, [Probe("x", "p", "c")])
+    result = run(Model(), object(), tmp_path, [Probe("x", "p", "c")])
     assert result.steps == [0, 5]
     assert [point.step for point in result.series["x"]] == [0, 5]
-    assert len(loaded) == 2
+    assert len(loaded) == (2 if has_zero else 1)
+
+
+@pytest.mark.parametrize("run,evaluator", [
+    (score_progress, "score_probe"), (sample_progress, "sample_probe"),
+])
+@pytest.mark.parametrize("failure", ["load", "evaluate", "callback"])
+def test_progress_cleans_up_adapter_on_failure(tmp_path, monkeypatch, run, evaluator, failure):
+    checkpoint = tmp_path / "step-0000"
+    checkpoint.mkdir()
+    (checkpoint / "adapters.safetensors").touch()
+    events = []
+
+    class Model:
+        def eval(self):
+            events.append("eval")
+
+    def event(name):
+        def call(*args, **kwargs):
+            if failure == name:
+                raise RuntimeError(name)
+            return ProbePoint(0, -1.0, 0.37, -1.0, 0.37, [])
+        return call
+
+    monkeypatch.setattr("distil.progress.load_adapters", event("load"))
+    monkeypatch.setattr(f"distil.progress.{evaluator}", event("evaluate"))
+    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: events.append("remove"))
+    with pytest.raises(RuntimeError, match=failure):
+        run(Model(), object(), tmp_path, [Probe("x", "p", "c")], on_point=event("callback"))
+    assert events[-2:] == ["remove", "eval"]
 
 
 def test_score_progress_reports_points_incrementally(tmp_path, monkeypatch):
@@ -249,6 +282,38 @@ def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch)
     points = result.series["x"]
     assert [point.completion for point in points] == ["answer-0", "answer-1"]
     assert points[0].finish_reason == "stop"
+
+
+def test_sample_probe_teacher_scores_exact_generated_string(monkeypatch):
+    import distil.progress as progress
+    from distil.sample import Sample
+
+    class TeacherTokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            assert messages[0] == {"role": "system", "content": "private"}
+            assert kwargs["enable_thinking"] is False
+            return "teacher>"
+
+    sample = Sample("exact student>\n", "\nfresh<eos>", "fresh", "stop", 3)
+    monkeypatch.setattr(progress, "sample_completion", lambda *a, **kw: sample)
+
+    def score(model, tokenizer, built, teacher, teacher_tokenizer, teacher_built, **kwargs):
+        assert built.text == sample.prompt_text + sample.completion_text
+        assert built.spans == [(len(sample.prompt_text), len(built.text))]
+        assert teacher_built.text == "teacher>" + sample.completion_text
+        assert kwargs == {"top_k": 2, "teacher_without_adapter": True}
+        return ScoreResult(built.text, [
+            TokenScore(1, "\nfresh", 0, 6, True, -0.5, teacher_logprob=-0.2, kl=0.1),
+        ], "student", [], "teacher")
+
+    monkeypatch.setattr(progress, "score_text_pair", score)
+    point = progress.sample_probe(
+        object(), object(), Probe("p", "question", "UNUSED TARGET"), 5, False,
+        max_tokens=3, temperature=0.0, top_k=2, teacher_model=object(),
+        teacher_tokenizer=TeacherTokenizer(), teacher_system="private", teacher_without_adapter=True,
+    )
+    assert (point.completion, point.content, point.num_tokens) == ("\nfresh<eos>", "fresh", 3)
+    assert point.mean_teacher_logprob == -0.2
 
 
 def test_sample_progress_replays_saved_rollout_messages(tmp_path, monkeypatch):
