@@ -1,0 +1,157 @@
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 94042.69it/s]
+teacher: 1/128 dolly-4387 tokens=101 pass=False
+teacher: 2/128 dolly-7918 tokens=107 pass=False
+teacher: 3/128 dolly-8924 tokens=107 pass=False
+teacher: 4/128 dolly-2300 tokens=111 pass=True
+teacher: 5/128 dolly-7070 tokens=116 pass=True
+teacher: 6/128 dolly-6720 tokens=125 pass=True
+teacher: 7/128 dolly-7328 tokens=127 pass=True
+teacher: 8/128 dolly-4642 tokens=133 pass=True
+teacher: 9/128 dolly-6446 tokens=83 pass=False
+teacher: 10/128 dolly-13039 tokens=114 pass=True
+teacher: 11/128 dolly-11979 tokens=118 pass=True
+teacher: 12/128 dolly-2617 tokens=115 pass=True
+teacher: 13/128 dolly-14573 tokens=128 pass=True
+teacher: 14/128 dolly-9818 tokens=118 pass=True
+teacher: 15/128 dolly-11850 tokens=153 pass=True
+teacher: 16/128 dolly-2257 tokens=134 pass=False
+teacher: 17/128 dolly-3009 tokens=88 pass=False
+teacher: 18/128 dolly-9101 tokens=97 pass=False
+teacher: 19/128 dolly-13198 tokens=108 pass=False
+teacher: 20/128 dolly-1935 tokens=119 pass=True
+teacher: 21/128 dolly-8931 tokens=107 pass=False
+teacher: 22/128 dolly-13009 tokens=100 pass=False
+teacher: 23/128 dolly-13726 tokens=92 pass=False
+teacher: 24/128 dolly-8606 tokens=106 pass=False
+teacher: 25/128 dolly-4108 tokens=101 pass=False
+teacher: 26/128 dolly-1694 tokens=104 pass=False
+teacher: 27/128 dolly-11372 tokens=105 pass=False
+teacher: 28/128 dolly-10821 tokens=121 pass=True
+teacher: 29/128 dolly-3645 tokens=112 pass=True
+teacher: 30/128 dolly-561 tokens=116 pass=False
+teacher: 31/128 dolly-10973 tokens=124 pass=True
+teacher: 32/128 dolly-15009 tokens=112 pass=True
+teacher: 33/128 dolly-10354 tokens=80 pass=False
+teacher: 34/128 dolly-12028 tokens=108 pass=False
+teacher: 35/128 dolly-4074 tokens=135 pass=False
+teacher: 36/128 dolly-8628 tokens=105 pass=False
+teacher: 37/128 dolly-9651 tokens=151 pass=True
+teacher: 38/128 dolly-513 tokens=107 pass=True
+teacher: 39/128 dolly-7072 tokens=99 pass=False
+teacher: 40/128 dolly-1338 tokens=166 pass=True
+teacher: 41/128 dolly-14048 tokens=97 pass=False
+teacher: 42/128 dolly-3227 tokens=92 pass=False
+teacher: 43/128 dolly-1301 tokens=91 pass=False
+teacher: 44/128 dolly-2757 tokens=115 pass=False
+teacher: 45/128 dolly-13712 tokens=106 pass=False
+teacher: 46/128 dolly-6838 tokens=103 pass=False
+teacher: 47/128 dolly-1414 tokens=92 pass=False
+teacher: 48/128 dolly-13199 tokens=162 pass=True
+teacher: 49/128 dolly-7791 tokens=144 pass=True
+teacher: 50/128 dolly-2835 tokens=120 pass=True
+teacher: 51/128 dolly-10768 tokens=91 pass=False
+teacher: 52/128 dolly-6097 tokens=98 pass=False
+teacher: 53/128 dolly-9427 tokens=130 pass=True
+teacher: 54/128 dolly-2117 tokens=112 pass=True
+teacher: 55/128 dolly-8711 tokens=112 pass=False
+teacher: 56/128 dolly-6379 tokens=94 pass=False
+teacher: 57/128 dolly-13700 tokens=89 pass=False
+teacher: 58/128 dolly-6119 tokens=92 pass=False
+teacher: 59/128 dolly-13643 tokens=90 pass=False
+teacher: 60/128 dolly-10491 tokens=103 pass=False
+teacher: 61/128 dolly-8050 tokens=119 pass=True
+teacher: 62/128 dolly-2853 tokens=103 pass=False
+teacher: 63/128 dolly-12944 tokens=107 pass=False
+teacher: 64/128 dolly-9836 tokens=140 pass=True
+teacher: 65/128 dolly-7053 tokens=98 pass=False
+teacher: 66/128 dolly-9535 tokens=87 pass=False
+teacher: 67/128 dolly-3794 tokens=90 pass=False
+teacher: 68/128 dolly-11581 tokens=100 pass=False
+teacher: 69/128 dolly-5056 tokens=120 pass=True
+teacher: 70/128 dolly-756 tokens=123 pass=True
+teacher: 71/128 dolly-4015 tokens=130 pass=True
+teacher: 72/128 dolly-13024 tokens=121 pass=True
+teacher: 73/128 dolly-330 tokens=114 pass=True
+teacher: 74/128 dolly-5872 tokens=101 pass=False
+teacher: 75/128 dolly-12689 tokens=151 pass=True
+teacher: 76/128 dolly-2575 tokens=109 pass=True
+teacher: 77/128 dolly-2874 tokens=106 pass=False
+teacher: 78/128 dolly-7013 tokens=109 pass=False
+teacher: 79/128 dolly-2829 tokens=100 pass=False
+teacher: 80/128 dolly-6601 tokens=97 pass=False
+teacher: 81/128 dolly-754 tokens=105 pass=False
+teacher: 82/128 dolly-11363 tokens=112 pass=True
+teacher: 83/128 dolly-4985 tokens=104 pass=False
+teacher: 84/128 dolly-922 tokens=101 pass=False
+teacher: 85/128 dolly-12677 tokens=85 pass=False
+teacher: 86/128 dolly-906 tokens=98 pass=False
+teacher: 87/128 dolly-2169 tokens=96 pass=False
+teacher: 88/128 dolly-4865 tokens=103 pass=False
+teacher: 89/128 dolly-6608 tokens=92 pass=False
+teacher: 90/128 dolly-6072 tokens=95 pass=False
+teacher: 91/128 dolly-10771 tokens=121 pass=False
+teacher: 92/128 dolly-14996 tokens=137 pass=True
+teacher: 93/128 dolly-12685 tokens=89 pass=False
+teacher: 94/128 dolly-1985 tokens=115 pass=True
+teacher: 95/128 dolly-14664 tokens=119 pass=True
+teacher: 96/128 dolly-11799 tokens=131 pass=True
+teacher: 97/128 dolly-5948 tokens=112 pass=True
+teacher: 98/128 dolly-2446 tokens=103 pass=False
+teacher: 99/128 dolly-5335 tokens=105 pass=False
+teacher: 100/128 dolly-3544 tokens=105 pass=False
+teacher: 101/128 dolly-14673 tokens=94 pass=False
+teacher: 102/128 dolly-14940 tokens=129 pass=True
+teacher: 103/128 dolly-12550 tokens=146 pass=True
+teacher: 104/128 dolly-12975 tokens=94 pass=False
+teacher: 105/128 dolly-610 tokens=135 pass=True
+teacher: 106/128 dolly-3473 tokens=105 pass=False
+teacher: 107/128 dolly-11844 tokens=113 pass=True
+teacher: 108/128 dolly-1268 tokens=102 pass=False
+teacher: 109/128 dolly-13292 tokens=97 pass=False
+teacher: 110/128 dolly-3442 tokens=103 pass=False
+teacher: 111/128 dolly-10072 tokens=101 pass=False
+teacher: 112/128 dolly-14298 tokens=103 pass=False
+teacher: 113/128 dolly-2843 tokens=120 pass=True
+teacher: 114/128 dolly-1855 tokens=103 pass=False
+teacher: 115/128 dolly-498 tokens=98 pass=False
+teacher: 116/128 dolly-7425 tokens=105 pass=False
+teacher: 117/128 dolly-6187 tokens=131 pass=True
+teacher: 118/128 dolly-8638 tokens=123 pass=True
+teacher: 119/128 dolly-12725 tokens=109 pass=False
+teacher: 120/128 dolly-8580 tokens=119 pass=True
+teacher: 121/128 dolly-392 tokens=114 pass=True
+teacher: 122/128 dolly-5616 tokens=100 pass=False
+teacher: 123/128 dolly-9942 tokens=120 pass=True
+teacher: 124/128 dolly-2888 tokens=100 pass=False
+teacher: 125/128 dolly-5979 tokens=134 pass=True
+teacher: 126/128 dolly-14820 tokens=88 pass=False
+teacher: 127/128 dolly-12011 tokens=102 pass=False
+teacher: 128/128 dolly-1700 tokens=134 pass=True
+base-no-prompt: 1/64 ifeval-244 tokens=420 pass=False
+base-no-prompt: 2/64 ifeval-508 tokens=566 pass=False
+base-no-prompt: 3/64 ifeval-525 tokens=607 pass=False
+base-no-prompt: 4/64 ifeval-18 tokens=777 pass=False
+base-no-prompt: 5/64 ifeval-127 tokens=1011 pass=False
+base-no-prompt: 6/64 ifeval-473 tokens=1023 pass=False
+Traceback (most recent call last):
+  File "/Users/nik/helper-projects/distil/scripts/distill_prompt_responses.py", line 230, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/Users/nik/helper-projects/distil/scripts/distill_prompt_responses.py", line 210, in main
+    base=sample_batches(model,tokenizer,evaluation,None,root/'evaluations/base-no-prompt/results.jsonl',score_fn)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nik/helper-projects/distil/scripts/distill_prompt_responses.py", line 67, in sample_batches
+    while responses := generator.next_generated():
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.12/site-packages/mlx_lm/generate.py", line 1866, in next_generated
+    prompt_responses, generation_responses = self._next()
+                                             ^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.12/site-packages/mlx_lm/generate.py", line 1775, in _next
+    generation_responses = self._generation_batch.next()
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.12/site-packages/mlx_lm/generate.py", line 1415, in next
+    tokens, logprobs = self._step()
+                       ^^^^^^^^^^^^
+  File "/opt/miniconda3/lib/python3.12/site-packages/mlx_lm/generate.py", line 1369, in _step
+    mx.async_eval(self._next_tokens, self._next_logprobs, token_context)
+KeyboardInterrupt

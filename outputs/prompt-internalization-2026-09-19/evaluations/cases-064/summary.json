@@ -1,0 +1,22 @@
+{
+  "examples": 64,
+  "full_mechanical_pass": 18,
+  "strict_pass": 18,
+  "loose_pass": 18,
+  "truncated": 0,
+  "per_check": {
+    "english": 64,
+    "sections_ifeval": 64,
+    "bullet_count_ifeval": 54,
+    "at_least_85_words": 25,
+    "fewer_than_180_words": 64,
+    "because_present": 40,
+    "forbidden_words_absent": 64,
+    "ending_ifeval": 64
+  },
+  "supplemental": {
+    "exact_sections_order": 64,
+    "star_bullets_in_section_2": 54,
+    "exact_ending": 64
+  }
+}

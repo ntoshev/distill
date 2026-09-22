@@ -1,0 +1,28 @@
+{
+  "model": "mlx-community/Qwen3.5-4B-6bit",
+  "model_revision": "fbb1092aa9daef007603ea9273cd24c225a409f1",
+  "epochs": 3,
+  "sizes": [
+    8,
+    16,
+    32,
+    64,
+    128
+  ],
+  "learning_rate": 0.0001,
+  "lora_rank": 16,
+  "batch_size": 4,
+  "seed": 0,
+  "temperature": 0,
+  "enable_thinking": false,
+  "system_prompt": "Answer the user's question in English.\n\nFollow all these rules in every response:\n1. Use exactly two sections, beginning with `Section 1` and `Section 2`.\n2. In Section 1, answer the question directly. In Section 2, provide supporting details or examples.\n3. Include exactly three bullet points across the entire response, using `* ` as the bullet marker. Place them in Section 2.\n4. Write at least 85 words but fewer than 180 words in total.\n5. Include the word `because` at least once.\n6. Never use the words `obviously`, `simply`, or `clearly`.\n7. End with this exact sentence: `This concludes the response.`",
+  "system_sha256": "017c0d01e0e552d73b26be0c383acc42bdb73b41ffded00eabd154b7443c2a2c",
+  "train_sha256": "d41fae3ae52f71b5bcb0b7653b51b7ff1bc27247844080199015b9642d6a958f",
+  "eval_sha256": "b94547832cecda978ef7eb3203cf19486771296779d8167ce5d827fede8995ea",
+  "packages": {
+    "mlx": "0.31.2",
+    "mlx-lm": "0.31.3",
+    "transformers": "5.11.0",
+    "nltk": "3.9.3"
+  }
+}

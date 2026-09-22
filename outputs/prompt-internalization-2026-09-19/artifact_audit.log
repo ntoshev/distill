@@ -1,0 +1,57 @@
+[
+  {
+    "cases": 8,
+    "adapter_path": "/Users/nik/helper-projects/distil/outputs/prompt-internalization-2026-09-19/adapters/cases-008",
+    "updates": 6,
+    "training_seconds": 84.74341087485664,
+    "sha256": "fedd0a649546cf5d59aa5a75f85b812987c767e9c75af100752fd95ac0350429",
+    "megabytes": 64.961208,
+    "full_mechanical_pass": 7,
+    "truncated": 2,
+    "teacher_training_pass": 5
+  },
+  {
+    "cases": 16,
+    "adapter_path": "/Users/nik/helper-projects/distil/outputs/prompt-internalization-2026-09-19/adapters/cases-016",
+    "updates": 12,
+    "training_seconds": 169.56939666718245,
+    "sha256": "e20f5f4e38222d4b51fd79b875831e4f1a38f3b8c4a00ea6288f9dc24e9ef3b8",
+    "megabytes": 64.961208,
+    "full_mechanical_pass": 10,
+    "truncated": 0,
+    "teacher_training_pass": 11
+  },
+  {
+    "cases": 32,
+    "adapter_path": "/Users/nik/helper-projects/distil/outputs/prompt-internalization-2026-09-19/adapters/cases-032",
+    "updates": 24,
+    "training_seconds": 313.9503178750165,
+    "sha256": "6c4ff3a1f123110eac196ba34f214296952ce637e8e3d7822a4dcf2a61a5bf90",
+    "megabytes": 64.961208,
+    "full_mechanical_pass": 15,
+    "truncated": 0,
+    "teacher_training_pass": 16
+  },
+  {
+    "cases": 64,
+    "adapter_path": "/Users/nik/helper-projects/distil/outputs/prompt-internalization-2026-09-19/adapters/cases-064",
+    "updates": 48,
+    "training_seconds": 617.690213915892,
+    "sha256": "eed6235789f5ebe39e6bc28711da8561247fce128a03b16adccc48f31820160e",
+    "megabytes": 64.961208,
+    "full_mechanical_pass": 18,
+    "truncated": 0,
+    "teacher_training_pass": 26
+  },
+  {
+    "cases": 128,
+    "adapter_path": "/Users/nik/helper-projects/distil/outputs/prompt-internalization-2026-09-19/adapters/cases-128",
+    "updates": 96,
+    "training_seconds": 1220.133224582998,
+    "sha256": "f208dca109a7005d1ee3625930c43915ade390c619b3de225ff999a6de46e4ad",
+    "megabytes": 64.961208,
+    "full_mechanical_pass": 12,
+    "truncated": 0,
+    "teacher_training_pass": 51
+  }
+]

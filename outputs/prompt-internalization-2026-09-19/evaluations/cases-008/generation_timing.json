@@ -1,0 +1,24 @@
+{
+  "seconds": 213.1926374589093,
+  "generated_cases": 64,
+  "stats": {
+    "prompt_tokens": 1894,
+    "prompt_tps": 249.7138419495812,
+    "prompt_time": 7.584681670879945,
+    "generation_tokens": 10814,
+    "generation_tps": 52.59524652449583,
+    "generation_time": 205.6079344539903,
+    "peak_memory": 7.360467334
+  },
+  "response_batch_sizes": {
+    "4": 5,
+    "8": 919,
+    "7": 4,
+    "9": 20,
+    "6": 7,
+    "5": 13,
+    "3": 45,
+    "2": 1444,
+    "1": 104
+  }
+}

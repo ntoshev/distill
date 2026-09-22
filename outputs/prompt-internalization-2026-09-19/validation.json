@@ -1,0 +1,34 @@
+{
+  "unit_suite": "186 passed, 41 deselected (not model)",
+  "model_checks": "2 passed: saved teacher response updates LoRA while preserving base; optimized training matches reference",
+  "training_benchmarks": {
+    "system": "mac15-6-m3-pro-11cpu-14gpu-36gb",
+    "passed": 3,
+    "lora_update_relative": 13.29,
+    "full_step_relative": 14.41,
+    "optimized_three_item_seconds": 1.714
+  },
+  "git_commit": "94611e4badef8a6b5a37bcbe18ad8b3c71c6b8b8",
+  "source_sha256": {
+    "src/distil/training.py": "14a9a1f0b2887764f17628f68b8196667c8d2e7522856fa6a1077dd6eadadc0d",
+    "scripts/distill_prompt_responses.py": "0400cbe727547b641a7b2f8523a9b3e5d59801fd0313a7935c227be8d9a362f5"
+  },
+  "training_runner_snapshot": "training_runner_snapshot.py",
+  "evaluation_source_sha256": {
+    "src/distil/training.py": "14a9a1f0b2887764f17628f68b8196667c8d2e7522856fa6a1077dd6eadadc0d",
+    "scripts/distill_prompt_responses.py": "51504c9c0b1c118c3f97c69215338af972a80aad7fc37a6b8f980f2f79407605"
+  },
+  "artifact_audit": {
+    "independent_adapters": true,
+    "nested_subsets_verified": true,
+    "teacher_responses_have_exact_token_ids": true,
+    "training_token_roundtrip_verified": true,
+    "evaluation_system_prompt_absent_for_all_adapters": true,
+    "no_training_eval_question_overlap": true,
+    "all_eval_sets_identical": true,
+    "expected_case_exposures_verified": true,
+    "adapter_hashes_verified": true,
+    "all_evaluation_scores_recomputed": true
+  },
+  "report_script_sha256": "e16962c1c4f438b6801f10f47ff129c1be0015e85a27ed48a4c6be684369d704"
+}

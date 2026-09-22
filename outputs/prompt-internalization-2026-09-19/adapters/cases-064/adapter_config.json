@@ -1,0 +1,11 @@
+{
+    "fine_tune_type": "lora",
+    "kl_direction": "forward",
+    "lora_parameters": {
+        "rank": 16,
+        "scale": 20.0,
+        "dropout": 0.0
+    },
+    "model": "mlx-community/Qwen3.5-4B-6bit",
+    "num_layers": 16
+}
