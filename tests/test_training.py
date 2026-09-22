@@ -49,6 +49,56 @@ def test_load_prompts_rejects_directory(tmp_path):
         load_prompts(tmp_path)
 
 
+def test_saved_samples_use_student_prefix_and_preserve_teacher_completion(monkeypatch):
+    import distil.training as training
+    from distil.sample import Sample
+    from types import SimpleNamespace
+
+    session = training.TrainingSession.__new__(training.TrainingSession)
+    session.tokenizer = object()
+    session.student_system = None
+    session.teacher_system = "private instructions"
+    session.enable_thinking = False
+    sample = Sample("TEACHER PREFIX", "answer<eos>", "answer", "stop", 2,
+                    teacher_logits=mx.zeros((2, 4)))
+    seen = []
+
+    def render(tokenizer, messages, thinking):
+        assert messages == [{"role": "user", "content": "question"}]
+        assert thinking is False
+        return "STUDENT PREFIX"
+
+    def align(prompt, messages, actual):
+        assert messages == [{"role": "system", "content": "private instructions"},
+                            {"role": "user", "content": "question"}]
+        assert actual.prompt_text == "STUDENT PREFIX"
+        assert actual.completion_text == "answer<eos>"
+        assert actual.content == "answer" and actual.finish_reason == "stop"
+        assert actual.teacher_logits is None
+        seen.append(actual)
+        return SimpleNamespace(prepare_seconds=0.0)
+
+    def update(prepared, **kwargs):
+        assert len(prepared) == 1 and kwargs["optimized"] is False
+        return ["updated"]
+
+    monkeypatch.setattr(training, "render_generation_prompt", render)
+    monkeypatch.setattr(session, "_align_rollout", align)
+    monkeypatch.setattr(session, "_update_prepared_batch", update)
+    monkeypatch.setattr(training, "sample_completion", lambda *a, **k: pytest.fail("must not generate"))
+    assert session.step_samples(["question"], [sample]) == ["updated"]
+    assert sample.prompt_text == "TEACHER PREFIX" and sample.teacher_logits is not None
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("prompts,samples", [([], []), (["q"], [])])
+def test_saved_samples_reject_invalid_batch(prompts, samples):
+    from distil.training import TrainingSession
+    session = TrainingSession.__new__(TrainingSession)
+    with pytest.raises(ValueError, match="matching non-empty"):
+        session.step_samples(prompts, samples)
+
+
 def test_interleaved_token_accepts_only_inside_teacher_top_k():
     teacher = mx.array([10.0, 9.0, 0.0])
 

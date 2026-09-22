@@ -4,7 +4,7 @@ import json
 import random
 import re
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -601,6 +601,52 @@ class TrainingSession:
             optimized=False,
         )
 
+    def step_samples(
+        self,
+        prompts: list[str] | tuple[str, ...],
+        samples: list[Sample] | tuple[Sample, ...],
+        *,
+        optimized: bool = False,
+    ) -> list[TrainStep]:
+        """Distill saved teacher completions without sampling or generating questions.
+
+        ``completion_text`` must retain the actual generated special tokens,
+        including the end-of-turn token for a completed answer. Only the input
+        prefix is replaced: the student sees ``student_system`` (normally None)
+        and the teacher sees ``teacher_system``. Supplied cached teacher logits
+        are discarded so they cannot come from a different teacher context.
+
+        The default evaluates gradient accumulation sequentially to bound memory
+        for long offline responses. ``optimized=True`` uses the same deferred
+        evaluation as ``step_batch``.
+        """
+        if not prompts or len(prompts) != len(samples):
+            raise ValueError("saved training batch needs matching non-empty prompts and samples")
+        batch_started = perf_counter()
+        prepared = []
+        for prompt, sample in zip(prompts, samples):
+            if not sample.completion_text or sample.num_tokens <= 0:
+                raise ValueError("saved training sample must contain completion tokens")
+            started = perf_counter()
+            messages = prompt_messages(prompt, self.student_system)
+            student_sample = replace(
+                sample,
+                prompt_text=render_generation_prompt(
+                    self.tokenizer, messages, self.enable_thinking
+                ),
+                teacher_logits=None,
+            )
+            teacher_messages = apply_teacher_context(messages, system=self.teacher_system)
+            rollout = self._align_rollout(prompt, teacher_messages, student_sample)
+            if rollout is None:
+                raise ValueError("saved training sample has no aligned completion tokens")
+            rollout.prepare_seconds = perf_counter() - started
+            prepared.append(rollout)
+        return self._update_prepared_batch(
+            prepared, batch_started=batch_started, capture_feedback=False,
+            optimized=optimized,
+        )
+
     def _step_batch_impl(
         self,
         prompts: list[str] | tuple[str, ...],
@@ -631,6 +677,19 @@ class TrainingSession:
                 for prompt in prompts
             ]
         )
+        return self._update_prepared_batch(
+            prepared, batch_started=batch_started, capture_feedback=capture_feedback,
+            optimized=optimized,
+        )
+
+    def _update_prepared_batch(
+        self,
+        prepared: list[_PreparedRollout],
+        *,
+        batch_started: float,
+        capture_feedback: bool,
+        optimized: bool,
+    ) -> list[TrainStep]:
         accumulated_grads = None
         losses: list[float] = []
         distill_seconds: list[float] = []

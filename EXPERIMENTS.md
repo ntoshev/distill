@@ -1,5 +1,51 @@
 # Experiments
 
+## Shared-prompt response distillation (2026-09-19)
+
+Five independent Qwen3.5-4B-6bit adapters were trained on nested subsets of
+8, 16, 32, 64, and 128 existing, context-free Dolly QA questions. The frozen
+base answered these questions with the shared formatting prompt; the student
+trained on those saved continuations without the system prompt. No model
+generated or rewrote questions, and no Dolly reference answers were used.
+
+Training used full-vocabulary forward KL, rank-16 LoRA on the last 16 layers,
+AdamW at `1e-4`, seed 0, logical batch size 4, and three epochs. Generation
+used native MLX batches of up to 8 with prefill batches of 4. Gradient
+accumulation evaluated sequences sequentially to bound memory. The five runs
+took about 40 minutes total with peak MLX memory around 16 GB on the M3 Pro.
+
+All variants were evaluated on the same 64 IFEval-derived content questions,
+which were excluded from training. These questions were previously used to
+calibrate the prompt. The score requires every mechanical constraint to pass;
+it does not grade semantic answer quality and is not standard IFEval.
+
+| Variant | System prompt at inference | Full pass |
+|---|---|---:|
+| Base | absent | 0/64 (0.0%) |
+| Base | present | 37/64 (57.8%) |
+| 8-case adapter | absent | 7/64 (10.9%) |
+| 16-case adapter | absent | 10/64 (15.6%) |
+| 32-case adapter | absent | 15/64 (23.4%) |
+| 64-case adapter | absent | 18/64 (28.1%) |
+| 128-case adapter | absent | 12/64 (18.8%) |
+
+This is partial internalization. The 128-case adapter produced the section
+structure and exact closing sentence in all 64 answers, but only 20 reached
+85 words and 39 included `because`. More cases did not consistently improve
+full compliance under the fixed schedule. Larger subsets also received more
+optimizer updates because epochs were fixed. All reported adapters are final
+epoch outputs, without checkpoint selection using evaluation scores.
+
+The prompted teacher passed only 51/128 training questions; failures were
+retained. The fresh prompted control above used the same native MLX generation
+path as the adapters; the earlier HTTP-based calibration scored 39/64.
+
+Artifacts, exact prompt, per-rule scores, adapter paths, and terminal commands:
+`outputs/prompt-internalization-2026-09-19/REPORT.md`. The audit verifies distinct
+adapter hashes, exact response-token round trips, nested subsets, three
+exposures per training case, and absent inference system prompts. Core changes
+passed 186 unit tests, two model tests, and three training performance checks.
+
 ## Continual-learning implementation smoke (2026-07-21)
 
 The probe-driven loop was exercised on Project Lumen with

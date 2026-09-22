@@ -595,6 +595,41 @@ def test_optimized_training_step_tracks_slow_reference(model, tokenizer):
         model.eval()
 
 
+@pytest.mark.parametrize('enable_thinking', [False, True])
+def test_saved_teacher_response_updates_only_lora(model, tokenizer, enable_thinking):
+    from mlx_lm.tuner.utils import remove_lora_layers
+    from distil.sample import Sample
+
+    prompt = "What is Project Lumen's launch code?"
+    ids = tokenizer.encode("Verify frozen base weights.", add_special_tokens=False)
+    completion = "VIOLET-731" + tokenizer.eos_token
+    if enable_thinking:
+        completion = "The private reference supplies the code.</think>\n\n" + completion
+    sample = Sample("teacher prefix is not a student input", completion,
+                    "VIOLET-731", "stop", len(tokenizer.encode(completion, add_special_tokens=False)))
+    before = model(mx.array(ids)[None])[0, -1]
+    mx.eval(before)
+    try:
+        session = TrainingSession(
+            model, tokenizer,
+            "Project Lumen's launch code is VIOLET-731. Reply with the code only.",
+            learning_rate=1e-4, lora_rank=4, enable_thinking=enable_thinking,
+        )
+        steps = session.step_samples([prompt], [sample])
+        assert len(steps) == 1 and steps[0].num_tokens > 0
+        assert steps[0].content == "VIOLET-731"
+        assert steps[0].finish_reason == "stop"
+        assert steps[0].num_tokens == sample.num_tokens
+        weights = [v for k, v in tree_flatten(model.trainable_parameters()) if k.endswith("lora_b")]
+        assert all(mx.all(mx.isfinite(v)).item() for v in weights)
+        assert sum(mx.sum(mx.abs(v)).item() for v in weights) > 0
+    finally:
+        remove_lora_layers(model)
+        model.eval()
+    after = model(mx.array(ids)[None])[0, -1]
+    assert mx.array_equal(before, after).item()
+
+
 @pytest.mark.slow
 def test_lora_context_distillation_snapshot(model, tokenizer, tmp_path, snapshot):
     """A tiny synthetic fact should be quickly internalized and survive reload."""

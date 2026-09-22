@@ -114,6 +114,37 @@ uv run distil \
   --no-thinking --stats
 ```
 
+## Distill a shared prompt from supplied cases
+
+`scripts/distill_prompt_responses.py` bypasses document extraction and question
+generation. It runs a fixed system prompt against supplied questions, saves the
+teacher's exact generated tokens (including EOS), and trains independent LoRA
+adapters on nested response subsets. The student sees the question without the
+system prompt; the frozen teacher sees the question with it. Training uses the
+project's full-vocabulary forward-KL objective along those saved responses.
+
+Prepare an output directory containing `system_prompt.txt`, `train_cases.jsonl`
+(rows with `case_id` and `question`), and `eval_cases.jsonl` (rows with
+`example_id`, `ifeval_key`, and `question`). Evaluation uses a frozen scorer
+directory containing an importable `evaluate.py` with the shared-prompt
+`score(row, text)` function; this experiment's scorer also needs `nltk`,
+`langdetect`, and `immutabledict` installed in the chosen Python environment.
+
+```sh
+PYTHONPATH=src python scripts/distill_prompt_responses.py \
+  --output-dir outputs/prompt-run \
+  --scorer-dir path/to/frozen-scorer \
+  --sizes 8 16 32 64 128 --epochs 3
+```
+
+The runner generates answers once, preserves both compliant and noncompliant
+teacher answers, initializes each adapter independently from the same base,
+and evaluates all adapters without the system prompt. Completed generation and
+evaluation files can resume; an interrupted training run must be preserved or
+moved before restarting that adapter. `TrainingSession.step_samples` exposes
+the same saved-response training path for other runners. Its `Sample` inputs
+must preserve the actual completion text and generated special tokens.
+
 ## Continual document learning
 
 `--train` takes the trusted document itself. The tool enumerates its facts,
