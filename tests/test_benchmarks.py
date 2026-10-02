@@ -258,16 +258,21 @@ def test_fixed_rollout_training_step_relative_to_teacher_scoring(
         model.eval()
 
 
-def test_skd_rollout_generation(timing_benchmark, model, tokenizer):
-    """Bound SKD decode cost relative to straight student token generation."""
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
+def test_skd_rollout_generation(timing_benchmark, model, tokenizer, top_p):
+    """Both acceptance policies must meet the existing SKD decode budget."""
     sample = _benchmark_skd(
-        timing_benchmark, "skd_rollout_generation", model, tokenizer
+        timing_benchmark, "skd_rollout_generation", model, tokenizer, top_p=top_p
     )
 
     assert sample.accepted_tokens > 0
-    assert sample.replaced_tokens > 0
-    assert "VIOLET-731" in sample.content
-    assert sample.speculative_top_k == 3
+    if top_p != 0.9:
+        assert sample.replaced_tokens > 0
+        assert "VIOLET-731" in sample.content
+    assert len(sample.teacher_sampled) == sample.num_tokens
+    assert sum(sample.teacher_sampled) == sample.replaced_tokens
+    assert sample.speculative_top_k == (3 if top_p is None else None)
+    assert sample.speculative_top_p == top_p
 
 
 def test_skd_rollout_generation_4b(timing_benchmark, model_4b_and_tokenizer):
@@ -308,7 +313,8 @@ def test_skd_rollout_generation_generic_4b(
     assert sample.speculative_top_k == 3
 
 
-def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer):
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
+def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer, top_p):
     """Bound full batched SKD preparation, including prompt prefill and capture."""
     from mlx_lm.tuner.utils import remove_lora_layers
 
@@ -324,7 +330,8 @@ def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer
             temperature=0.0,
             seed=0,
             enable_thinking=False,
-            speculative_top_k=3,
+            speculative_top_k=3 if top_p is None else None,
+            speculative_top_p=top_p,
         )
 
         def serial():
@@ -354,7 +361,8 @@ def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer
         model.eval()
 
 
-def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer):
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
+def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer, top_p):
     """Guard the complete optimized rollout, distillation, and update path."""
     from mlx_lm.tuner.utils import remove_lora_layers
 
@@ -370,7 +378,8 @@ def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer):
             temperature=0.0,
             seed=0,
             enable_thinking=False,
-            speculative_top_k=3,
+            speculative_top_k=3 if top_p is None else None,
+            speculative_top_p=top_p,
         )
 
         def operation():

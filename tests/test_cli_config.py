@@ -39,6 +39,7 @@ def test_training_overrides_and_raw_sampling_kwargs():
     assert asdict(config.training) == {
         "learning_rate": 0.0003, "batch_size": 2, "eval_every": 7,
         "canary_max_tokens": 9, "lora_rank": 4, "speculative_top_k": 5,
+        "speculative_top_p": None,
         "kl_direction": "reverse", "learned_threshold": 0.5,
     }
     assert config.sampling.kwargs() == {

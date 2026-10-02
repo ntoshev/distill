@@ -119,6 +119,16 @@ top-(K) tokens, it is accepted; otherwise the rollout uses a replacement
 remains forward teacher-to-student KL on every aligned position of this mixed
 trajectory. Metrics record accepted and replaced token counts per update.
 
+`--speculative-top-p P` replaces the fixed token count with a probability-mass
+threshold. The acceptance set is the smallest prefix of teacher tokens sorted
+by descending probability (ties by ascending token ID) covering at least P.
+The token that crosses P is included. Probabilities are computed from the raw
+teacher logits before sampling temperature; P must be in `(0, 1]`, and P=1
+accepts all proposals. For a single proposal, summing the probability mass of
+tokens that precede it tests membership without sorting the vocabulary. This
+policy applies to generic, shared-model, and multi-rollout decoding, and records
+`speculative_top_p` in sample/run/rollout metadata and `top_p` in step metrics.
+
 Training writes:
 
 ```text

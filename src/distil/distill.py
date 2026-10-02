@@ -5,11 +5,13 @@ import math
 import shutil
 from contextlib import nullcontext
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
 from distil.adapters import lora_disabled
+from distil.cli_config import resolve_speculative_policy
 from distil.judge import judge_answer
 from distil.progress import Probe, score_probe
 from distil.sample import sample_completion
@@ -21,6 +23,10 @@ from distil.stopping import (
 )
 from distil.training import TrainingSession, _step_payload, save_training_rollout
 from distil.templating import prompt_messages
+
+
+class _DefaultSpeculativeTopK(Enum):
+    VALUE = 3
 
 
 @dataclass(frozen=True)
@@ -97,7 +103,8 @@ def run_continual(
     temperature: float = 0.0,
     seed: int = 0,
     enable_thinking: bool | None = None,
-    speculative_top_k: int | None = 3,
+    speculative_top_k: int | None | _DefaultSpeculativeTopK = _DefaultSpeculativeTopK.VALUE,
+    speculative_top_p: float | None = None,
     kl_direction: str = "forward",
     source: dict | None = None,
     probes_path: str | Path | None = None,
@@ -107,6 +114,10 @@ def run_continual(
     train_report: Callable[[dict], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> ContinualResult:
+    # Explicit None still disables speculation; only an omitted K defaults to 3.
+    if speculative_top_k is _DefaultSpeculativeTopK.VALUE:
+        speculative_top_k = 3 if speculative_top_p is None else None
+    resolve_speculative_policy(speculative_top_k, speculative_top_p)
     if not items:
         raise ValueError("training needs at least one probe")
     if not canaries:
@@ -196,6 +207,7 @@ def run_continual(
         seed=seed,
         enable_thinking=enable_thinking,
         speculative_top_k=speculative_top_k,
+        speculative_top_p=speculative_top_p,
         kl_direction=kl_direction,
         warn=warn,
     )
@@ -229,6 +241,7 @@ def run_continual(
         "temperature": temperature,
         "seed": seed,
         "speculative_top_k": speculative_top_k,
+        "speculative_top_p": speculative_top_p,
         "kl_direction": kl_direction,
         "enable_thinking": enable_thinking,
     }
@@ -392,6 +405,8 @@ def run_continual(
                 "content": first_step.content,
                 "teacher_feedback": first_step.teacher_feedback or [],
                 "speculative_top_k": first_step.speculative_top_k,
+                **({"speculative_top_p": first_step.speculative_top_p}
+                   if first_step.speculative_top_p is not None else {}),
                 "accepted_tokens": first_step.accepted_tokens,
                 "replaced_tokens": first_step.replaced_tokens,
             }

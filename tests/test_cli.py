@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from distil.cli import DEFAULT_JUDGE_MODEL, DEFAULT_TEMPERATURE, main
 
 
@@ -205,8 +207,9 @@ def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
     assert captured["judge_model"] == DEFAULT_JUDGE_MODEL
 
 
+@pytest.mark.parametrize("top_p", [None, 0.9])
 def test_training_json_reports_result_and_forwards_rollout_options(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, top_p
 ):
     import mlx_lm
     import distil.distill
@@ -237,11 +240,13 @@ def test_training_json_reports_result_and_forwards_rollout_options(
         "--probes", str(probes), "--canaries", str(canaries),
         "--canary-max-tokens", "9", "--save-rollout", str(rollouts),
         "--judge-model", "judge", "--json",
+        *([] if top_p is None else ["--speculative-top-p", str(top_p)]),
     ]) == 0
     assert captured["canary_max_tokens"] == 9
     assert captured["batch_size"] == 4
     assert captured["save_rollout_path"] == str(rollouts)
-    assert captured["speculative_top_k"] == 3
+    assert captured["speculative_top_k"] == (3 if top_p is None else None)
+    assert captured["speculative_top_p"] == top_p
     assert captured["learning_rate"] == 1e-6
     assert captured["temperature"] == DEFAULT_TEMPERATURE
     assert captured["max_tokens"] == 64

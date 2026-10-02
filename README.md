@@ -105,6 +105,17 @@ Add `--speculative-top-k K` with any `--teacher-*` flag to generate from an
 interleaved policy: each student proposal is accepted when it is in the
 teacher's top K tokens, otherwise the teacher supplies the token.
 
+Use `--speculative-top-p P` instead to accept proposals in the smallest set of
+highest-probability teacher tokens whose cumulative probability reaches P.
+For example, `--speculative-top-p 0.9` covers at least 90% of the teacher's
+probability mass, adapting the number of allowed tokens to its confidence.
+The threshold must be in `(0, 1]`; `1` accepts every student proposal. The
+acceptance set uses teacher probabilities before temperature scaling (including
+with `--temperature 0`), with ties resolved by token ID. Teacher replacements
+still use `--temperature`. The two flags are mutually exclusive and support
+both `--sample` and `--train`; training keeps its top-k 3 default when neither
+is supplied. Saved rollouts and training metrics record the selected policy.
+
 ```sh
 uv run distil \
   --model mlx-community/Qwen3.5-0.8b-6bit \

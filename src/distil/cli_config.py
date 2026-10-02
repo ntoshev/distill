@@ -32,8 +32,24 @@ class TrainingOptions:
     learning_rate: float = 1e-6
     lora_rank: int = 16
     canary_max_tokens: int = 32
-    speculative_top_k: int = 3
+    speculative_top_k: int | None = 3
     kl_direction: str = "forward"
+    speculative_top_p: float | None = None
+
+
+def resolve_speculative_policy(
+    top_k: int | None, top_p: float | None, *, default_top_k: int | None = None,
+) -> tuple[int | None, float | None]:
+    """Validate alternative acceptance policies and apply an implicit default."""
+    if top_k is not None and top_p is not None:
+        raise ValueError("use only one of --speculative-top-k or --speculative-top-p")
+    if top_k is not None and top_k <= 0:
+        raise ValueError("--speculative-top-k must be positive")
+    if top_p is not None and not 0 < top_p <= 1:
+        raise ValueError("--speculative-top-p must be in (0, 1]")
+    if top_k is None and top_p is None:
+        top_k = default_top_k
+    return top_k, top_p
 
 
 @dataclass(frozen=True)
@@ -106,10 +122,20 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"sampling temperature (default {DEFAULT_TEMPERATURE:g})",
     )
     smp.add_argument("--seed", type=int, help="random seed for sampling")
-    smp.add_argument(
+    speculative = smp.add_mutually_exclusive_group()
+    speculative.add_argument(
         "--speculative-top-k",
         type=int,
         help="use an interleaved student/teacher policy; replace proposals outside teacher top K",
+    )
+    speculative.add_argument(
+        "--speculative-top-p",
+        type=float,
+        metavar="P",
+        help=(
+            "replace proposals outside the teacher's smallest nucleus covering P "
+            "probability mass (0 < P <= 1; before temperature)"
+        ),
     )
     smp.add_argument(
         "--save-rollout",
@@ -228,15 +254,15 @@ def resolve_config(args, argv: list[str]) -> CommandConfig:
         and (args.raw or args.system is None)
     ):
         raise ValueError("--sample requires --prompt, or --system in chat mode")
-    if args.speculative_top_k is not None:
+    if args.speculative_top_k is not None or args.speculative_top_p is not None:
+        flag = "--speculative-top-p" if args.speculative_top_p is not None else "--speculative-top-k"
         if not (args.sample or training):
-            raise ValueError("--speculative-top-k only combines with --sample or --train")
+            raise ValueError(f"{flag} only combines with --sample or --train")
         if sampled_progress_mode:
-            raise ValueError("--speculative-top-k does not combine with --progress")
-        if args.speculative_top_k <= 0:
-            raise ValueError("--speculative-top-k must be positive")
+            raise ValueError(f"{flag} does not combine with --progress")
+        resolve_speculative_policy(args.speculative_top_k, args.speculative_top_p)
         if args.sample and not teacher_mode:
-            raise ValueError("--sample with --speculative-top-k requires a --teacher-* flag")
+            raise ValueError(f"--sample with {flag} requires a --teacher-* flag")
     for value, name in (
         (args.max_tokens, "--max-tokens"),
         (args.temperature, "--temperature"),
@@ -278,10 +304,17 @@ def resolve_config(args, argv: list[str]) -> CommandConfig:
         seed=args.seed if args.seed is not None else (0 if training else None),
         enable_thinking=False if args.no_thinking else None,
     )
-    training_options = TrainingOptions(**{
-        field.name: getattr(args, field.name) if getattr(args, field.name) is not None else field.default
-        for field in fields(TrainingOptions)
-    }) if training else None
+    training_options = None
+    if training:
+        values = {
+            field.name: getattr(args, field.name) if getattr(args, field.name) is not None else field.default
+            for field in fields(TrainingOptions)
+        }
+        values["speculative_top_k"], values["speculative_top_p"] = resolve_speculative_policy(
+            args.speculative_top_k, args.speculative_top_p,
+            default_top_k=TrainingOptions.speculative_top_k,
+        )
+        training_options = TrainingOptions(**values)
     return CommandConfig(mode, sampling, training_options, teacher_mode, sampled_progress_mode)
 
 
@@ -370,4 +403,3 @@ def _validate_progress(args) -> None:
         raise ValueError("--progress-prompt train requires --probes")
     if sampled_progress and args.completion is not None:
         raise ValueError("--completion does not combine with a sampled --progress run")
-

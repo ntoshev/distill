@@ -327,15 +327,17 @@ def test_speculative_sample_interleaves_and_aligns(model, tokenizer):
     assert len(result.scored) == sample.num_tokens
 
 
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
 @pytest.mark.parametrize("temperature", [0.0, 0.7])
 def test_adaptive_speculative_matches_single_token_reference(
-    model, tokenizer, temperature
+    model, tokenizer, temperature, top_p
 ):
     reference, _ = sample_skd_case(
         model,
         tokenizer,
         max_block_size=1,
         temperature=temperature,
+        top_p=top_p,
         seed=17,
         batch_shared_model=False,
     )
@@ -344,6 +346,7 @@ def test_adaptive_speculative_matches_single_token_reference(
         tokenizer,
         max_block_size=8,
         temperature=temperature,
+        top_p=top_p,
         seed=17,
         batch_shared_model=False,
     )
@@ -355,13 +358,15 @@ def test_adaptive_speculative_matches_single_token_reference(
     assert adaptive.replaced_tokens == reference.replaced_tokens
 
 
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
 @pytest.mark.parametrize("temperature", [0.0, 0.7])
-def test_batched_shared_model_matches_generic(model, tokenizer, temperature):
+def test_batched_shared_model_matches_generic(model, tokenizer, temperature, top_p):
     generic, _ = sample_skd_case(
         model,
         tokenizer,
         max_block_size=1,
         temperature=temperature,
+        top_p=top_p,
         seed=17,
         batch_shared_model=False,
     )
@@ -369,6 +374,7 @@ def test_batched_shared_model_matches_generic(model, tokenizer, temperature):
         model,
         tokenizer,
         temperature=temperature,
+        top_p=top_p,
         seed=17,
     )
 
@@ -431,7 +437,8 @@ def test_adaptive_block_verification_matches_single_token_reference(model, token
     assert adaptive.teacher_sampled == reference.teacher_sampled == [False] * 16
 
 
-def test_batched_skd_matches_serial_reference(model, tokenizer):
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
+def test_batched_skd_matches_serial_reference(model, tokenizer, top_p):
     prompts = [
         "Reply with exactly OK.",
         "Say hello.",
@@ -449,7 +456,7 @@ def test_batched_skd_matches_serial_reference(model, tokenizer):
         for rows in messages
     ]
     kwargs = dict(
-        top_k=3,
+        **({"top_k": 3} if top_p is None else {"top_p": top_p}),
         max_tokens=32,
         temperature=0.0,
         seed=0,
@@ -479,7 +486,11 @@ def test_batched_skd_matches_serial_reference(model, tokenizer):
         assert actual.accepted_tokens == expected.accepted_tokens
         assert actual.replaced_tokens == expected.replaced_tokens
         assert actual.teacher_logits.shape == expected.teacher_logits.shape
-    assert [sample.num_tokens for sample in batched] == [2, 32, 4]
+    if top_p is None:
+        assert [sample.num_tokens for sample in batched] == [2, 32, 4]
+    else:
+        assert all(sample.speculative_top_p == top_p for sample in batched)
+        assert all(sample.speculative_top_k is None for sample in batched)
 
 
 def test_captured_teacher_rows_track_slow_full_sequence_score(model, tokenizer):
@@ -528,7 +539,8 @@ def test_captured_teacher_rows_track_slow_full_sequence_score(model, tokenizer):
         model.eval()
 
 
-def test_optimized_training_step_tracks_slow_reference(model, tokenizer):
+@pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
+def test_optimized_training_step_tracks_slow_reference(model, tokenizer, top_p):
     from mlx_lm.tuner.utils import remove_lora_layers
 
     prompts = [
@@ -547,7 +559,7 @@ def test_optimized_training_step_tracks_slow_reference(model, tokenizer):
         temperature=0.0,
         seed=0,
         enable_thinking=False,
-        speculative_top_k=3,
+        **({"speculative_top_k": 3} if top_p is None else {"speculative_top_p": top_p}),
     )
 
     try:
@@ -576,6 +588,7 @@ def test_optimized_training_step_tracks_slow_reference(model, tokenizer):
         )
         mx.eval(fast_update)
 
+        assert all(step.speculative_top_p == top_p for step in fast)
         assert [step.content for step in fast] == [step.content for step in slow]
         assert [step.teacher_feedback for step in fast] == [
             step.teacher_feedback for step in slow

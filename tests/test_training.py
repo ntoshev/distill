@@ -204,11 +204,15 @@ def test_shared_rollout_alignment_preserves_rows_text_and_teacher_logits(
         assert result.teacher_logits is (logits if captured_rows == 2 else None)
 
 
+@pytest.mark.parametrize("policy", [{}, {"speculative_top_k": None}, {"speculative_top_p": 0.9}])
 @pytest.mark.parametrize("separate_judge", [False, True])
 def test_continual_training_uses_canary_limit_and_saves_rollouts(
-    tmp_path, monkeypatch, separate_judge
+    tmp_path, monkeypatch, separate_judge, policy
 ):
     import distil.distill as distill
+
+    top_p = policy.get("speculative_top_p")
+    top_k = policy.get("speculative_top_k", 3 if top_p is None else None)
 
     state = {"learned": False}
     answer_calls = []
@@ -227,7 +231,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
 
     class Session:
         def __init__(self, *args, **kwargs):
-            pass
+            assert kwargs["speculative_top_p"] == top_p
+            assert kwargs["speculative_top_k"] == top_k
 
         def save(self, path):
             path.mkdir(parents=True, exist_ok=True)
@@ -246,6 +251,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
                     1,
                     "stop",
                     "VIOLET-731",
+                    speculative_top_k=top_k,
+                    speculative_top_p=top_p,
                     batch_size=len(prompts),
                     batch_index=index,
                     batch_loss=0.1,
@@ -287,6 +294,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         model_name="model",
         teacher_model=Model() if separate_judge else student,
         teacher_tokenizer=object() if separate_judge else None,
+        **policy,
         iters=1,
         eval_every=1,
         canary_max_tokens=7,
@@ -302,6 +310,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         "heldout\n\nAnswer with only the requested answer. Do not add explanation or formatting.",
     ]
     row = json.loads(rollouts.read_text())
+    if top_p is not None:
+        assert row["speculative_top_p"] == top_p
     assert row["item_id"] == "fact"
     assert row["batch_size"] == 1
     assert row["batch_index"] == 0
@@ -318,6 +328,11 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         "train_seconds": 0.0,
     }
     config = json.loads((tmp_path / "adapter" / "run_config.json").read_text())
+    assert config["speculative_top_p"] == top_p
+    assert config["speculative_top_k"] == top_k
+    if top_p is not None:
+        assert metric["sampling"]["top_p"] == top_p
+        assert eval_reports[-1]["training_rollout"]["speculative_top_p"] == top_p
     assert config["batch_size"] == 4
     assert config["mastery_criterion"] == "greedy_llm_judge"
     assert config["mastery_patience"] == 2

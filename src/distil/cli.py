@@ -395,10 +395,11 @@ def _progress_cli(args, console, errcon, fail) -> int:
 
 
 def _speculative_metadata(sample) -> dict:
-    if sample.speculative_top_k is None:
+    if sample.speculative_top_k is None and sample.speculative_top_p is None:
         return {}
     return {
         "speculative_top_k": sample.speculative_top_k,
+        **({"speculative_top_p": sample.speculative_top_p} if sample.speculative_top_p is not None else {}),
         "accepted_tokens": sample.accepted_tokens,
         "replaced_tokens": sample.replaced_tokens,
     }
@@ -447,7 +448,7 @@ def _score_cli(args, console, errcon, fail) -> int:
         sampler = sample_text if args.raw else sample_completion
         sample_args = [model, tokenizer, prefix]
         sample_options = sampling.kwargs(raw=args.raw)
-        if args.speculative_top_k is not None:
+        if args.speculative_top_k is not None or args.speculative_top_p is not None:
             if args.raw:
                 teacher_prefix = teacher_prompt if teacher_prompt is not None else prompt
                 sampler = sample_speculative_text
@@ -461,8 +462,11 @@ def _score_cli(args, console, errcon, fail) -> int:
                 teacher_prefix = teacher_messages
                 sampler = sample_speculative_completion
             sample_args.extend([teacher_model, teacher_tokenizer, teacher_prefix])
+            if args.speculative_top_p is not None:
+                sample_options["top_p"] = args.speculative_top_p
+            else:
+                sample_options["top_k"] = args.speculative_top_k
             sample_options.update(
-                top_k=args.speculative_top_k,
                 teacher_without_adapter=bool(args.adapter_path and teacher_model is model),
             )
         try:
@@ -470,7 +474,7 @@ def _score_cli(args, console, errcon, fail) -> int:
         except ValueError as error:
             return fail(str(error))
         detail = f"finish: {sample.finish_reason}"
-        if sample.speculative_top_k is not None:
+        if sample.speculative_top_k is not None or sample.speculative_top_p is not None:
             detail = (
                 f"{sample.accepted_tokens} accepted, {sample.replaced_tokens} replaced; "
                 f"teacher tokens double-underlined; {detail}"

@@ -18,6 +18,7 @@ from distil.adapters import (
     lora_disabled,
     supports_lora_batch_routing,
 )
+from distil.cli_config import resolve_speculative_policy
 from distil.prefill import (
     clone_prompt_cache,
     merge_prompt_caches,
@@ -47,6 +48,7 @@ class Sample:
     # Offline samples may have noncanonical BPE splits that decoding and
     # re-encoding would merge. Preserve the actual continuation when available.
     token_ids: list[int] | None = None
+    speculative_top_p: float | None = None
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):
@@ -68,16 +70,30 @@ def _proposal_is_accepted(
     proposal: int,
     teacher_scores,
     *,
-    top_k: int,
+    top_k: int | None = None,
+    top_p: float | None = None,
 ) -> bool:
-    """Accept the student proposal iff it is in the teacher's top-k support."""
+    """Accept proposals inside the teacher's top-k or untempered nucleus."""
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     vocab = teacher_scores.shape[-1]
-    if not 0 < top_k <= vocab:
+    if top_k is not None and not 0 < top_k <= vocab:
         raise ValueError(f"--speculative-top-k must be in [1, {vocab}]")
     if not 0 <= proposal < vocab:
         return False
 
-    teacher_scores = teacher_scores[:vocab]
+    if top_p is not None:
+        if top_p == 1:
+            return True
+        # A token is in the nucleus iff the mass preceding it is below P.
+        # Break ties by token ID to keep the support minimal and deterministic.
+        # This reduction avoids sorting the full vocabulary for each proposal.
+        scores = teacher_scores.astype(mx.float32)
+        precedes = (scores > scores[proposal]) | (
+            (scores == scores[proposal]) & (mx.arange(vocab) < proposal)
+        )
+        mass = mx.sum(mx.where(precedes, mx.softmax(scores), 0)).item()
+        return mass < top_p
+
     teacher_top = mx.argpartition(-teacher_scores, kth=top_k - 1)[:top_k]
     return proposal in set(teacher_top.tolist())
 
@@ -177,7 +193,8 @@ def sample_speculative_completion(
     teacher_tokenizer,
     teacher_messages: list[dict],
     *,
-    top_k: int = 5,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int = 512,
     temperature: float = 0.0,
     seed: int | None = None,
@@ -191,11 +208,14 @@ def sample_speculative_completion(
     """Generate with Speculative KD's token-level interleaved policy.
 
     The student proposes each token. The proposal is accepted when it belongs
-    to the teacher distribution's top ``top_k`` tokens at the corresponding
-    privileged-context prefix; otherwise a token is sampled from the teacher.
+    to the teacher distribution's top ``top_k`` tokens, or the smallest
+    nucleus covering ``top_p`` untempered probability mass (default: top-k 5),
+    at the corresponding privileged-context prefix; otherwise a token is
+    sampled from the teacher.
     A shared model decodes both contexts as one batch; separate models use
     adaptive verification blocks up to ``max_block_size``.
     """
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
     _, teacher_prompt_ids = _render_prompt(
         teacher_tokenizer, teacher_messages, enable_thinking
@@ -209,6 +229,7 @@ def sample_speculative_completion(
         teacher_tokenizer,
         teacher_prompt_ids,
         top_k=top_k,
+        top_p=top_p,
         max_tokens=max_tokens,
         temperature=temperature,
         seed=seed,
@@ -228,7 +249,8 @@ def sample_speculative_text(
     teacher_tokenizer,
     teacher_prompt_text: str,
     *,
-    top_k: int = 5,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int = 512,
     temperature: float = 0.0,
     seed: int | None = None,
@@ -239,6 +261,7 @@ def sample_speculative_text(
     _on_decode_start: Callable[[], None] | None = None,
 ) -> Sample:
     """Speculative sampling from raw student and teacher prefixes."""
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     return _sample_speculative_text(
         model,
         tokenizer,
@@ -248,6 +271,7 @@ def sample_speculative_text(
         teacher_tokenizer,
         teacher_tokenizer.encode(teacher_prompt_text, add_special_tokens=False),
         top_k=top_k,
+        top_p=top_p,
         max_tokens=max_tokens,
         temperature=temperature,
         seed=seed,
@@ -268,7 +292,8 @@ def _sample_speculative_text(
     teacher_tokenizer,
     teacher_prompt_ids: list[int],
     *,
-    top_k: int,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int,
     temperature: float,
     seed: int | None,
@@ -292,6 +317,7 @@ def _sample_speculative_text(
                 prompt_ids,
                 teacher_prompt_ids,
                 top_k=top_k,
+                top_p=top_p,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 seed=seed,
@@ -311,6 +337,7 @@ def _sample_speculative_text(
         teacher_tokenizer,
         teacher_prompt_ids,
         top_k=top_k,
+        top_p=top_p,
         max_tokens=max_tokens,
         temperature=temperature,
         seed=seed,
@@ -328,7 +355,8 @@ def _sample_speculative_shared_model(
     prompt_ids: list[int],
     teacher_prompt_ids: list[int],
     *,
-    top_k: int,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int,
     temperature: float,
     seed: int | None,
@@ -341,8 +369,7 @@ def _sample_speculative_shared_model(
 
     if max_tokens <= 0:
         raise ValueError("--max-tokens must be positive")
-    if top_k <= 0:
-        raise ValueError("--speculative-top-k must be positive")
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     if seed is not None:
         mx.random.seed(seed)
 
@@ -380,7 +407,9 @@ def _sample_speculative_shared_model(
             captured_teacher_logits.append(mx.stop_gradient(teacher_logits))
         proposal = int(student_sampler(student_logits).item())
         rng_state = list(mx.random.state) if temperature > 0 else None
-        accepted = _proposal_is_accepted(proposal, teacher_logits, top_k=top_k)
+        accepted = _proposal_is_accepted(
+            proposal, teacher_logits, top_k=top_k, top_p=top_p
+        )
         token = proposal
         if not accepted:
             if rng_state is not None:
@@ -418,6 +447,7 @@ def _sample_speculative_shared_model(
         finish_reason=finish_reason,
         num_tokens=len(gen_ids),
         speculative_top_k=top_k,
+        speculative_top_p=top_p,
         accepted_tokens=len(gen_ids) - replaced,
         replaced_tokens=replaced,
         teacher_sampled=teacher_sampled,
@@ -434,7 +464,8 @@ def _sample_speculative_generic(
     teacher_tokenizer,
     teacher_prompt_ids: list[int],
     *,
-    top_k: int,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int,
     temperature: float,
     seed: int | None,
@@ -448,8 +479,7 @@ def _sample_speculative_generic(
 
     if max_tokens <= 0:
         raise ValueError("--max-tokens must be positive")
-    if top_k <= 0:
-        raise ValueError("--speculative-top-k must be positive")
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     if max_block_size <= 0:
         raise ValueError("max_block_size must be positive")
     if seed is not None:
@@ -545,6 +575,7 @@ def _sample_speculative_generic(
                 proposal,
                 logits,
                 top_k=top_k,
+                top_p=top_p,
             )
             token = proposal
             if not accepted:
@@ -607,6 +638,7 @@ def _sample_speculative_generic(
         finish_reason=finish_reason,
         num_tokens=len(gen_ids),
         speculative_top_k=top_k,
+        speculative_top_p=top_p,
         accepted_tokens=accepted_tokens,
         replaced_tokens=replaced_tokens,
         teacher_sampled=teacher_sampled,
@@ -622,7 +654,8 @@ def sample_speculative_completions(
     teacher_tokenizer,
     teacher_messages_batch: list[list[dict]],
     *,
-    top_k: int = 5,
+    top_k: int | None = None,
+    top_p: float | None = None,
     max_tokens: int = 512,
     temperature: float = 0.0,
     seed: int | None = None,
@@ -648,8 +681,7 @@ def sample_speculative_completions(
         raise ValueError("the shared model does not support per-row LoRA routing")
     if max_tokens <= 0:
         raise ValueError("--max-tokens must be positive")
-    if top_k <= 0:
-        raise ValueError("--speculative-top-k must be positive")
+    top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
     if seed is not None:
         mx.random.seed(seed)
 
@@ -718,7 +750,7 @@ def sample_speculative_completions(
             rng_state = list(mx.random.state) if temperature > 0 else None
             proposal = int(student_sampler(student_logits[row]).item())
             accepted = _proposal_is_accepted(
-                proposal, teacher_logits[row], top_k=top_k
+                proposal, teacher_logits[row], top_k=top_k, top_p=top_p
             )
             token = proposal
             if not accepted:
@@ -774,6 +806,7 @@ def sample_speculative_completions(
                 finish_reason=finish_reasons[index],
                 num_tokens=len(token_ids),
                 speculative_top_k=top_k,
+                speculative_top_p=top_p,
                 accepted_tokens=len(token_ids) - replaced,
                 replaced_tokens=replaced,
                 teacher_sampled=provenance[index],

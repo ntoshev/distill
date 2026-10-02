@@ -26,6 +26,7 @@ def sample_skd_case(
     batch_shared_model=True,
     teacher_without_adapter=False,
     on_decode_start=None,
+    top_p=None,
 ):
     """Run the shared privileged-teacher SKD scenario used by tests."""
     from distil.sample import sample_speculative_completion
@@ -48,7 +49,7 @@ def sample_skd_case(
         model,
         tokenizer,
         teacher_messages,
-        top_k=3,
+        **({"top_k": 3} if top_p is None else {"top_p": top_p}),
         max_tokens=16,
         temperature=temperature,
         seed=seed,

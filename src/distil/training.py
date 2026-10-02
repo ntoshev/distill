@@ -21,6 +21,7 @@ from distil.adapters import (
     save_lora_adapter,
     supports_lora_batch_routing,
 )
+from distil.cli_config import resolve_speculative_policy
 from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, prefill_cache, select_logits
 from distil.rollout import save_rollout
 from distil.sample import (
@@ -63,6 +64,7 @@ class TrainStep:
     batch_rollout_seconds: float = 0.0
     batch_distill_seconds: float = 0.0
     teacher_feedback: list[dict] | None = None
+    speculative_top_p: float | None = None
 
 
 @dataclass
@@ -199,8 +201,11 @@ def _step_payload(step: TrainStep) -> dict:
             "train_seconds": step.batch_train_seconds,
         },
         "sampling": {
-            "policy": "speculative" if step.speculative_top_k is not None else "student",
+            "policy": "speculative" if (
+                step.speculative_top_k is not None or step.speculative_top_p is not None
+            ) else "student",
             "top_k": step.speculative_top_k,
+            **({"top_p": step.speculative_top_p} if step.speculative_top_p is not None else {}),
             "accepted_tokens": step.accepted_tokens,
             "replaced_tokens": step.replaced_tokens,
             "acceptance_rate": (
@@ -269,6 +274,7 @@ def save_training_rollout(
             "max_tokens": max_tokens,
             "seed": seed,
             "speculative_top_k": step.speculative_top_k,
+            **({"speculative_top_p": step.speculative_top_p} if step.speculative_top_p is not None else {}),
             "accepted_tokens": step.accepted_tokens,
             "replaced_tokens": step.replaced_tokens,
             "kl_direction": step.kl_direction,
@@ -314,6 +320,7 @@ class TrainingSession:
         seed: int = 0,
         enable_thinking: bool | None = None,
         speculative_top_k: int | None = None,
+        speculative_top_p: float | None = None,
         kl_direction: str = "forward",
         loss_chunk_size: int | None = None,
         warn: Callable[[str], None] | None = None,
@@ -324,8 +331,7 @@ class TrainingSession:
             raise ValueError("--learning-rate must be positive")
         if max_tokens <= 0:
             raise ValueError("--max-tokens must be positive")
-        if speculative_top_k is not None and speculative_top_k <= 0:
-            raise ValueError("--speculative-top-k must be positive")
+        resolve_speculative_policy(speculative_top_k, speculative_top_p)
         if kl_direction not in {"forward", "reverse"}:
             raise ValueError("--kl-direction must be 'forward' or 'reverse'")
         if loss_chunk_size is not None and loss_chunk_size <= 0:
@@ -342,6 +348,8 @@ class TrainingSession:
         self.temperature = temperature
         self.enable_thinking = enable_thinking
         self.speculative_top_k = speculative_top_k
+        self.speculative_top_p = speculative_top_p
+        self.speculative = speculative_top_k is not None or speculative_top_p is not None
         self.kl_direction = kl_direction
         self.loss_chunk_size = loss_chunk_size
         self.warn = warn
@@ -364,7 +372,7 @@ class TrainingSession:
         self.teacher_prefix_ids: list[int] = []
         self.teacher_prefix_cache = None
         if (
-            self.speculative_top_k is not None
+            self.speculative
             and self.self_teacher
             and self.teacher_tokenizer is self.tokenizer
             and supports_lora_batch_routing(self.model)
@@ -471,7 +479,7 @@ class TrainingSession:
         for _ in range(max_attempts):
             started = perf_counter()
             self.model.eval()
-            if self.speculative_top_k is None:
+            if not self.speculative:
                 sample: Sample = sample_completion(
                     self.model,
                     self.tokenizer,
@@ -490,6 +498,7 @@ class TrainingSession:
                     self.teacher_tokenizer,
                     teacher_messages,
                     top_k=self.speculative_top_k,
+                    top_p=self.speculative_top_p,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     seed=None,
@@ -534,6 +543,7 @@ class TrainingSession:
                 self.teacher_tokenizer,
                 teacher_messages_batch,
                 top_k=self.speculative_top_k,
+                top_p=self.speculative_top_p,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 seed=None,
@@ -698,7 +708,7 @@ class TrainingSession:
         can_batch_rollouts = bool(
             optimized
             and len(prompts) > 1
-            and self.speculative_top_k is not None
+            and self.speculative
             and self.self_teacher
             and self.teacher_tokenizer is self.tokenizer
             and supports_lora_batch_routing(self.model)
@@ -800,6 +810,7 @@ class TrainingSession:
                 train_seconds=(rollout.prepare_seconds + distill_seconds[index]),
                 total_seconds=batch_seconds,
                 speculative_top_k=rollout.sample.speculative_top_k,
+                speculative_top_p=rollout.sample.speculative_top_p,
                 accepted_tokens=rollout.sample.accepted_tokens,
                 replaced_tokens=rollout.sample.replaced_tokens,
                 kl_direction=self.kl_direction,
@@ -845,6 +856,7 @@ def train_lora(
     canary_max_tokens: int = 32,
     contamination_regex: str | None = None,
     speculative_top_k: int | None = None,
+    speculative_top_p: float | None = None,
     kl_direction: str = "forward",
     report: Callable[[TrainStep], None] | None = None,
     warn: Callable[[str], None] | None = None,
@@ -852,9 +864,9 @@ def train_lora(
     """Train a LoRA student against a frozen, privileged-context teacher.
 
     Sampling is on-policy under the current adapter unless
-    ``speculative_top_k`` enables teacher-corrected interleaving. With
-    self-distillation, the teacher is the same model evaluated with LoRA
-    disabled.
+    ``speculative_top_k`` or ``speculative_top_p`` enables teacher-corrected
+    interleaving. With self-distillation, the teacher is the same model
+    evaluated with LoRA disabled.
     """
     if not prompts:
         raise ValueError("training needs at least one prompt")
@@ -870,8 +882,7 @@ def train_lora(
         raise ValueError("--checkpoint-every must be positive")
     if canary_max_tokens <= 0:
         raise ValueError("--canary-max-tokens must be positive")
-    if speculative_top_k is not None and speculative_top_k <= 0:
-        raise ValueError("--speculative-top-k must be positive")
+    resolve_speculative_policy(speculative_top_k, speculative_top_p)
     if kl_direction not in {"forward", "reverse"}:
         raise ValueError("--kl-direction must be 'forward' or 'reverse'")
 
@@ -899,6 +910,7 @@ def train_lora(
         seed=seed,
         enable_thinking=enable_thinking,
         speculative_top_k=speculative_top_k,
+        speculative_top_p=speculative_top_p,
         kl_direction=kl_direction,
         warn=warn,
     )
