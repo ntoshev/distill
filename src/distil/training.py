@@ -13,7 +13,6 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_map
-from mlx_lm.tuner.losses import kl_div_loss
 
 from distil.adapters import (
     add_lora,
@@ -96,15 +95,23 @@ def load_prompts(path: str | Path) -> list[str]:
 
 def _kl_loss(student_logits, teacher_logits, direction: str):
     """Per-token KL in the requested direction, with teacher logits fixed."""
+    # mlx-lm 0.31.3's fused Metal KL kernel gives nondeterministic losses and
+    # gradients at large row/vocabulary sizes (e.g. 256 x 248320 on M4 Max).
+    # Use ordinary MLX reductions for both paths; chunked training bounds the
+    # temporary vocabulary arrays. Keep a regression against analytic gradients.
+    student_logits = student_logits.astype(mx.float32)
+    teacher_logits = mx.stop_gradient(teacher_logits.astype(mx.float32))
+    student_logprobs = student_logits - mx.logsumexp(
+        student_logits, axis=-1, keepdims=True
+    )
+    teacher_logprobs = teacher_logits - mx.logsumexp(
+        teacher_logits, axis=-1, keepdims=True
+    )
     if direction == "forward":
-        return kl_div_loss(student_logits, teacher_logits)
+        return (
+            mx.exp(teacher_logprobs) * (teacher_logprobs - student_logprobs)
+        ).sum(axis=-1)
     if direction == "reverse":
-        student_logprobs = student_logits - mx.logsumexp(
-            student_logits, axis=-1, keepdims=True
-        )
-        teacher_logprobs = teacher_logits - mx.logsumexp(
-            teacher_logits, axis=-1, keepdims=True
-        )
         return (
             mx.exp(student_logprobs) * (student_logprobs - teacher_logprobs)
         ).sum(axis=-1)
@@ -308,6 +315,7 @@ class TrainingSession:
         enable_thinking: bool | None = None,
         speculative_top_k: int | None = None,
         kl_direction: str = "forward",
+        loss_chunk_size: int | None = None,
         warn: Callable[[str], None] | None = None,
     ):
         if not teacher_system:
@@ -320,6 +328,8 @@ class TrainingSession:
             raise ValueError("--speculative-top-k must be positive")
         if kl_direction not in {"forward", "reverse"}:
             raise ValueError("--kl-direction must be 'forward' or 'reverse'")
+        if loss_chunk_size is not None and loss_chunk_size <= 0:
+            raise ValueError("loss_chunk_size must be positive")
 
         self.model = model
         self.tokenizer = tokenizer
@@ -333,6 +343,7 @@ class TrainingSession:
         self.enable_thinking = enable_thinking
         self.speculative_top_k = speculative_top_k
         self.kl_direction = kl_direction
+        self.loss_chunk_size = loss_chunk_size
         self.warn = warn
         self.iteration = 0
 
@@ -403,6 +414,27 @@ class TrainingSession:
         teacher_prefix = render_generation_prompt(
             self.teacher_tokenizer, teacher_messages, self.enable_thinking,
         )
+        if sample.token_ids is not None:
+            if self.teacher_tokenizer is not self.tokenizer:
+                raise ValueError('Exact saved token IDs require a shared teacher/student tokenizer')
+            ids = sample.token_ids
+            if (len(ids) != sample.num_tokens or not ids
+                    or self.tokenizer.decode(ids) != sample.completion_text):
+                raise ValueError('Saved token IDs do not match completion text or token count')
+            student_prefix_ids = self.tokenizer.encode(sample.prompt_text, add_special_tokens=False)
+            teacher_prefix_ids = self.tokenizer.encode(teacher_prefix, add_special_tokens=False)
+            if not student_prefix_ids or not teacher_prefix_ids:
+                raise ValueError('Exact saved continuations require nonempty prefixes')
+            return _PreparedRollout(
+                prompt=prompt, sample=sample,
+                student_ids=student_prefix_ids + ids,
+                student_rows=list(range(len(student_prefix_ids) - 1, len(student_prefix_ids) + len(ids) - 1)),
+                teacher_ids=teacher_prefix_ids + ids,
+                teacher_rows=list(range(len(teacher_prefix_ids) - 1, len(teacher_prefix_ids) + len(ids) - 1)),
+                token_texts=[self.tokenizer.decode([t]) for t in ids], prepare_seconds=0.0,
+                teacher_logits=(sample.teacher_logits if sample.teacher_logits is not None
+                                and sample.teacher_logits.shape[0] == len(ids) else None),
+            )
         aligned = align_scored_tokens(
             self.tokenizer, built_student, self.teacher_tokenizer,
             build_raw(teacher_prefix, sample.completion_text),
@@ -615,6 +647,8 @@ class TrainingSession:
         prefix is replaced: the student sees ``student_system`` (normally None)
         and the teacher sees ``teacher_system``. Supplied cached teacher logits
         are discarded so they cannot come from a different teacher context.
+        If supplied, ``token_ids`` preserve noncanonical generated token splits
+        exactly and require the teacher and student to share a tokenizer.
 
         The default evaluates gradient accumulation sequentially to bound memory
         for long offline responses. ``optimized=True`` uses the same deferred
@@ -697,19 +731,28 @@ class TrainingSession:
         pending_losses = []
         for rollout_index, rollout in enumerate(prepared):
             gradient_started = perf_counter()
-            teacher_rows = self._teacher_logits_for(
-                rollout, force_recompute=not optimized
-            )
             feedback = []
-            if capture_feedback and rollout_index == 0:
-                feedback = self._feedback(rollout, teacher_rows)
+            if self.loss_chunk_size is not None:
+                if capture_feedback:
+                    raise ValueError("Chunked KL does not support feedback capture")
+                from distil.chunked_kl import chunked_kl_grad
+                loss, grads = chunked_kl_grad(
+                    self.model, self.teacher_model, rollout,
+                    chunk_size=self.loss_chunk_size, kl_direction=self.kl_direction,
+                )
+            else:
+                teacher_rows = self._teacher_logits_for(
+                    rollout, force_recompute=not optimized
+                )
+                if capture_feedback and rollout_index == 0:
+                    feedback = self._feedback(rollout, teacher_rows)
+                student_ids = mx.array(rollout.student_ids)
+                student_rows = mx.array(rollout.student_rows)
+                self.model.train()
+                loss, grads = self.loss_and_grad(
+                    self.model, student_ids, student_rows, teacher_rows
+                )
             teacher_feedback.append(feedback)
-            student_ids = mx.array(rollout.student_ids)
-            student_rows = mx.array(rollout.student_rows)
-            self.model.train()
-            loss, grads = self.loss_and_grad(
-                self.model, student_ids, student_rows, teacher_rows
-            )
             pending_losses.append(loss)
             accumulated_grads = (
                 grads
@@ -720,7 +763,7 @@ class TrainingSession:
                     grads,
                 )
             )
-            if not optimized:
+            if not optimized or self.loss_chunk_size is not None:
                 mx.eval(loss, accumulated_grads)
                 losses.append(loss.item())
                 distill_seconds.append(perf_counter() - gradient_started)

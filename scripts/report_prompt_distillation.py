@@ -20,12 +20,24 @@ sys.path.insert(0,str(root/'frozen_eval'))
 from evaluate import score
 config=json.loads((root/'run_config.json').read_text())
 thinking=config['enable_thinking']
+teacher_policy = ('Incomplete teacher responses are rejected before training; complete answers that fail mechanical checks are retained.'
+                  if config.get('incomplete_teacher_policy') else
+                  'Truncated teacher responses were retained by this legacy run.')
+generation_flags = (' '.join(f'--{key.replace("_", "-")} {config[key]}' for key in
+                    ['max_tokens', 'loss_chunk_size', 'completion_batch_size', 'prefill_batch_size', 'prefill_step_size',
+                     'generation_wave_size', 'cleanup_interval', 'temperature', 'top_p', 'top_k', 'presence_penalty']
+                    if key in config)
+                    if 'loss_chunk_size' in config else '')
 train=read_rows(root/'train_cases.jsonl')
 evaluation=read_rows(root/'eval_cases.jsonl')
 teacher=read_rows(root/'teacher/responses.jsonl')
 teacher_by_id={r['case_id']:r for r in teacher}
 roundtrip=json.loads((root/'token_roundtrip_audit.json').read_text())
-assert roundtrip['teacher_response_count']==128 and not roundtrip['token_roundtrip_mismatch_ids']
+assert roundtrip['teacher_response_count']==128
+if config.get('training_token_source') == 'saved exact token IDs':
+    assert roundtrip['exact_token_ids_verified'] and not roundtrip['invalid_saved_token_ids']
+else:
+    assert not roundtrip['token_roundtrip_mismatch_ids']
 assert roundtrip['teacher_and_student_prefix_boundaries_verified']
 assert len(teacher_by_id)==len(train)==128
 assert not {r['question'].strip().lower() for r in train}&{r['question'].strip().lower() for r in evaluation}
@@ -61,6 +73,8 @@ for size in config['sizes']:
     assert run['student_system'] is None and run['teacher_system']==system
     assert run['epochs']==config['epochs'] and run['seed']==config['seed']
     assert run.get('enable_thinking', False)==thinking
+    if config.get('training_token_source'):
+        assert run['training_token_source']==config['training_token_source']
     assert done['updates']==config['epochs']*((size+config['batch_size']-1)//config['batch_size'])
     weights=path/'adapters.safetensors'
     assert sha(weights)==done['adapter_sha256']
@@ -83,7 +97,8 @@ assert len({a['sha256'] for a in adapters})==len(adapters)==len(config['sizes'])
 if thinking:
     from huggingface_hub import snapshot_download
     from transformers import AutoTokenizer
-    path=snapshot_download(config['model'],revision=config['model_revision'],local_files_only=True)
+    path=snapshot_download(config['model'],revision=config['model_revision'],local_files_only=True,
+                           allow_patterns=['tokenizer*', 'chat_template*', 'special_tokens_map.json'])
     tokenizer=AutoTokenizer.from_pretrained(path)
     end=tokenizer.encode('</think>',add_special_tokens=False)
     assert len(end)==1
@@ -93,7 +108,9 @@ if thinking:
     for row in all_rows:
         ids=row['token_ids']
         assert row['prompt_text'].endswith('<think>\n')
-        assert tokenizer.encode(row['completion_text'],add_special_tokens=False)==ids
+        assert tokenizer.decode(ids)==row['completion_text']
+        if not config.get('training_token_source'):
+            assert tokenizer.encode(row['completion_text'],add_special_tokens=False)==ids
         assert row['raw_response_text']==tokenizer.decode(ids,skip_special_tokens=True)
         assert row['reasoning_complete']==(end[0] in ids)
         boundary=ids.index(end[0]) if row['reasoning_complete'] else len(ids)
@@ -105,7 +122,7 @@ if thinking:
             assert row[key]==value,(row['case_id'],key)
 summary=dict(config=config,adapters=adapters,evaluations=evaluations,
              audit=dict(independent_adapters=True,nested_subsets_verified=True,
-                        teacher_responses_have_exact_token_ids=True,training_token_roundtrip_verified=True,
+                        teacher_responses_have_exact_token_ids=True,training_token_alignment_verified=True,
                         evaluation_system_prompt_absent_for_all_adapters=True,
                         no_training_eval_question_overlap=True,all_eval_sets_identical=True,
                         expected_case_exposures_verified=True,adapter_hashes_verified=True,
@@ -123,7 +140,7 @@ best=max(adapters,key=lambda a:a['full_mechanical_pass'])
 lines+=['', f"The highest observed adapter score was {best['full_mechanical_pass']}/64 from the {best['cases']}-case adapter. The explicitly prompted base scored {evaluations['base-with-prompt']['full_mechanical_pass']}/64. These are final-epoch results, not evaluation-selected checkpoints."]
 if thinking:
     lines+=['', 'Thinking is enabled for teacher generation, student training, and all evaluation variants. Training uses the entire generated reasoning-plus-answer continuation. The unchanged formatting scorer grades only the final answer after `</think>`. Unfinished reasoning yields an empty final answer, not a scored reasoning trace.',
-            '', 'The original 2,048-token generation cap is unchanged and is shared by reasoning and the final answer. Truncated examples, including those without a final answer, remain in the training data.',
+            '', f"The {config.get('max_tokens', 2048):,}-token generation cap is shared by reasoning and the final answer. {teacher_policy}",
             '', '## Reasoning completion', '', '| Variant | Unfinished reasoning | Empty final answers | Reasoning tokens |', '|---|---:|---:|---:|']
     for name,s in [('teacher',json.loads((root/'teacher/summary.json').read_text()))]+list(evaluations.items()):
         lines.append(f"| {name} | {s['unfinished_reasoning']} | {s['empty_final_answers']} | {s['reasoning_tokens']} |")
@@ -135,6 +152,8 @@ if thinking:
         for name,s in evaluations.items():
             old=baseline['evaluations'][name]['full_mechanical_pass'];new=s['full_mechanical_pass']
             lines.append(f'| {name} | {old}/64 | {new}/64 | {(new-old)/64*100:+.2f} percentage points |')
+        if config['temperature'] != baseline['config']['temperature']:
+            lines+=['', 'Sampling settings also changed from the earlier greedy run, so these differences do not isolate the effect of reasoning. All variants within this run share the same sampling settings.']
 lines+=['', 'The explicit-prompt control above was generated afresh through the same native MLX batching path as the adapters. The earlier calibrated prompt scored 39/64 via the HTTP evaluation runner. Greedy generation can vary with batching, prefill/cache implementation, and floating-point kernels. The 64 questions were previously used to calibrate the prompt, but none were used to train these adapters.',
         '', '## Training','',
         '- Questions: 128 context-free open/general QA instructions from `databricks/databricks-dolly-15k`, selected with seed 42 and saved verbatim apart from outer whitespace. No Dolly reference answers were used.',
@@ -143,7 +162,9 @@ lines+=['', 'The explicit-prompt control above was generated afresh through the 
         '- Student inputs contain only the case question; teacher inputs include the shared system prompt. The same response continuation is scored under both contexts.',
         '- Objective: full-vocabulary forward KL from the frozen prompted teacher to the student, including end-of-turn tokens. This uses the project’s `TrainingSession.step_samples`, not its document-to-question pipeline.',
         f"- Independent base initialization for each adapter; LoRA rank {config['lora_rank']}, last 16 model layers, scale 20, dropout 0, AdamW learning rate {config['learning_rate']:g}, seed {config['seed']}, logical batch size {config['batch_size']}, {config['epochs']} epochs.",
-        f"- Training accumulates independent sequence gradients sequentially to bound memory. Generation uses native MLX batches with completion batch size 8 and prefill batch size 4. Temperature is zero and thinking is {'enabled' if thinking else 'disabled'}.",
+        f"- Training accumulates independent sequence gradients sequentially to bound memory. Generation uses native MLX batches with completion batch size {config.get('completion_batch_size', 8)} and prefill batch size {config.get('prefill_batch_size', 4)}. Temperature is {config['temperature']}; top-p {config.get('top_p', 1)}, top-k {config.get('top_k', 0)}, presence penalty {config.get('presence_penalty', 0)}. Thinking is {'enabled' if thinking else 'disabled'}.",
+        (f"- KL output-head chunks contain {config['loss_chunk_size']} token positions. Layer and recurrent-block recomputation preserve full-vocabulary KL and gradients through the entire sequence."
+         if 'loss_chunk_size' in config else '- This legacy run used full-sequence KL allocations.'),
         '- Subsets are nested prefixes of the frozen training case order. Larger datasets receive more optimizer updates because the number of epochs is fixed. All outputs are final-epoch adapters; evaluation scores did not select checkpoints.',
         '', '| Cases | Updates | Teacher passes in subset | Training time | Adapter |','|---:|---:|---:|---:|---|']
 for a in adapters:
@@ -159,10 +180,10 @@ lines+=['', '## Use an adapter','', '```sh',
         '  --model mlx-community/Qwen3.5-4B-6bit \\',
         f'  --adapter-path {root}/adapters/cases-128 \\',
         '  --prompt "Why do leaves change color in autumn?" \\',
-        '  --sample --temperature 0 --max-tokens 2048'+('' if thinking else ' --no-thinking'),
-        '```','', 'To test internalization, omit the system prompt, as in this example. The standard MLX adapter directory contains `adapters.safetensors` and `adapter_config.json`.',
+        f"  --sample --temperature {config['temperature']} --max-tokens {config.get('max_tokens', 2048)}"+('' if thinking else ' --no-thinking'),
+        '```','', 'To test internalization, omit the system prompt, as in this example. This interactive example sets only temperature; use the evaluation command below to reproduce every sampling setting. The standard MLX adapter directory contains `adapters.safetensors` and `adapter_config.json`.',
         '', '## Re-run evaluation','', 'From the project root, use the saved cases, prompt, and scorer:', '', '```sh',
-        f"PYTHONPATH=src python {root}/training_runner_snapshot.py --output-dir {root} --scorer-dir {root}/frozen_eval --sizes {' '.join(map(str,config['sizes']))} --phase evaluate"+(' --enable-thinking' if thinking else ''),
+        f"PYTHONPATH=src python {root}/training_runner_snapshot.py --output-dir {root} --scorer-dir {root}/frozen_eval --sizes {' '.join(map(str,config['sizes']))} {generation_flags} --phase evaluate"+(' --enable-thinking' if thinking else ''),
         f'python scripts/report_prompt_distillation.py {root}',
         '```', '', 'Completed evaluation rows are reused. For a fresh run, first move the `evaluations` directory to a new name. Training adapters and teacher responses are left in place.',
         '', '## Verification and provenance','',

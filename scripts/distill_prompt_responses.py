@@ -19,6 +19,7 @@ import time
 import mlx.core as mx
 from mlx_lm import load
 from mlx_lm.generate import BatchGenerator
+from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
 from distil.sample import Sample
@@ -61,29 +62,58 @@ def response_fields(tokenizer, ids, enable_thinking):
                 reasoning_tokens=end)
 
 
-def audit_teacher_tokens(tokenizer, rows, system, enable_thinking, output):
+def audit_teacher_tokens(tokenizer, rows, system, enable_thinking, output, *, exact_token_ids=False):
     mismatches = []
+    invalid = []
     for row in rows:
         ids = row['token_ids']
+        if tokenizer.decode(ids) != row['completion_text'] or len(ids) != row['num_tokens']:
+            invalid.append(row['case_id'])
         valid = tokenizer.encode(row['completion_text'], add_special_tokens=False) == ids
         for context in [system, None]:
             prefix = render_generation_prompt(
                 tokenizer, prompt_messages(row['question'], context), enable_thinking)
             if context == system:
-                valid &= prefix == row['prompt_text']
+                if prefix != row['prompt_text']:
+                    invalid.append(row['case_id'])
             prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
             valid &= tokenizer.encode(prefix + row['completion_text'], add_special_tokens=False) == prefix_ids + ids
         if not valid:
             mismatches.append(row['case_id'])
     write_json(output, dict(teacher_response_count=len(rows),
                            token_roundtrip_mismatch_ids=mismatches,
-                           teacher_and_student_prefix_boundaries_verified=not mismatches))
-    if mismatches:
+                           invalid_saved_token_ids=invalid,
+                           exact_token_ids_verified=exact_token_ids and not invalid,
+                           teacher_and_student_prefix_boundaries_verified=not invalid and (exact_token_ids or not mismatches)))
+    if invalid or (mismatches and not exact_token_ids):
         raise ValueError(f'Teacher token round trip failed: {mismatches}')
 
 
-def sample_batches(model, tokenizer, cases, system, output, score_fn, max_tokens=2048,
-                   enable_thinking=False):
+def generated_presence_penalty(prompt_length, penalty):
+    """Penalize each generated token once, without penalizing prompt tokens."""
+    def process(context, logits):
+        generated = context[prompt_length:]
+        if generated.size:
+            # Assignment, rather than scatter-add, penalizes repeated IDs once.
+            logits[:, generated] = logits[:, generated] - penalty
+        return logits
+    return process
+
+
+def sample_batches(model, tokenizer, cases, system, output, score_fn, *,
+                   generation_wave_size=16, seed=0, **generation):
+    """Bound generator lifetime; preserve completed rows when restarting."""
+    for offset in range(0, len(cases), generation_wave_size):
+        mx.random.seed(seed + offset)
+        _sample_wave(model, tokenizer, cases[offset:offset + generation_wave_size],
+                     system, output, score_fn, **generation)
+    return read_rows(output)
+
+
+def _sample_wave(model, tokenizer, cases, system, output, score_fn, max_tokens=16384,
+                   enable_thinking=False, completion_batch_size=4, prefill_batch_size=1,
+                   prefill_step_size=512, temperature=0, top_p=1.0, top_k=0,
+                   presence_penalty=0, cleanup_interval=64):
     """Record every generated token, including the real stop token, in batches."""
     output.parent.mkdir(parents=True, exist_ok=True)
     old = read_rows(output) if output.exists() else []
@@ -96,17 +126,32 @@ def sample_batches(model, tokenizer, cases, system, output, score_fn, max_tokens
     encoded = [tokenizer.encode(p, add_special_tokens=False) for p in prefixes]
     generator = BatchGenerator(
         model, max_tokens=max_tokens, stop_tokens=[[t] for t in tokenizer.eos_token_ids],
-        completion_batch_size=8, prefill_batch_size=4,
+        completion_batch_size=completion_batch_size, prefill_batch_size=prefill_batch_size,
+        prefill_step_size=prefill_step_size,
+        sampler=make_sampler(temp=temperature, top_p=top_p, top_k=top_k),
     )
-    uids = generator.insert(encoded, [max_tokens] * len(pending))
+    processors = ([[generated_presence_penalty(len(p), presence_penalty)] for p in encoded]
+                  if presence_penalty else None)
+    uids = generator.insert(encoded, [max_tokens] * len(pending), logits_processors=processors)
     indices = dict(zip(uids, range(len(pending))))
     tokens = {uid: [] for uid in uids}
     batch_sizes = Counter()
     start = time.perf_counter()
+    last_progress = start
+    generated_tokens = 0
+    generation_steps = 0
     try:
         with generator.stats() as stats:
             while responses := generator.next_generated():
+                generation_steps += 1
+                if cleanup_interval and generation_steps % cleanup_interval == 0:
+                    # MLX clears its allocator cache asynchronously every 512 steps.
+                    # Drain Metal work and Python references before releasing buffers.
+                    mx.synchronize(generator.stream)
+                    gc.collect()
+                    mx.clear_cache()
                 batch_sizes[len(responses)] += 1
+                generated_tokens += len(responses)
                 for response in responses:
                     uid = response.uid
                     tokens[uid].append(response.token)
@@ -117,26 +162,43 @@ def sample_batches(model, tokenizer, cases, system, output, score_fn, max_tokens
                     ids = tokens.pop(uid)
                     completion = tokenizer.decode(ids)
                     fields = response_fields(tokenizer, ids, enable_thinking)
-                    scored = score_fn({'ifeval_key': case.get('ifeval_key', case.get('source_index', i)),
-                                       'question': case['question']}, fields['response'])
+                    scored = score_fn(dict(case, ifeval_key=case.get('ifeval_key', case.get('source_index', i))),
+                                      fields['response'])
                     row = dict(case, system_prompt=system, prompt_text=prefixes[i],
                                completion_text=completion, **fields, token_ids=ids,
                                num_tokens=len(ids), finish_reason=response.finish_reason, **scored)
                     with output.open('a') as f:
                         f.write(json.dumps(row, ensure_ascii=False) + '\n')
                     old.append(row)
-                    print(f'{output.parent.name}: {len(old)}/{len(cases)} {case["case_id"]} '
+                    print(f'{output.parent.name}: {len(old)} saved {case["case_id"]} '
                           f'tokens={len(ids)} pass={row["full_mechanical_pass"]}', flush=True)
+                now = time.perf_counter()
+                if now - last_progress >= 30:
+                    print(f'{output.parent.name}: {len(old)} saved; '
+                          f'{generated_tokens} tokens generated; '
+                          f'{generated_tokens/(now-start):.1f} tokens/s', flush=True)
+                    last_progress = now
         elapsed = time.perf_counter() - start
-        write_json(output.with_name('generation_timing.json'), dict(
+        timing = dict(
             seconds=elapsed, generated_cases=len(pending), stats=asdict(stats),
-            response_batch_sizes=dict(batch_sizes)))
+            response_batch_sizes=dict(batch_sizes))
+        with output.with_name('generation_timing.jsonl').open('a') as f:
+            f.write(json.dumps(timing) + '\n')
     finally:
         generator.close()
     del generator
-    mx.clear_cache()
     gc.collect()
+    mx.clear_cache()
     return old
+
+
+def validate_teacher_responses(rows, enable_thinking):
+    incomplete = [r['case_id'] for r in rows if r['finish_reason'] != 'stop'
+                  or not r['response'].strip()
+                  or (enable_thinking and not r.get('reasoning_complete', False))]
+    if incomplete:
+        raise ValueError(f'Incomplete teacher responses: {incomplete}. Increase --max-tokens '
+                         'or use repetition-resistant sampling and regenerate in a new output directory before training.')
 
 
 def summarize(rows, output):
@@ -166,17 +228,20 @@ def train_adapter(model, tokenizer, responses, system, root, args):
         model, tokenizer, system, model_name=args.model, student_system=None,
         learning_rate=args.learning_rate, lora_rank=args.lora_rank, seed=args.seed,
         enable_thinking=args.enable_thinking, kl_direction='forward',
+        loss_chunk_size=args.loss_chunk_size,
     )
     config = dict(cases=len(responses), epochs=args.epochs, learning_rate=args.learning_rate,
                   lora_rank=args.lora_rank, batch_size=args.batch_size, seed=args.seed,
                   student_system=None, teacher_system=system, objective='full-vocabulary forward KL on frozen teacher responses, including actual EOS',
+                  training_token_source='saved exact token IDs',
                   case_ids=[r['case_id'] for r in responses], base_model=args.model,
                   base_model_revision=args.model_revision, init='Independent frozen base and identical LoRA initialization seed',
                   filtered_teacher_failures=False, selection='Final epoch; held-out scores do not select checkpoints')
     config['enable_thinking'] = args.enable_thinking
+    config['loss_chunk_size'] = args.loss_chunk_size
     write_json(root/'run_config.json', config)
     samples = [Sample(r['prompt_text'], r['completion_text'], r['response'],
-                      r['finish_reason'], r['num_tokens']) for r in responses]
+                      r['finish_reason'], r['num_tokens'], token_ids=r['token_ids']) for r in responses]
     rng = random.Random(args.seed)
     start = time.perf_counter()
     try:
@@ -221,6 +286,19 @@ def main():
     p.add_argument('--learning-rate', type=float, default=1e-4)
     p.add_argument('--lora-rank', type=int, default=16)
     p.add_argument('--batch-size', type=int, default=4)
+    p.add_argument('--max-tokens', type=int, default=16384,
+                   help='Total generated reasoning and answer tokens per case')
+    p.add_argument('--completion-batch-size', type=int, default=4)
+    p.add_argument('--prefill-batch-size', type=int, default=1)
+    p.add_argument('--prefill-step-size', type=int, default=512)
+    p.add_argument('--generation-wave-size', type=int, default=16)
+    p.add_argument('--cleanup-interval', type=int, default=64)
+    p.add_argument('--temperature', type=float, default=0)
+    p.add_argument('--top-p', type=float, default=1.0)
+    p.add_argument('--top-k', type=int, default=0)
+    p.add_argument('--presence-penalty', type=float, default=0)
+    p.add_argument('--loss-chunk-size', type=int, default=128,
+                   help='Exact KL head chunk size; bounds vocabulary allocation memory')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--enable-thinking', action='store_true',
                    help='Train on complete reasoning traces; score only the final answer')
@@ -229,6 +307,11 @@ def main():
     args = p.parse_args()
     if args.epochs <= 0 or args.batch_size <= 0 or any(n<=0 for n in args.sizes):
         p.error('epochs, batch size, and dataset sizes must be positive')
+    if min(args.max_tokens, args.completion_batch_size, args.prefill_batch_size,
+           args.prefill_step_size, args.loss_chunk_size, args.generation_wave_size, args.cleanup_interval) <= 0:
+        p.error('token limits, generation batch sizes, and chunk sizes must be positive')
+    if args.temperature < 0 or not 0 < args.top_p <= 1 or args.top_k < 0 or not 0 <= args.presence_penalty <= 2:
+        p.error('Invalid sampling parameters')
     root = args.output_dir
     train = read_rows(root/'train_cases.jsonl')
     if max(args.sizes)>len(train):p.error('Not enough frozen training cases')
@@ -238,12 +321,20 @@ def main():
     score_fn = importlib.import_module('evaluate').score
     config = dict(model=args.model, model_revision=args.model_revision, epochs=args.epochs,
                   sizes=args.sizes, learning_rate=args.learning_rate,lora_rank=args.lora_rank,
-                  batch_size=args.batch_size,seed=args.seed,temperature=0,enable_thinking=args.enable_thinking,
+                  batch_size=args.batch_size,seed=args.seed,temperature=args.temperature,enable_thinking=args.enable_thinking,
+                  top_p=args.top_p, top_k=args.top_k, presence_penalty=args.presence_penalty,
+                  presence_penalty_context='entire generated continuation, excluding prompt',
+                  training_token_source='saved exact token IDs',
+                  generation_wave_size=args.generation_wave_size, cleanup_interval=args.cleanup_interval,
                   system_prompt=system,system_sha256=fingerprint(root/'system_prompt.txt'),
                   train_sha256=fingerprint(root/'train_cases.jsonl'),eval_sha256=fingerprint(root/'eval_cases.jsonl'),
+                  max_tokens=args.max_tokens, loss_chunk_size=args.loss_chunk_size,
+                  completion_batch_size=args.completion_batch_size,
+                  prefill_batch_size=args.prefill_batch_size, prefill_step_size=args.prefill_step_size,
+                  incomplete_teacher_policy='reject before training; retain complete mechanical failures',
                   packages={n:importlib.metadata.version(n) for n in ['mlx','mlx-lm','transformers','nltk']})
     if args.enable_thinking:
-        config.update(max_tokens=2048, scoring_content='final answer after </think>; empty if unfinished',
+        config.update(scoring_content='final answer after </think>; empty if unfinished',
                       training_content='entire generated continuation, including reasoning and actual stop token')
     existing=root/'run_config.json'
     if existing.exists() and json.loads(existing.read_text())!=config:
@@ -252,19 +343,26 @@ def main():
     mx.set_cache_limit(1_000_000_000)
     mx.random.seed(args.seed)
     model,tokenizer=load(args.model,revision=args.model_revision)
+    generation = dict(enable_thinking=args.enable_thinking, max_tokens=args.max_tokens,
+                      completion_batch_size=args.completion_batch_size,
+                      prefill_batch_size=args.prefill_batch_size, prefill_step_size=args.prefill_step_size,
+                      temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,
+                      presence_penalty=args.presence_penalty, generation_wave_size=args.generation_wave_size,
+                      cleanup_interval=args.cleanup_interval, seed=args.seed)
     if args.phase in ['all','generate']:
         teacher=sample_batches(model,tokenizer,train,system,root/'teacher/responses.jsonl',score_fn,
-                               enable_thinking=args.enable_thinking)
+                               **generation)
         summarize(teacher,root/'teacher/summary.json')
     teacher=read_rows(root/'teacher/responses.jsonl')
-    audit_teacher_tokens(tokenizer,teacher,system,args.enable_thinking,root/'token_roundtrip_audit.json')
+    audit_teacher_tokens(tokenizer,teacher,system,args.enable_thinking,root/'token_roundtrip_audit.json', exact_token_ids=True)
+    validate_teacher_responses(teacher, args.enable_thinking)
     teacher_by_id={r['case_id']:r for r in teacher}
     if args.phase in ['all','evaluate']:
         prompted=sample_batches(model,tokenizer,evaluation,system,root/'evaluations/base-with-prompt/results.jsonl',score_fn,
-                                enable_thinking=args.enable_thinking)
+                                **generation)
         summarize(prompted,root/'evaluations/base-with-prompt/summary.json')
         base=sample_batches(model,tokenizer,evaluation,None,root/'evaluations/base-no-prompt/results.jsonl',score_fn,
-                            enable_thinking=args.enable_thinking)
+                            **generation)
         summarize(base,root/'evaluations/base-no-prompt/summary.json')
     for size in args.sizes:
         subset=[teacher_by_id[r['case_id']] for r in train[:size]]
@@ -275,9 +373,9 @@ def main():
             load_adapters(model,str(adapter))
             try:
                 evaluated=sample_batches(model,tokenizer,evaluation,None,root/f'evaluations/cases-{size:03d}/results.jsonl',score_fn,
-                                         enable_thinking=args.enable_thinking)
+                                         **generation)
                 result=summarize(evaluated,root/f'evaluations/cases-{size:03d}/summary.json')
-                print(f'ADAPTER {size}: {result["full_mechanical_pass"]}/64',flush=True)
+                print(f'ADAPTER {size}: {result["full_mechanical_pass"]}/{len(evaluation)}',flush=True)
             finally:
                 remove_lora_layers(model)
                 model.eval()

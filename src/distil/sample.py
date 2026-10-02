@@ -1,8 +1,8 @@
 """Sample completions from the student or an interleaved teacher/student policy.
 
-The rendered generation prompt and the decoded generated tokens are kept as
-strings, so scoring a fresh sample is `build_raw(prompt_text, completion_text)`
-— exact by construction, no re-templating. `content` (special tokens stripped)
+The rendered generation prompt and decoded continuation are retained as strings.
+Offline samples can also preserve exact token IDs, since re-encoding decoded
+text can merge noncanonical token splits. `content` (special tokens stripped)
 is what goes into a saved rollout's assistant message.
 """
 
@@ -44,6 +44,9 @@ class Sample:
     # One privileged-teacher predictive row per generated token. Training can
     # reuse these exact rows instead of scoring the same completion again.
     teacher_logits: mx.array | None = None
+    # Offline samples may have noncanonical BPE splits that decoding and
+    # re-encoding would merge. Preserve the actual continuation when available.
+    token_ids: list[int] | None = None
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):

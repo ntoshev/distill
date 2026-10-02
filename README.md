@@ -134,7 +134,9 @@ directory containing an importable `evaluate.py` with the shared-prompt
 PYTHONPATH=src python scripts/distill_prompt_responses.py \
   --output-dir outputs/prompt-run \
   --scorer-dir path/to/frozen-scorer \
-  --sizes 8 16 32 64 128 --epochs 3
+  --sizes 8 16 32 64 128 --epochs 3 \
+  --enable-thinking --max-tokens 16384 \
+  --temperature 1.0 --top-p 0.95 --top-k 20 --presence-penalty 1.5
 ```
 
 The runner generates answers once, preserves both compliant and noncompliant
@@ -144,6 +146,49 @@ evaluation files can resume; an interrupted training run must be preserved or
 moved before restarting that adapter. `TrainingSession.step_samples` exposes
 the same saved-response training path for other runners. Its `Sample` inputs
 must preserve the actual completion text and generated special tokens.
+Saved teacher responses also pass their original `token_ids` directly to training,
+because decoding and re-encoding sampled text can change token boundaries.
+
+Reasoning and the final answer share the configurable `--max-tokens` budget
+(default 16,384). Only the answer after `</think>` is scored; training includes
+the entire reasoning trace, answer, and actual EOS. The runner rejects truncated
+or unfinished teacher responses before training. It retains complete answers
+that fail the formatting rules. Use a new output directory when changing the
+budget or other recorded settings, so resumed rows cannot mix configurations.
+The example uses Qwen3.5's recommended sampling settings for general reasoning;
+greedy reasoning can repeat indefinitely despite a larger token budget. Presence
+penalties cover the entire generated continuation, excluding the prompt. Every
+evaluation variant uses the same settings. Generation recreates its batch after
+16 cases and synchronizes and releases unused buffers every 64 decoding steps.
+
+The runner defaults to `--loss-chunk-size 128`, `--completion-batch-size 4`,
+`--prefill-batch-size 1`, and `--prefill-step-size 512`. The Qwen3/Qwen3.5
+training path computes exact full-vocabulary KL in token chunks and recomputes
+layer activations during backpropagation, preserving gradients through the full
+sequence. It requires a frozen output head. This avoids holding every token's
+vocabulary logits at once; reducing the logical training batch alone does not
+solve that allocation. These options are independent of the logical
+`--batch-size 4`, which still averages four sequence gradients per update.
+
+The smaller instruction-following diagnostic in
+[`experiments/shared_prompt_forbidden/PROTOCOL.md`](experiments/shared_prompt_forbidden/PROTOCOL.md)
+uses IFEval's built-in forbidden-word rule: avoid the whole word "the" in the
+final answer. It freezes eight supplied training questions and eight separate
+validation questions, compares thinking on/off, and gates a three-learning-rate
+pilot on real-model gradient checks:
+
+```sh
+PYTHONPATH=src:. python scripts/diagnose_forbidden_prompt.py \
+  --output-dir outputs/prompt-forbidden-the-diagnostic-2026-09-23
+PYTHONPATH=src:. python scripts/train_forbidden_pilot.py \
+  --output-dir outputs/prompt-forbidden-the-diagnostic-2026-09-23
+```
+
+Both commands require the supplied `outputs/prompt-internalization-2026-09-19`
+artifact. This is a custom shared-prompt experiment, not the official IFEval
+benchmark. KL uses standard float32 MLX reductions: the fused Metal KL kernel
+in mlx-lm 0.31.3 produced nondeterministic losses and incorrect gradients at
+the production vocabulary and chunk sizes on M4 Max.
 
 ## Continual document learning
 

@@ -29,6 +29,35 @@ def test_kl_loss_rejects_unknown_direction():
         _kl_loss(mx.zeros((1, 2)), mx.zeros((1, 2)), "sideways")
 
 
+@pytest.mark.parametrize('rows', [128, 256])
+def test_forward_kl_large_vocab_has_repeatable_analytic_gradient(rows):
+    """Production chunk/dense sizes exposed a race in the fused Metal kernel."""
+    mx.random.seed(42)
+    student = 5 * mx.random.normal((rows, 248320))
+    teacher = student + mx.random.normal(student.shape)
+    expected = (mx.softmax(student, axis=-1) - mx.softmax(teacher, axis=-1)) / rows
+    mx.eval(student, teacher, expected)
+    previous = None
+    for _ in range(3):
+        loss, grad = mx.value_and_grad(
+            lambda s: _kl_loss(s, teacher, 'forward').mean())(student)
+        mx.eval(loss, grad)
+        relative_error = mx.linalg.norm(grad - expected) / mx.linalg.norm(expected)
+        assert relative_error.item() < 1e-5
+        if previous is not None:
+            assert loss.item() == previous[0]
+            assert mx.array_equal(grad, previous[1]).item()
+        previous = loss.item(), grad
+
+
+@pytest.mark.parametrize('direction', ['forward', 'reverse'])
+def test_kl_keeps_teacher_fixed(direction):
+    student = mx.array([[1., 2., 3.]])
+    teacher = mx.array([[3., 2., 1.]])
+    gradient = mx.grad(lambda t: _kl_loss(student, t, direction).sum())(teacher)
+    assert mx.array_equal(gradient, mx.zeros_like(teacher)).item()
+
+
 def test_load_prompts_uses_nonempty_lines(tmp_path):
     path = tmp_path / "questions.txt"
     path.write_text("first question\n\n  second question  \n")
@@ -97,6 +126,31 @@ def test_saved_samples_reject_invalid_batch(prompts, samples):
     session = TrainingSession.__new__(TrainingSession)
     with pytest.raises(ValueError, match="matching non-empty"):
         session.step_samples(prompts, samples)
+
+
+def test_saved_noncanonical_token_splits_are_preserved(monkeypatch):
+    import distil.training as training
+    from distil.sample import Sample
+
+    class Tokenizer:
+        def encode(self, text, **kwargs):
+            return {'student': [10], 'teacher': [20, 21], 'ab': [99]}[text]
+        def decode(self, ids):
+            return ''.join({11: 'a', 12: 'b'}[i] for i in ids)
+
+    session = training.TrainingSession.__new__(training.TrainingSession)
+    session.tokenizer = session.teacher_tokenizer = Tokenizer()
+    session.enable_thinking = True
+    monkeypatch.setattr(training, 'render_generation_prompt', lambda *a: 'teacher')
+    sample = Sample('student', 'ab', 'ab', 'length', 2, token_ids=[11, 12])
+    result = session._align_rollout('question', [], sample)
+    assert result.student_ids == [10, 11, 12]
+    assert result.teacher_ids == [20, 21, 11, 12]
+    assert result.student_rows == [0, 1]
+    assert result.teacher_rows == [1, 2]
+    sample.num_tokens = 1
+    with pytest.raises(ValueError, match='token count'):
+        session._align_rollout('question', [], sample)
 
 
 def test_interleaved_token_accepts_only_inside_teacher_top_k():
