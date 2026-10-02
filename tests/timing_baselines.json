@@ -45,6 +45,38 @@
         "optimized_training_step_batch_3": {
           "median_seconds": 1.857335,
           "regression_tolerance": 0.15
+        },
+        "cartridge_qwen3_4b_p128_export_load_cache": {
+          "median_seconds": 0.038525,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_document_prefill_512": {
+          "median_seconds": 1.070201,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_document_cached_prompt": {
+          "median_seconds": 0.053192,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_p128_prompt_first_token": {
+          "median_seconds": 0.050793,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_p128_greedy_decode_32": {
+          "median_seconds": 0.783814,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_p128_ntp_update_64": {
+          "median_seconds": 0.789284,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_p128_kd_update_64": {
+          "median_seconds": 2.140964,
+          "regression_tolerance": 0.2
+        },
+        "cartridge_qwen3_4b_p128_skd_update_16": {
+          "median_seconds": 1.701301,
+          "regression_tolerance": 0.2
         }
       }
     },

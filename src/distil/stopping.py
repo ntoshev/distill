@@ -44,7 +44,9 @@ def load_learning_items(path: str | Path) -> list[LearningItem]:
                 fact=row.get("fact"),
             )
         except (KeyError, TypeError, json.JSONDecodeError) as error:
-            raise ValueError(f"invalid training probe on line {line_number}: {error}") from error
+            raise ValueError(
+                f"invalid training probe on line {line_number}: {error}"
+            ) from error
         strings = (item.name, item.prompt, item.completion, *item.train_prompts)
         if (
             not isinstance(prompts, list)
@@ -55,7 +57,9 @@ def load_learning_items(path: str | Path) -> list[LearningItem]:
                 f"invalid training probe on line {line_number}: fields and train_prompts must be non-empty strings"
             )
         if item.system is not None and not isinstance(item.system, str):
-            raise ValueError(f"invalid training probe on line {line_number}: system must be a string")
+            raise ValueError(
+                f"invalid training probe on line {line_number}: system must be a string"
+            )
         if item.prompt in item.train_prompts:
             raise ValueError(
                 f"invalid training probe on line {line_number}: held-out prompt duplicates a training prompt"
@@ -144,3 +148,24 @@ class ActiveRotation:
         # the unconsumed portion of the current shuffled cycle.
         self.queue[:0] = deferred
         return selected
+
+    def state(self):
+        return {
+            "active": list(self.active),
+            "queue": list(self.queue),
+            "prompt_queues": self.prompt_queues,
+            "rng": self.rng.getstate(),
+        }
+
+    def restore(self, state):
+        def tuples(value):
+            return tuple(tuples(v) for v in value) if isinstance(value, list) else value
+
+        if not set(state["active"]) <= self.items.keys() or not set(
+            state["queue"]
+        ) <= set(state["active"]):
+            raise ValueError("invalid fact rotation resume state")
+        self.active = tuple(state["active"])
+        self.queue = list(state["queue"])
+        self.prompt_queues = state["prompt_queues"]
+        self.rng.setstate(tuples(state["rng"]))

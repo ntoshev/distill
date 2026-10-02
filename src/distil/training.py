@@ -23,6 +23,7 @@ from distil.adapters import (
 )
 from distil.cli_config import resolve_speculative_policy
 from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, prefill_cache, select_logits
+from distil.losses import kl_loss as _kl_loss
 from distil.rollout import save_rollout
 from distil.sample import (
     Sample,
@@ -93,31 +94,6 @@ def load_prompts(path: str | Path) -> list[str]:
     if not prompts:
         raise ValueError(f"training prompt file is empty: {path}")
     return prompts
-
-
-def _kl_loss(student_logits, teacher_logits, direction: str):
-    """Per-token KL in the requested direction, with teacher logits fixed."""
-    # mlx-lm 0.31.3's fused Metal KL kernel gives nondeterministic losses and
-    # gradients at large row/vocabulary sizes (e.g. 256 x 248320 on M4 Max).
-    # Use ordinary MLX reductions for both paths; chunked training bounds the
-    # temporary vocabulary arrays. Keep a regression against analytic gradients.
-    student_logits = student_logits.astype(mx.float32)
-    teacher_logits = mx.stop_gradient(teacher_logits.astype(mx.float32))
-    student_logprobs = student_logits - mx.logsumexp(
-        student_logits, axis=-1, keepdims=True
-    )
-    teacher_logprobs = teacher_logits - mx.logsumexp(
-        teacher_logits, axis=-1, keepdims=True
-    )
-    if direction == "forward":
-        return (
-            mx.exp(teacher_logprobs) * (teacher_logprobs - student_logprobs)
-        ).sum(axis=-1)
-    if direction == "reverse":
-        return (
-            mx.exp(student_logprobs) * (student_logprobs - teacher_logprobs)
-        ).sum(axis=-1)
-    raise ValueError(f"unknown KL direction: {direction}")
 
 
 def _distillation_loss(

@@ -107,12 +107,19 @@ def sample_completion(
     seed: int | None = None,
     enable_thinking: bool | None = None,
     _on_decode_start: Callable[[], None] | None = None,
+    cache_factory=None,
 ) -> Sample:
     prompt_text, prompt_ids = _render_prompt(tokenizer, messages, enable_thinking)
     return _sample_text(
-        model, tokenizer, prompt_text, prompt_ids,
-        max_tokens=max_tokens, temperature=temperature, seed=seed,
+        model,
+        tokenizer,
+        prompt_text,
+        prompt_ids,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        seed=seed,
         on_decode_start=_on_decode_start,
+        cache_factory=cache_factory,
     )
 
 
@@ -123,6 +130,7 @@ def sample_text(
     max_tokens: int = 512,
     temperature: float = 0.0,
     seed: int | None = None,
+    cache_factory=None,
 ) -> Sample:
     """Sample directly from a raw text prefix."""
     return _sample_text(
@@ -133,6 +141,7 @@ def sample_text(
         max_tokens=max_tokens,
         temperature=temperature,
         seed=seed,
+        cache_factory=cache_factory,
     )
 
 
@@ -146,6 +155,7 @@ def _sample_text(
     temperature: float,
     seed: int | None,
     on_decode_start: Callable[[], None] | None = None,
+    cache_factory=None,
 ) -> Sample:
     from mlx_lm import stream_generate  # deferred: slow import
     from mlx_lm.sample_utils import make_sampler
@@ -172,6 +182,7 @@ def _sample_text(
         max_tokens=max_tokens,
         sampler=make_sampler(temp=temperature),
         prompt_progress_callback=prompt_progress,
+        **({"prompt_cache": cache_factory()} if cache_factory else {}),
     ):
         gen_ids.append(resp.token)
         finish_reason = resp.finish_reason
@@ -182,6 +193,7 @@ def _sample_text(
         content=tokenizer._tokenizer.decode(gen_ids, skip_special_tokens=True),
         finish_reason=finish_reason,
         num_tokens=len(gen_ids),
+        token_ids=list(gen_ids),
     )
 
 
@@ -204,6 +216,8 @@ def sample_speculative_completion(
     batch_shared_model: bool = True,
     capture_teacher_logits: bool = False,
     _on_decode_start: Callable[[], None] | None = None,
+    cache_factory=None,
+    teacher_cache_factory=None,
 ) -> Sample:
     """Generate with Speculative KD's token-level interleaved policy.
 
@@ -238,6 +252,8 @@ def sample_speculative_completion(
         batch_shared_model=batch_shared_model,
         capture_teacher_logits=capture_teacher_logits,
         on_decode_start=_on_decode_start,
+        cache_factory=cache_factory,
+        teacher_cache_factory=teacher_cache_factory,
     )
 
 
@@ -259,6 +275,8 @@ def sample_speculative_text(
     batch_shared_model: bool = True,
     capture_teacher_logits: bool = False,
     _on_decode_start: Callable[[], None] | None = None,
+    cache_factory=None,
+    teacher_cache_factory=None,
 ) -> Sample:
     """Speculative sampling from raw student and teacher prefixes."""
     top_k, top_p = resolve_speculative_policy(top_k, top_p, default_top_k=5)
@@ -280,6 +298,8 @@ def sample_speculative_text(
         batch_shared_model=batch_shared_model,
         capture_teacher_logits=capture_teacher_logits,
         on_decode_start=_on_decode_start,
+        cache_factory=cache_factory,
+        teacher_cache_factory=teacher_cache_factory,
     )
 
 
@@ -302,7 +322,30 @@ def _sample_speculative_text(
     batch_shared_model: bool,
     capture_teacher_logits: bool,
     on_decode_start: Callable[[], None] | None = None,
+    cache_factory=None,
+    teacher_cache_factory=None,
 ) -> Sample:
+    if cache_factory is not None or teacher_cache_factory is not None:
+        if teacher_without_adapter:
+            raise ValueError("cartridge policies cannot combine with LoRA routing")
+        return _sample_sequential_policies(
+            model,
+            tokenizer,
+            prompt_text,
+            prompt_ids,
+            teacher_model,
+            teacher_tokenizer,
+            teacher_prompt_ids,
+            top_k=top_k,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            seed=seed,
+            cache_factory=cache_factory,
+            teacher_cache_factory=teacher_cache_factory,
+            capture_teacher_logits=capture_teacher_logits,
+            on_decode_start=on_decode_start,
+        )
     shared = (
         teacher_model is model
         and teacher_tokenizer is tokenizer
@@ -446,6 +489,7 @@ def _sample_speculative_shared_model(
         content=tokenizer._tokenizer.decode(gen_ids, skip_special_tokens=True),
         finish_reason=finish_reason,
         num_tokens=len(gen_ids),
+        token_ids=list(gen_ids),
         speculative_top_k=top_k,
         speculative_top_p=top_p,
         accepted_tokens=len(gen_ids) - replaced,
@@ -626,9 +670,7 @@ def _sample_speculative_generic(
         student_logits = student_forward(selected)[-1]
         teacher_logits = teacher_forward(selected)[-1]
 
-    captured = (
-        mx.stack(captured_teacher_logits) if captured_teacher_logits else None
-    )
+    captured = mx.stack(captured_teacher_logits) if captured_teacher_logits else None
     if captured is not None:
         mx.eval(captured)
     return Sample(
@@ -637,6 +679,7 @@ def _sample_speculative_generic(
         content=tokenizer._tokenizer.decode(gen_ids, skip_special_tokens=True),
         finish_reason=finish_reason,
         num_tokens=len(gen_ids),
+        token_ids=list(gen_ids),
         speculative_top_k=top_k,
         speculative_top_p=top_p,
         accepted_tokens=accepted_tokens,
@@ -805,6 +848,7 @@ def sample_speculative_completions(
                 ),
                 finish_reason=finish_reasons[index],
                 num_tokens=len(token_ids),
+                token_ids=list(token_ids),
                 speculative_top_k=top_k,
                 speculative_top_p=top_p,
                 accepted_tokens=len(token_ids) - replaced,
@@ -814,3 +858,95 @@ def sample_speculative_completions(
             )
         )
     return results
+
+
+def _sample_sequential_policies(
+    model,
+    tokenizer,
+    prompt_text,
+    prompt_ids,
+    teacher_model,
+    teacher_tokenizer,
+    teacher_prompt_ids,
+    *,
+    top_k,
+    top_p,
+    max_tokens,
+    temperature,
+    seed,
+    cache_factory,
+    teacher_cache_factory,
+    capture_teacher_logits,
+    on_decode_start=None,
+):
+    """Correctness-first SKD with separate policy state even for shared weights."""
+    from mlx_lm.models.cache import make_prompt_cache
+    from mlx_lm.sample_utils import make_sampler
+
+    if max_tokens <= 0:
+        raise ValueError("--max-tokens must be positive")
+    if seed is not None:
+        mx.random.seed(seed)
+    model.eval()
+    teacher_model.eval()
+    student_cache = cache_factory() if cache_factory else make_prompt_cache(model)
+    teacher_cache = (
+        teacher_cache_factory()
+        if teacher_cache_factory
+        else make_prompt_cache(teacher_model)
+    )
+    student = prefill_last_logits(model, prompt_ids, student_cache)
+    teacher = prefill_last_logits(teacher_model, teacher_prompt_ids, teacher_cache)
+    if student.shape != teacher.shape:
+        raise ValueError("teacher and student vocabularies do not align")
+    sampler = make_sampler(temp=temperature)
+    ids, provenance, captured = [], [], []
+    finish = "length"
+    if on_decode_start:
+        on_decode_start()
+    for _ in range(max_tokens):
+        rng = list(mx.random.state)
+        proposal = int(sampler(student).item())
+        accepted = _proposal_is_accepted(proposal, teacher, top_k=top_k, top_p=top_p)
+        if accepted:
+            token = proposal
+        else:
+            mx.random.state = rng
+            token = int(sampler(teacher).item())
+        if tokenizer.decode([token]) != teacher_tokenizer.decode([token]):
+            raise ValueError("teacher and student token vocabularies do not align")
+        ids.append(token)
+        provenance.append(not accepted)
+        if capture_teacher_logits:
+            captured.append(mx.stop_gradient(teacher))
+        if token in _eos_token_ids(tokenizer):
+            finish = "stop"
+            break
+        if len(ids) == max_tokens:
+            break
+        # Both policies consume the actual token, including a replacement.
+        student = model(mx.array([token])[None], cache=student_cache)[0, -1].astype(
+            mx.float32
+        )
+        mx.eval(student, [c.state for c in student_cache])
+        teacher = teacher_model(mx.array([token])[None], cache=teacher_cache)[
+            0, -1
+        ].astype(mx.float32)
+        mx.eval(teacher, [c.state for c in teacher_cache])
+    teacher_logits = mx.stack(captured) if captured else None
+    if teacher_logits is not None:
+        mx.eval(teacher_logits)
+    return Sample(
+        prompt_text,
+        tokenizer.decode(ids),
+        tokenizer._tokenizer.decode(ids, skip_special_tokens=True),
+        finish,
+        len(ids),
+        speculative_top_k=top_k,
+        speculative_top_p=top_p,
+        accepted_tokens=len(ids) - sum(provenance),
+        replaced_tokens=sum(provenance),
+        teacher_sampled=provenance,
+        teacher_logits=teacher_logits,
+        token_ids=ids,
+    )

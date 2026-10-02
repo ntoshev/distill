@@ -80,9 +80,7 @@ def prefill_last_logits(
         logits = model(mx.array(ids)[None], cache=cache)[0, -1].astype(mx.float32)
     else:
         _prefill_cache(model, ids[:-1], cache, step_size)
-        logits = model(mx.array(ids[-1:])[None], cache=cache)[0, -1].astype(
-            mx.float32
-        )
+        logits = model(mx.array(ids[-1:])[None], cache=cache)[0, -1].astype(mx.float32)
     mx.eval(logits, _cache_state(cache))
     return logits
 
@@ -92,6 +90,7 @@ def select_logits(
     ids: list[int],
     rows: list[int],
     *,
+    cache_factory=None,
     step_size: int = DEFAULT_PREFILL_STEP_SIZE,
 ):
     """Return selected predictive rows without forwarding a long prompt at once.
@@ -114,14 +113,18 @@ def select_logits(
 
     input_ids = mx.array(ids)
     if len(ids) <= step_size:
-        logits = model(input_ids[None])[0]
+        logits = (
+            model(input_ids[None], cache=cache_factory())
+            if cache_factory
+            else model(input_ids[None])
+        )[0]
         selected = logits[mx.array(rows)].astype(mx.float32)
         mx.eval(selected)
         return selected
 
     from mlx_lm.models.cache import make_prompt_cache
 
-    cache = make_prompt_cache(model)
+    cache = cache_factory() if cache_factory else make_prompt_cache(model)
     selected_pieces = []
     cursor = 0
     run_start = rows[0]

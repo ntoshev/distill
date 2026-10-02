@@ -23,6 +23,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "benchmark: timing regression tests selected by a system-specific baseline",
     "model: tests that load the local mlx model (slow, needs cached weights)",

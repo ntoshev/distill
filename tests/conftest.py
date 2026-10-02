@@ -356,3 +356,15 @@ def snapshot():
         )
 
     return check
+
+
+@pytest.fixture(scope='session')
+def cartridge_model_and_tokenizer():
+    from mlx_lm import load
+    from mlx_lm.utils import _download
+    from distil.cartridge import model_identity
+    name='mlx-community/Qwen3-4B-Instruct-2507-4bit'
+    path=_download(name,revision='50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b')
+    model,tokenizer=load(path)
+    identity=model_identity(model,tokenizer,name,model_path=path)
+    return model,tokenizer,identity

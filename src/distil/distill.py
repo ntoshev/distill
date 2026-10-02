@@ -33,8 +33,8 @@ class _DefaultSpeculativeTopK(Enum):
 class ContinualResult:
     success: bool
     stop_reason: str
-    selected_step: int
-    adapter_file: Path
+    selected_step: int | None
+    adapter_file: Path | None
     selection_file: Path
 
 
@@ -52,6 +52,7 @@ def _answer(
     max_tokens: int,
     enable_thinking: bool | None,
     default_system: str | None = None,
+    cache_factory=None,
 ) -> str:
     return sample_completion(
         model,
@@ -61,10 +62,15 @@ def _answer(
         temperature=0.0,
         seed=0,
         enable_thinking=enable_thinking,
+        **({"cache_factory": cache_factory} if cache_factory else {}),
     ).content.strip()
 
 
 def _copy_selected(checkpoint: Path, root: Path) -> Path:
+    if (checkpoint / "cartridge.json").exists():
+        from distil.cartridge_checkpoint import copy_export
+
+        return copy_export(checkpoint, root)
     for name in ("adapter_config.json", "adapters.safetensors"):
         source = checkpoint / name
         if not source.is_file():
@@ -103,7 +109,9 @@ def run_continual(
     temperature: float = 0.0,
     seed: int = 0,
     enable_thinking: bool | None = None,
-    speculative_top_k: int | None | _DefaultSpeculativeTopK = _DefaultSpeculativeTopK.VALUE,
+    speculative_top_k: int
+    | None
+    | _DefaultSpeculativeTopK = _DefaultSpeculativeTopK.VALUE,
     speculative_top_p: float | None = None,
     kl_direction: str = "forward",
     source: dict | None = None,
@@ -113,6 +121,11 @@ def run_continual(
     report: Callable[[dict], None] | None = None,
     train_report: Callable[[dict], None] | None = None,
     warn: Callable[[str], None] | None = None,
+    session_factory=None,
+    inference_policy=None,
+    backend="lora",
+    artifact_config=None,
+    resume_checkpoint=None,
 ) -> ContinualResult:
     # Explicit None still disables speculation; only an omitted K defaults to 3.
     if speculative_top_k is _DefaultSpeculativeTopK.VALUE:
@@ -139,7 +152,16 @@ def run_continual(
     if not 0 < learned_threshold <= 1:
         raise ValueError("--learned-threshold must be in (0, 1]")
 
+    if backend == "cartridge" and session_factory is None:
+        raise ValueError("cartridge fact learning requires a cartridge session factory")
     root = Path(adapter_path)
+    if (
+        backend == "cartridge"
+        and not resume_checkpoint
+        and root.exists()
+        and any(p.name != "generated" for p in root.iterdir())
+    ):
+        raise ValueError(f"refusing existing cartridge output: {root}")
     root.mkdir(parents=True, exist_ok=True)
     selection_file = root / "selection.json"
     if selection_file.is_file():
@@ -149,8 +171,9 @@ def run_continual(
 
     metrics_file = root / "training_metrics.jsonl"
     eval_file = root / "eval_metrics.jsonl"
-    metrics_file.write_text("")
-    eval_file.write_text("")
+    if not resume_checkpoint:
+        metrics_file.write_text("")
+        eval_file.write_text("")
 
     model.eval()
     judge_model = judge_model or teacher_model or model
@@ -169,6 +192,11 @@ def run_continual(
             max_tokens=canary_max_tokens,
             enable_thinking=enable_thinking,
             default_system=student_system,
+            **(
+                {"cache_factory": inference_policy.new_cache}
+                if inference_policy
+                else {}
+            ),
         )
         for probe in canaries
     }
@@ -191,7 +219,7 @@ def run_continual(
             "starting model does not satisfy canary completion: " + ", ".join(invalid)
         )
 
-    session = TrainingSession(
+    session = (session_factory or TrainingSession)(
         model,
         tokenizer,
         teacher_system,
@@ -212,17 +240,22 @@ def run_continual(
         warn=warn,
     )
     checkpoints = root / "checkpoints"
-    if checkpoints.exists():
+    if checkpoints.exists() and not resume_checkpoint:
         shutil.rmtree(checkpoints)
     step0 = checkpoints / "step-0000"
-    session.save(step0)
+    if backend == "lora":
+        session.save(step0)
 
     run_config = {
         "model": model_name,
+        "student_system": student_system,
         "generator_model": generator_model or model_name,
         "from_adapter": str(from_adapter) if from_adapter is not None else None,
-        "teacher_model": model_name if teacher_model is None or teacher_model is model else "external",
-        "judge_model": judge_model_name or ("external" if separate_judge else model_name),
+        "teacher_model": model_name
+        if teacher_model is None or teacher_model is model
+        else "external",
+        "judge_model": judge_model_name
+        or ("external" if separate_judge else model_name),
         "source": source,
         "probes": str(probes_path) if probes_path is not None else None,
         "canaries": str(canaries_path) if canaries_path is not None else None,
@@ -245,7 +278,26 @@ def run_continual(
         "kl_direction": kl_direction,
         "enable_thinking": enable_thinking,
     }
+    if artifact_config:
+        run_config.update(artifact_config)
+    if backend == "cartridge":
+        run_config.update(
+            schema_version=2,
+            backend="cartridge",
+            recipe="facts",
+            objective="forward-kl-skd",
+            reduction="equal-fact",
+            warmup=5,
+            gradient_clip=1.0,
+            logit_chunk_size=32,
+        )
+        run_config.pop("lora_rank", None)
+        run_config.pop("from_adapter", None)
     config_file = root / "run_config.json"
+    if backend == "cartridge" and not resume_checkpoint:
+        config_file.write_text(
+            json.dumps(run_config, ensure_ascii=False, indent=2) + "\n"
+        )
 
     item_probes = {
         item.name: Probe(
@@ -262,10 +314,30 @@ def run_continual(
     last_loss = None
     latest_training_rollout: dict | None = None
 
+    rotation = ActiveRotation(items, seed)
+    rotation.update(set(items_by_name))
+    resume_state = None
+    if resume_checkpoint:
+        resume_state = session.restore(Path(resume_checkpoint))
+        from distil.cartridge_checkpoint import recover_logs, validate_resume_config
+
+        validate_resume_config(root, resume_state)
+        recover_logs(root, resume_state["log_offsets"])
+        rotation.restore(resume_state["rotation"])
+        mastery_streaks.update(resume_state["mastery_streaks"])
+        canary_baselines = resume_state["canary_baselines"]
+        safe_rows = resume_state["safe_rows"]
+        last_loss = resume_state["last_loss"]
+        latest_training_rollout = resume_state["latest_training_rollout"]
+
     def evaluate(step: int, checkpoint: Path) -> tuple[dict, set[str]]:
         started = perf_counter()
+        policy = session.inference_policy if backend == "cartridge" else None
+        cache_options = {"cache_factory": policy.new_cache} if policy else {}
         scores = {
-            name: score_probe(model, tokenizer, probe, step, enable_thinking).mean_probability
+            name: score_probe(
+                model, tokenizer, probe, step, enable_thinking, **cache_options
+            ).mean_probability
             for name, probe in item_probes.items()
         }
         probability_learned = mastered(scores, learned_threshold)
@@ -278,6 +350,7 @@ def run_continual(
                 max_tokens=mastery_max_tokens,
                 enable_thinking=enable_thinking,
                 default_system=student_system,
+                **cache_options,
             )
             item = items_by_name[name]
             judge_context = nullcontext() if separate_judge else lora_disabled(model)
@@ -297,7 +370,9 @@ def run_continual(
                 "streak": mastery_streaks[name],
             }
         learned = {
-            name for name, streak in mastery_streaks.items() if streak >= mastery_patience
+            name
+            for name, streak in mastery_streaks.items()
+            if streak >= mastery_patience
         }
         canary_rows = []
         for probe in canaries:
@@ -308,6 +383,7 @@ def run_continual(
                 max_tokens=canary_max_tokens,
                 enable_thinking=enable_thinking,
                 default_system=student_system,
+                **cache_options,
             )
             baseline = canary_baselines[probe.name]
             canary_rows.append(
@@ -340,26 +416,58 @@ def run_continual(
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
         if not row["canary_changed"]:
             safe_rows.append(row)
+        if backend == "cartridge":
+            rotation.update(active)
+            from distil.cartridge_checkpoint import commit_checkpoint
+
+            commit_checkpoint(
+                session,
+                root,
+                {
+                    "rotation": rotation.state(),
+                    "mastery_streaks": dict(mastery_streaks),
+                    "canary_baselines": canary_baselines,
+                    "safe_rows": safe_rows,
+                    "last_evaluation": row,
+                    "last_loss": last_loss,
+                    "latest_training_rollout": latest_training_rollout,
+                },
+            )
         if report is not None:
             report(row)
         return row, active
 
-    baseline, active = evaluate(0, step0)
-    if baseline["mastered"] == len(items):
+    if resume_state:
+        baseline = resume_state["last_evaluation"]
+        active = set(rotation.active)
+    else:
+        baseline, active = evaluate(0, step0)
+    if baseline["canary_changed"]:
+        stopped, reason, selected = "aborted", "locality", None
+        run_config["resolved_iters"] = iters or 0
+        config_file.write_text(
+            json.dumps(run_config, ensure_ascii=False, indent=2) + "\n"
+        )
+    elif baseline["mastered"] == len(items):
         run_config["resolved_iters"] = 0
-        config_file.write_text(json.dumps(run_config, ensure_ascii=False, indent=2) + "\n")
+        config_file.write_text(
+            json.dumps(run_config, ensure_ascii=False, indent=2) + "\n"
+        )
         stopped, reason, selected = "already_mastered", "already_mastered", baseline
     else:
         example_budget = min(2000, max(200, 200 * len(active)))
         budget = iters if iters is not None else math.ceil(example_budget / batch_size)
         run_config["resolved_iters"] = budget
-        config_file.write_text(json.dumps(run_config, ensure_ascii=False, indent=2) + "\n")
-        rotation = ActiveRotation(items, seed)
+        config_file.write_text(
+            json.dumps(run_config, ensure_ascii=False, indent=2) + "\n"
+        )
         rotation.update(active)
         stopped = reason = ""
         selected = baseline
         reported_first_question = False
-        for update_number in range(1, budget + 1):
+        for update_number in range(
+            session.iteration + 1 if resume_state else 1, budget + 1
+        ):
             # Keep on-policy rollouts in the original training-prompt distribution.
             # The answer-only contract is reserved for held-out mastery evaluation.
             batch = rotation.next_batch(batch_size)
@@ -405,8 +513,11 @@ def run_continual(
                 "content": first_step.content,
                 "teacher_feedback": first_step.teacher_feedback or [],
                 "speculative_top_k": first_step.speculative_top_k,
-                **({"speculative_top_p": first_step.speculative_top_p}
-                   if first_step.speculative_top_p is not None else {}),
+                **(
+                    {"speculative_top_p": first_step.speculative_top_p}
+                    if first_step.speculative_top_p is not None
+                    else {}
+                ),
                 "accepted_tokens": first_step.accepted_tokens,
                 "replaced_tokens": first_step.replaced_tokens,
             }
@@ -426,10 +537,13 @@ def run_continual(
                         },
                     }
                 )
-            if iteration % eval_every != 0:
+            if iteration % eval_every != 0 and (
+                backend != "cartridge" or iteration != budget
+            ):
                 continue
             checkpoint = checkpoints / f"step-{iteration:04d}"
-            session.save(checkpoint)
+            if backend == "lora":
+                session.save(checkpoint)
             row, active = evaluate(iteration, checkpoint)
             if row["canary_changed"]:
                 stopped, reason = "aborted", "locality"
@@ -451,23 +565,38 @@ def run_continual(
                 ),
             )
 
-    selected_checkpoint = Path(selected["checkpoint"])
-    adapter_file = _copy_selected(selected_checkpoint, root)
+    selected_checkpoint = Path(selected["checkpoint"]) if selected else None
+    adapter_file = (
+        _copy_selected(selected_checkpoint, root) if selected_checkpoint else None
+    )
     selection = {
         "stopped": stopped,
         "reason": reason,
-        "selected_step": selected["iteration"],
-        "mastered": selected["mastered"],
-        "total": selected["total"],
+        "selected_step": selected["iteration"] if selected else None,
+        "mastered": selected["mastered"] if selected else 0,
+        "total": selected["total"] if selected else len(items),
         "mastery_criterion": "greedy_llm_judge",
         "mastery_patience": mastery_patience,
         "source_checkpoint": str(selected_checkpoint),
     }
-    selection_file.write_text(json.dumps(selection, ensure_ascii=False, indent=2) + "\n")
+    if backend == "cartridge" and hasattr(session, "cartridge"):
+        import mlx.core as mx
+
+        selection.update(
+            tensor_bytes=session.cartridge.nbytes,
+            prefix_positions=session.cartridge.positions,
+            trainable_parameters=session.cartridge.trainable_count,
+            source_tokens=run_config.get("source_tokens"),
+            peak_memory_bytes=mx.get_peak_memory(),
+            backend=backend,
+        )
+    selection_file.write_text(
+        json.dumps(selection, ensure_ascii=False, indent=2) + "\n"
+    )
     return ContinualResult(
         success=stopped in {"success", "already_mastered"},
         stop_reason=reason,
-        selected_step=selected["iteration"],
+        selected_step=selected["iteration"] if selected else None,
         adapter_file=adapter_file,
         selection_file=selection_file,
     )

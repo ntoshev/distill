@@ -4,7 +4,8 @@
 
 - visualizing token likelihood and teacher/student KL;
 - sampling and saving model rollouts;
-- distilling privileged context into a LoRA adapter;
+- distilling privileged context into a LoRA adapter or Qwen3 cartridge;
+- memorizing raw passage continuations with a learned attention memory;
 - inspecting learning and contamination across saved checkpoints.
 
 The current single-fact experiment learns `VIOLET-731`. Top-5 Speculative KD
@@ -15,6 +16,9 @@ the trade-off visible and allow useful early stopping; they do not establish
 that forgetting is eliminated. See
 [EXPERIMENTS.md](EXPERIMENTS.md) for the measurements and
 [DESIGN.md](DESIGN.md) for implementation details.
+
+Cartridge usage, restart semantics, limitations, and validation are documented
+in [CARTRIDGE.md](CARTRIDGE.md).
 
 ## Setup
 

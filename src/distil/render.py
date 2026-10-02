@@ -163,7 +163,9 @@ class RenderOptions:
     metric: str = "logprob"  # logprob | prob | kl (kl needs teacher-mode scores)
     hide_context: bool = False
     stats: bool = False  # legend + summary line
-    worst: int = 0  # rows in the most-surprising-tokens / disagreements table (0 disables)
+    worst: int = (
+        0  # rows in the most-surprising-tokens / disagreements table (0 disables)
+    )
     teacher_sampled: list[bool] | None = None  # provenance of scored sample tokens
 
 
@@ -241,7 +243,9 @@ def render_progress_tokens_header(
         metric_columns = "teacher p  student p  KL      tokens  finish"
         if not has_teacher:
             metric_columns = "student p  tokens  finish"
-        console.print(f"{'step':<{label_width}}  completion  {metric_columns}", style="grey50")
+        console.print(
+            f"{'step':<{label_width}}  completion  {metric_columns}", style="grey50"
+        )
     console.print()
     return label_width, sampled
 
@@ -254,7 +258,9 @@ def render_progress_token_point(
     label_width: int,
     sampled: bool,
 ) -> None:
-    label = "base" if point.step == 0 else f"step-{point.step:04d}"
+    label = getattr(point, "label", None) or (
+        "base" if point.step == 0 else f"step-{point.step:04d}"
+    )
     line = Text(f"{label:<{label_width}}  ")
     for token in point.tokens:
         if metric == "kl":
@@ -280,7 +286,8 @@ def render_progress_token_point(
             line.append(f"  {point.finish_reason}", style="grey50")
     else:
         line.append(
-            f"  {_progress_text(_progress_value(point, metric), metric)}", style="grey50"
+            f"  {_progress_text(_progress_value(point, metric), metric)}",
+            style="grey50",
         )
     console.print(line)
 
@@ -337,10 +344,12 @@ def render_progress_row_point(
         )
         return
 
-    label = "base" if point.step == 0 else f"step-{point.step:04d}"
+    label = getattr(point, "label", None) or (
+        "base" if point.step == 0 else f"step-{point.step:04d}"
+    )
     line = Text(
         f"{label:<{layout['step_width']}}  "
-        f"{probe.name[:layout['probe_width']]:<{layout['probe_width']}}  "
+        f"{probe.name[: layout['probe_width']]:<{layout['probe_width']}}  "
     )
     for token in point.tokens:
         value = token["kl"] if metric == "kl" else token["logprob"]
@@ -377,7 +386,9 @@ def _token_value(tok: TokenScore, metric: str) -> float | None:
     return tok.kl if metric == "kl" else tok.logprob
 
 
-def render(result: ScoreResult, console: Console, opts: RenderOptions | None = None) -> None:
+def render(
+    result: ScoreResult, console: Console, opts: RenderOptions | None = None
+) -> None:
     opts = opts or RenderOptions()
 
     body = Text()
@@ -414,7 +425,9 @@ def render(result: ScoreResult, console: Console, opts: RenderOptions | None = N
         else:
             for lp in (-10, -8, -7, -6, -4, -2, -1, -0.5, -0.1):
                 legend.append(f" {lp:g} ", style=_legend_style(lp, opts.metric))
-            legend.append("  logprob" if opts.metric == "logprob" else "  (prob-scaled)")
+            legend.append(
+                "  logprob" if opts.metric == "logprob" else "  (prob-scaled)"
+            )
         console.print(legend)
         line = (
             f"tokens scored: [bold]{len(scored)}[/bold] of {len(result.tokens)}   "
@@ -461,7 +474,9 @@ def _disagreement_table(scored: list[TokenScore], n: int) -> Table:
     def preferred(alts):
         return f"{alts[0].text!r} {math.exp(alts[0].logprob):.0%}" if alts else ""
 
-    table = Table(title=f"{n} largest teacher/student disagreements", title_justify="left")
+    table = Table(
+        title=f"{n} largest teacher/student disagreements", title_justify="left"
+    )
     table.add_column("token", style="bold")
     table.add_column("KL", justify="right")
     table.add_column("student lp", justify="right")
@@ -495,7 +510,9 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
         "perplexity": round(result.perplexity, 2) if scored else None,
     }
     if teacher:
-        payload["mean_teacher_logprob"] = round(result.mean_teacher_logprob, 3) if scored else None
+        payload["mean_teacher_logprob"] = (
+            round(result.mean_teacher_logprob, 3) if scored else None
+        )
         payload["mean_kl"] = round(result.mean_kl, 3) if scored else None
     payload["tokens"] = [
         {
@@ -503,7 +520,10 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
             "scored": t.scored,
             **({"logprob": round(t.logprob, ndigits)} if t.scored else {}),
             **(
-                {"teacher_logprob": round(t.teacher_logprob, ndigits), "kl": round(t.kl, ndigits)}
+                {
+                    "teacher_logprob": round(t.teacher_logprob, ndigits),
+                    "kl": round(t.kl, ndigits),
+                }
                 if t.scored and t.kl is not None
                 else {}
             ),
@@ -513,7 +533,11 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
                 else {}
             ),
             **(
-                {"teacher_top": [[a.text, round(a.logprob, ndigits)] for a in t.teacher_top_k]}
+                {
+                    "teacher_top": [
+                        [a.text, round(a.logprob, ndigits)] for a in t.teacher_top_k
+                    ]
+                }
                 if t.scored and t.teacher_top_k
                 else {}
             ),
@@ -521,3 +545,24 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
         for t in result.tokens
     ]
     return payload
+
+
+def render_checkpoint_grid(result, console, metric="prob"):
+    """Dense cartridge grid: one checkpoint per row, one sequence per column."""
+    table = Table(box=None, padding=(0, 1), collapse_padding=True, show_edge=False)
+    table.add_column("step", style="grey50", no_wrap=True)
+    for probe in result.probes:
+        table.add_column(probe.name, overflow="fold")
+    for row_index, step in enumerate(result.steps):
+        points = [result.series[p.name][row_index] for p in result.probes]
+        label = points[0].label or f"{step}"
+        cells = []
+        for point in points:
+            cell = Text()
+            for token in point.tokens:
+                value = token.get("kl") if metric == "kl" else token["logprob"]
+                cell.append(token["text"], style=style_for(value, metric))
+            cell.append(f"  p={point.mean_probability:.1%}", style="grey50")
+            cells.append(cell)
+        table.add_row(label, *cells)
+    console.print(table)
