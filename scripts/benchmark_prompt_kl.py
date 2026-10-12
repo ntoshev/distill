@@ -13,8 +13,8 @@ from types import SimpleNamespace
 import mlx.core as mx
 from mlx_lm import load
 
-from distil.chunked_kl import chunked_kl_grad
-from distil.training import TrainingSession, _teacher_rows
+from distill.chunked_kl import chunked_kl_grad
+from distill.training import TrainingSession, _teacher_rows
 
 
 def main():

@@ -6,10 +6,10 @@ import random
 import mlx.core as mx
 import pytest
 
-from distil.cli import main, _speculative_metadata
-from distil.cli_config import build_parser, resolve_config
-from distil.sample import Sample, _proposal_is_accepted, sample_speculative_text
-from distil.training import (
+from distill.cli import main, _speculative_metadata
+from distill.cli_config import build_parser, resolve_config
+from distill.sample import Sample, _proposal_is_accepted, sample_speculative_text
+from distill.training import (
     TrainStep, TrainingSession, _step_payload, save_training_rollout, train_lora,
 )
 
@@ -94,7 +94,7 @@ def test_cli_top_p_rejects_invalid_threshold(value, capsys):
 @pytest.mark.parametrize("raw", [False, True])
 def test_cli_top_p_dispatch_and_saved_metadata(monkeypatch, capsys, tmp_path, raw):
     import mlx_lm
-    import distil.cli as cli
+    import distill.cli as cli
 
     monkeypatch.setattr(mlx_lm, "load", lambda *a, **k: (object(), object()))
 

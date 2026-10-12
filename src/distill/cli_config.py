@@ -84,7 +84,7 @@ class CommandConfig:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="distil",
+        prog="distill",
         description="Visualize per-token likelihood or train a LoRA by on-policy context "
         "distillation. Values support @file and '-' for stdin.",
     )

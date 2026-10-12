@@ -6,14 +6,14 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten
 import pytest
 
-from distil.chunked_kl import chunked_kl_grad
-from distil.training import TrainingSession, _teacher_rows
+from distill.chunked_kl import chunked_kl_grad
+from distill.training import TrainingSession, _teacher_rows
 
 
 def test_query_chunk_gradients_match_full_causal_attention():
     from mlx_lm.models.qwen3 import ModelArgs, TransformerBlock
     from mlx.utils import tree_unflatten
-    from distil.chunked_kl import _attention_layer_vjp
+    from distill.chunked_kl import _attention_layer_vjp
     mx.random.seed(7)
     args = ModelArgs(model_type='qwen3', hidden_size=32, num_hidden_layers=1,
                      intermediate_size=64, num_attention_heads=4, rms_norm_eps=1e-6,
@@ -40,8 +40,8 @@ def test_query_chunk_gradients_match_full_causal_attention():
 @pytest.mark.parametrize('chunk_size', [7, 128])
 def test_chunked_kl_matches_dense_loss_and_gradients(model, tokenizer, chunk_size):
     from mlx_lm.tuner.utils import remove_lora_layers
-    from distil.sample import Sample
-    from distil.templating import prompt_messages
+    from distill.sample import Sample
+    from distill.templating import prompt_messages
 
     try:
         session = TrainingSession(model, tokenizer, 'Always answer in French.',
@@ -51,7 +51,7 @@ def test_chunked_kl_matches_dense_loss_and_gradients(model, tokenizer, chunk_siz
         model.update(tree_unflatten([(name, mx.full(p.shape, 0.003) if name.endswith('lora_b') else p)
                                      for name, p in tree_flatten(model.trainable_parameters())]))
         prompt = 'What is the capital of France?'
-        from distil.templating import render_generation_prompt
+        from distill.templating import render_generation_prompt
         prefix = render_generation_prompt(tokenizer, prompt_messages(prompt), True)
         completion = 'The question asks for a capital. It is Paris.\n</think>\n\nParis.<|im_end|>'
         sample = Sample(prefix, completion, 'Paris.', 'stop', 23)
@@ -80,8 +80,8 @@ def test_chunked_kl_matches_dense_loss_and_gradients(model, tokenizer, chunk_siz
 @pytest.mark.parametrize('chunk_size', [1, 3, 32])
 @pytest.mark.parametrize('direction', ['forward', 'reverse'])
 def test_chunked_head_chain_rule_matches_float32_oracle(monkeypatch, chunk_size, direction):
-    import distil.chunked_kl as chunked
-    from distil.training import _kl_loss
+    import distill.chunked_kl as chunked
+    from distill.training import _kl_loss
 
     class Layer(nn.Module):
         def __init__(self):

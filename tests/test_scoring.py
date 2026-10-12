@@ -1,6 +1,6 @@
 import mlx.core as mx
 
-from distil.scoring import score_text
+from distill.scoring import score_text
 
 
 class BosTokenizer:

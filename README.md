@@ -1,6 +1,6 @@
-# distil
+# distill
 
-`distil` is a small MLX command-line tool for:
+`distill` is a small MLX command-line tool for:
 
 - visualizing token likelihood and teacher/student KL;
 - sampling and saving model rollouts;
@@ -32,24 +32,24 @@ Examples below use `mlx-community/Qwen3.5-0.8b-6bit`.
 
 ```sh
 # Apply the model's chat template and score only the completion.
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 2+2?" \
   --completion "2+2 equals 5."
 
 # Raw continuation scoring without a chat template.
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --raw --prompt "1 2 3 4" --completion " 5 6 3 8 9 10"
 
 # Save a supplied chat completion in rollout format.
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 2+2?" --completion "4" \
   --save-rollout samples.jsonl
 
 # Score one rollout from verifiers/prime-rl results.jsonl.
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --rollout examples/verifiers/gsm8k-results.jsonl --index 1
 ```
@@ -74,7 +74,7 @@ only the teacher's context differs. The default display metric becomes exact
 full-vocabulary `KL(teacher || student)`.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --rollout examples/verifiers/gsm8k-results.jsonl --index 1 \
   --teacher-system "The correct answer is 3." \
@@ -89,7 +89,7 @@ With `--raw`, use `--teacher-prompt` as the teacher's alternate raw prefix.
 ## Sample from the student
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is 7 times 8?" \
   --sample --temperature 0.7 --seed 0 --max-tokens 256 \
@@ -121,7 +121,7 @@ both `--sample` and `--train`; training keeps its top-k 3 default when neither
 is supplied. Saved rollouts and training metrics record the selected policy.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --prompt "What is Project Lumen's launch code?" \
   --sample --speculative-top-k 5 --temperature 0 --seed 0 --max-tokens 16 \
@@ -220,7 +220,7 @@ contradictory text cannot satisfy mastery. Any changed canary output stops the
 run, and the best earlier safe checkpoint is selected.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --train @examples/distillation/sakana_wiki.txt \
   --generator-model mlx-community/Qwen3.5-9B-6bit \
@@ -257,7 +257,7 @@ selected checkpoint and stop result for automation.
 The adapter is saved in standard mlx-lm format and can be sampled directly:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --adapter-path adapters/lumen-test \
   --prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
@@ -315,7 +315,7 @@ Render one fixed target at every checkpoint. Each token is colored by its own
 probability; the trailing percentage is geometric-mean token probability.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --prompt "What is Project Lumen's launch code? Answer with the code only." \
@@ -325,7 +325,7 @@ uv run distil \
 Compare several targets and canaries as compact sparklines:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --probes examples/distillation/lumen-probes.jsonl \
@@ -346,7 +346,7 @@ preserves the model's actual token boundaries; it is not a fixed answer colored
 with another string's probabilities.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --rollout outputs/lr-sweep-v014/lr-2e-6/rollouts.jsonl --index 0 \
@@ -358,7 +358,7 @@ from the training distribution. `--sample` remains available for ad-hoc prompt
 or probe exploration. For the same distribution used by continual training:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-4b-6bit \
   --progress outputs/fifa-first-5 \
   --probes examples/distillation/2026_fifa_world_cup_first_5_probes.jsonl \

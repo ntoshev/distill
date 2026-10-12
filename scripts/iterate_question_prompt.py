@@ -7,7 +7,7 @@ from pathlib import Path
 
 from mlx_lm import load
 
-from distil.sample import sample_completion
+from distill.sample import sample_completion
 
 
 PROMPTS = {

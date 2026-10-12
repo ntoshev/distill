@@ -13,18 +13,18 @@ from typing import Callable
 import mlx.core as mx
 from mlx.utils import tree_map
 
-from distil.adapters import (
+from distill.adapters import (
     lora_batch_enabled,
     lora_disabled,
     supports_lora_batch_routing,
 )
-from distil.cli_config import resolve_speculative_policy
-from distil.prefill import (
+from distill.cli_config import resolve_speculative_policy
+from distill.prefill import (
     clone_prompt_cache,
     merge_prompt_caches,
     prefill_last_logits,
 )
-from distil.templating import render_generation_prompt
+from distill.templating import render_generation_prompt
 
 
 class _SharedModelBatchUnsupported(Exception):

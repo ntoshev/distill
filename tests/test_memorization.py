@@ -2,9 +2,9 @@ import json
 import mlx.core as mx
 import pytest
 from cartridge_helpers import tiny_model
-from distil.cartridge import Cartridge, model_identity
-from distil.memorization import compile_windows, WindowSchedule, run_memorization
-from distil.cartridge_training import CartridgeTrainingSession
+from distill.cartridge import Cartridge, model_identity
+from distill.memorization import compile_windows, WindowSchedule, run_memorization
+from distill.cartridge_training import CartridgeTrainingSession
 
 SOURCE = "The launch code is violet. The river is quiet. The sky is blue.\n"
 
@@ -154,7 +154,7 @@ def test_exact_resume_preserves_fp32_masters_adam_cursor_and_committed_logs(tmp_
 
 
 def test_resume_uses_fp32_masters_instead_of_half_precision_export(tmp_path):
-    from distil.cartridge import model_identity
+    from distill.cartridge import model_identity
 
     model, tokenizer = tiny_model()
     model.set_dtype(mx.float16)

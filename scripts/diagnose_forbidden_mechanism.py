@@ -75,8 +75,8 @@ def prepare(root):
              SOURCE / 'lr_1e-05/step_4/adapters.safetensors',
              SOURCE / 'lr_1e-05/step_4/adapter_config.json',
              PROJECT / 'scripts/train_forbidden_pilot.py', PROJECT / 'scripts/distill_prompt_responses.py',
-             PROJECT / 'src/distil/training.py', PROJECT / 'src/distil/chunked_kl.py',
-             PROJECT / 'src/distil/adapters.py', PROJECT / 'src/distil/templating.py',
+             PROJECT / 'src/distill/training.py', PROJECT / 'src/distill/chunked_kl.py',
+             PROJECT / 'src/distill/adapters.py', PROJECT / 'src/distill/templating.py',
              PROJECT / 'experiments/shared_prompt_forbidden/evaluate.py']
     files += list((SOURCE / 'scorer').glob('*.py'))
     hashes = {str(p.relative_to(PROJECT)): sha(p) for p in files}
@@ -138,7 +138,7 @@ def generation_job(job, dest):
     import mlx.core as mx
     from mlx_lm.generate import BatchGenerator
     from mlx_lm.sample_utils import make_sampler
-    from distil.templating import prompt_messages, render_generation_prompt
+    from distill.templating import prompt_messages, render_generation_prompt
     from experiments.shared_prompt_forbidden.evaluate import load_scorer
     from scripts.distill_prompt_responses import generated_presence_penalty, response_fields
     source = next(r for r in rows(SOURCE / 'lr_1e-05/validation_recovered/responses.jsonl')
@@ -196,9 +196,9 @@ def generation_job(job, dest):
 
 def profile_job(job, dest):
     import mlx.core as mx
-    from distil.chunked_kl import _parts, _head_logits
-    from distil.templating import prompt_messages, render_generation_prompt
-    from distil.training import _kl_loss
+    from distill.chunked_kl import _parts, _head_logits
+    from distill.templating import prompt_messages, render_generation_prompt
+    from distill.training import _kl_loss
     from scripts.train_forbidden_pilot import hidden_rows
     source = next(r for r in rows(SOURCE / 'teacher/responses.jsonl') if r['case_id'] == job['case_id'])
     model, tokenizer = load_model(True)

@@ -176,7 +176,7 @@ for name,s in evaluations.items():
     vals=[p['english'],extra['exact_sections_order'],extra['star_bullets_in_section_2'],p['at_least_85_words'],p['fewer_than_180_words'],p['because_present'],p['forbidden_words_absent'],extra['exact_ending']]
     lines.append('| '+name+' | '+' | '.join(map(str,vals))+' |')
 lines+=['', '## Use an adapter','', '```sh',
-        'uv run distil \\',
+        'uv run distill \\',
         '  --model mlx-community/Qwen3.5-4B-6bit \\',
         f'  --adapter-path {root}/adapters/cases-128 \\',
         '  --prompt "Why do leaves change color in autumn?" \\',

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mlx_lm import load
 
-from distil.generation import (
+from distill.generation import (
     GeneratedFact,
     fact_prompt,
     parse_lines,
@@ -17,7 +17,7 @@ from distil.generation import (
     question_repair_prompt,
     validate_question_block,
 )
-from distil.sample import sample_completion
+from distill.sample import sample_completion
 
 
 def _sample(model, tokenizer, prompt: str, max_tokens: int, seed: int) -> str:

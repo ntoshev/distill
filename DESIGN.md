@@ -1,6 +1,6 @@
-# distil design
+# distill design
 
-`distil` has two related purposes:
+`distill` has two related purposes:
 
 1. visualize token likelihood and teacher/student disagreement;
 2. train a LoRA adapter by on-policy context distillation, while retaining

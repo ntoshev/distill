@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from distil.judge import JUDGE_SYSTEM, judge_answer
+from distill.judge import JUDGE_SYSTEM, judge_answer
 
 
 @pytest.mark.parametrize(
@@ -10,7 +10,7 @@ from distil.judge import JUDGE_SYSTEM, judge_answer
     [(" YES.", True), ("No, it contradicts", False)],
 )
 def test_judge_answer_parses_verdict(monkeypatch, verdict, expected):
-    import distil.judge as judge
+    import distill.judge as judge
 
     calls = []
 

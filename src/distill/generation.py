@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from distil.templating import render_generation_prompt
+from distill.templating import render_generation_prompt
 
 
 PROMPT_VERSION = "continual-v4"

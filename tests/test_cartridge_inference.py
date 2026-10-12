@@ -1,9 +1,9 @@
 import mlx.core as mx
 from cartridge_helpers import tiny_model
-from distil.cartridge import Cartridge, model_identity
-from distil.prefill import select_logits
-from distil.scoring import score_ids, kl_pair_ids
-from distil.sample import sample_text
+from distill.cartridge import Cartridge, model_identity
+from distill.prefill import select_logits
+from distill.scoring import score_ids, kl_pair_ids
+from distill.sample import sample_text
 
 
 def memory_case():
@@ -65,8 +65,8 @@ def test_raw_sampler_preserves_actual_ids_and_uses_a_fresh_prefix():
 
 
 def test_generated_scoring_keeps_noncanonical_actual_token_boundaries():
-    from distil.scoring import score_generated
-    from distil.sample import Sample
+    from distill.scoring import score_generated
+    from distill.sample import Sample
 
     model, tokenizer, memory = memory_case()
     sample = Sample("xyz", "aa", "aa", "length", 2, token_ids=[97, 97])
@@ -86,8 +86,8 @@ def test_generated_scoring_keeps_noncanonical_actual_token_boundaries():
 def test_cartridge_progress_has_detached_base_and_active_canary_answers(
     tmp_path, monkeypatch
 ):
-    from distil.progress import Probe, score_progress
-    from distil.sample import Sample
+    from distill.progress import Probe, score_progress
+    from distill.sample import Sample
 
     model, tokenizer, memory = memory_case()
     for step in [0, 1]:
@@ -106,7 +106,7 @@ def test_cartridge_progress_has_detached_base_and_active_canary_answers(
             "xyz", text, text, "length", len(text), token_ids=tokenizer.encode(text)
         )
 
-    monkeypatch.setattr("distil.progress.sample_completion", sample)
+    monkeypatch.setattr("distill.progress.sample_completion", sample)
     result = score_progress(
         model,
         tokenizer,
@@ -121,7 +121,7 @@ def test_cartridge_progress_has_detached_base_and_active_canary_answers(
 
 
 def test_generated_eos_is_preserved_in_sampling_and_rescoring():
-    from distil.scoring import score_generated
+    from distill.scoring import score_generated
 
     model, tokenizer = tiny_model()
     model.model.embed_tokens.weight = mx.zeros_like(model.model.embed_tokens.weight)

@@ -5,10 +5,10 @@ import json
 import pytest
 import mlx.core as mx
 
-from distil.progress import Probe, ProbePoint
-from distil.sample import _proposal_is_accepted
-from distil.stopping import LearningItem
-from distil.training import TrainStep, _kl_loss, load_prompts
+from distill.progress import Probe, ProbePoint
+from distill.sample import _proposal_is_accepted
+from distill.stopping import LearningItem
+from distill.training import TrainStep, _kl_loss, load_prompts
 
 
 def test_kl_loss_directions_match_manual_distributions():
@@ -79,8 +79,8 @@ def test_load_prompts_rejects_directory(tmp_path):
 
 
 def test_saved_samples_use_student_prefix_and_preserve_teacher_completion(monkeypatch):
-    import distil.training as training
-    from distil.sample import Sample
+    import distill.training as training
+    from distill.sample import Sample
     from types import SimpleNamespace
 
     session = training.TrainingSession.__new__(training.TrainingSession)
@@ -122,15 +122,15 @@ def test_saved_samples_use_student_prefix_and_preserve_teacher_completion(monkey
 
 @pytest.mark.parametrize("prompts,samples", [([], []), (["q"], [])])
 def test_saved_samples_reject_invalid_batch(prompts, samples):
-    from distil.training import TrainingSession
+    from distill.training import TrainingSession
     session = TrainingSession.__new__(TrainingSession)
     with pytest.raises(ValueError, match="matching non-empty"):
         session.step_samples(prompts, samples)
 
 
 def test_saved_noncanonical_token_splits_are_preserved(monkeypatch):
-    import distil.training as training
-    from distil.sample import Sample
+    import distill.training as training
+    from distill.sample import Sample
 
     class Tokenizer:
         def encode(self, text, **kwargs):
@@ -165,9 +165,9 @@ def test_interleaved_token_accepts_only_inside_teacher_top_k():
 def test_shared_rollout_alignment_preserves_rows_text_and_teacher_logits(
     monkeypatch, captured_rows, empty
 ):
-    import distil.training as training
-    from distil.sample import Sample
-    from distil.scoring import AlignedTokens
+    import distill.training as training
+    from distill.sample import Sample
+    from distill.scoring import AlignedTokens
 
     class TeacherTokenizer:
         def apply_chat_template(self, messages, **kwargs):
@@ -209,7 +209,7 @@ def test_shared_rollout_alignment_preserves_rows_text_and_teacher_logits(
 def test_continual_training_uses_canary_limit_and_saves_rollouts(
     tmp_path, monkeypatch, separate_judge, policy
 ):
-    import distil.distill as distill
+    import distill.distill as distill
 
     top_p = policy.get("speculative_top_p")
     top_k = policy.get("speculative_top_k", 3 if top_p is None else None)
@@ -368,7 +368,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
 def test_continual_mastery_requires_consecutive_whole_answer_passes(
     tmp_path, monkeypatch
 ):
-    import distil.distill as distill
+    import distill.distill as distill
 
     reports = []
     item_answers = iter(["wrong", "VIOLET-731", "wrong", "VIOLET-731", "VIOLET-731"])

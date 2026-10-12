@@ -1,9 +1,9 @@
 import mlx.core as mx
 from cartridge_helpers import tiny_model
-from distil.cartridge import Cartridge, model_identity
-from distil.cartridge_training import CartridgeTrainingSession
-from distil.sample import sample_speculative_completion
-from distil.templating import prompt_messages, render_generation_prompt
+from distill.cartridge import Cartridge, model_identity
+from distill.cartridge_training import CartridgeTrainingSession
+from distill.sample import sample_speculative_completion
+from distill.templating import prompt_messages, render_generation_prompt
 
 
 def test_sequential_policy_caches_advance_on_actual_tokens_and_capture_teacher_rows():

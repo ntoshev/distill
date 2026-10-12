@@ -6,11 +6,11 @@ from time import perf_counter
 import mlx.core as mx
 import pytest
 
-from distil.rollout import load_rollout
-from distil.sample import sample_completion
-from distil.scoring import score_text
-from distil.templating import build_rollout
-from distil.training import TrainingSession, _teacher_rows
+from distill.rollout import load_rollout
+from distill.sample import sample_completion
+from distill.scoring import score_text
+from distill.templating import build_rollout
+from distill.training import TrainingSession, _teacher_rows
 
 from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 

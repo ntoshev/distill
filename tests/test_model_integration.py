@@ -13,22 +13,22 @@ import pytest
 from rich.console import Console
 from mlx.utils import tree_flatten
 
-from distil.adapters import continue_lora
-from distil.render import RenderOptions, render, to_json_dict
-from distil.distill import run_continual
-from distil.generation import teacher_system as document_teacher_system
-from distil.judge import judge_answer
-from distil.progress import Probe
-from distil.rollout import load_rollout, save_rollout
-from distil.sample import (
+from distill.adapters import continue_lora
+from distill.render import RenderOptions, render, to_json_dict
+from distill.distill import run_continual
+from distill.generation import teacher_system as document_teacher_system
+from distill.judge import judge_answer
+from distill.progress import Probe
+from distill.rollout import load_rollout, save_rollout
+from distill.sample import (
     sample_completion,
     sample_speculative_completion,
     sample_speculative_completions,
 )
-from distil.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
-from distil.templating import apply_teacher_context, build_chat, build_raw, build_rollout
-from distil.training import TrainingSession, _teacher_rows, train_lora
-from distil.stopping import LearningItem, answer_only_prompt
+from distill.scoring import score_ids, score_text, score_text_pair, tokenize_with_offsets
+from distill.templating import apply_teacher_context, build_chat, build_raw, build_rollout
+from distill.training import TrainingSession, _teacher_rows, train_lora
+from distill.stopping import LearningItem, answer_only_prompt
 
 from conftest import FIXTURE_DIR, MODEL, sample_skd_case
 
@@ -268,11 +268,11 @@ def test_sample_greedy_scores_high_and_saves(model, tokenizer, tmp_path):
     path = tmp_path / "samples.jsonl"
     index = save_rollout(
         path, messages, [{"role": "assistant", "content": s.content}],
-        extra={"task": "distil-sample", "is_truncated": s.finish_reason != "stop"},
+        extra={"task": "distill-sample", "is_truncated": s.finish_reason != "stop"},
     )
     loaded = load_rollout(path, index)
     assert loaded.completion[0]["content"] == s.content
-    assert loaded.meta["task"] == "distil-sample"
+    assert loaded.meta["task"] == "distill-sample"
 
 
 def test_sample_then_teacher_scores_align(model, tokenizer):
@@ -611,7 +611,7 @@ def test_optimized_training_step_tracks_slow_reference(model, tokenizer, top_p):
 @pytest.mark.parametrize('enable_thinking', [False, True])
 def test_saved_teacher_response_updates_only_lora(model, tokenizer, enable_thinking):
     from mlx_lm.tuner.utils import remove_lora_layers
-    from distil.sample import Sample
+    from distill.sample import Sample
 
     prompt = "What is Project Lumen's launch code?"
     ids = tokenizer.encode("Verify frozen base weights.", add_special_tokens=False)

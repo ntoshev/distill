@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 from mlx_lm.models.cache import make_prompt_cache
-from distil.cartridge import Cartridge
+from distill.cartridge import Cartridge
 
 
 class InferencePolicy(Protocol):

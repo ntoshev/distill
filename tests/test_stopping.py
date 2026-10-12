@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from distil.stopping import (
+from distill.stopping import (
     ANSWER_ONLY_INSTRUCTION,
     ActiveRotation,
     answer_only_prompt,

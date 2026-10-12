@@ -3,7 +3,7 @@ import mlx.core as mx
 import pytest
 from mlx_lm.models.gated_delta import gated_delta_ops
 
-from distil.recurrent import bounded_gated_delta
+from distill.recurrent import bounded_gated_delta
 
 
 @pytest.mark.parametrize('vector_gate', [False, True])

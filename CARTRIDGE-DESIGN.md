@@ -1,12 +1,12 @@
-# Cartridge backend for distil
+# Cartridge backend for distill
 
-Status: proposed design, based on the current working trees of `distil` and
+Status: proposed design, based on the current working trees of `distill` and
 `../cartridges` (2026-10-02). Commands below describe the proposed interface;
 they are not implemented by this document.
 
 ## Recommendation
 
-Add cartridges as a second backend inside the existing `distil` CLI. Preserve
+Add cartridges as a second backend inside the existing `distill` CLI. Preserve
 `--train` as document fact learning, and add `--memorize` for verbatim passage
 learning. Share document ingestion, scoring, generation, evaluation, checkpoint
 inspection, and reporting; keep backend parameters and optimizers separate.
@@ -26,7 +26,7 @@ implemented and tested representation.
 
 | Area | Current implementation | Integration implication |
 | --- | --- | --- |
-| CLI | `src/distil/cli_config.py` resolves score, sample, train, and progress modes | Extend this parser instead of adding a separate executable |
+| CLI | `src/distill/cli_config.py` resolves score, sample, train, and progress modes | Extend this parser instead of adding a separate executable |
 | Document learning | `cli.py:_continual_cli`, `generation.py`, `distill.py:run_continual` | Reuse fact generation, question pairs, mastery judgments, rotation, and canaries |
 | LoRA optimization | `training.py:TrainingSession` installs LoRA and differentiates model parameters | Introduce a separate cartridge session; changing only the save method is insufficient |
 | Inference | `sample.py`, `scoring.py`, `prefill.py` largely create or assume empty initial caches | Add explicit per-policy cache construction throughout |
@@ -37,9 +37,9 @@ implemented and tested representation.
 
 The sibling currently pins `Qwen3-4B-Instruct-2507-4bit` at revision
 `50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b`, requires ordinary `KVCache`
-layers, and imports `distil` already. Adding a reverse dependency from `distil`
+layers, and imports `distill` already. Adding a reverse dependency from `distill`
 to that package would create a dependency cycle. Port the small reusable core
-into `distil`; subsequently let the experimental package consume that core.
+into `distill`; subsequently let the experimental package consume that core.
 Do not import its dataset downloads or `.research` checkout requirements into
 normal CLI execution.
 
@@ -71,7 +71,7 @@ backend choices before loading a model.
 ### Memorize a document
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --memorize @examples/distillation/sakana_wiki.txt \
   --cartridge cartridges/sakana-memory \
@@ -92,7 +92,7 @@ exclusive with `--prompt`, `--completion`, `--rollout`, and `--sample`. It rende
 the recorded completion recipe and generates a continuation:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --cartridge-path cartridges/sakana-memory \
   --complete-key @passage-key.txt --max-tokens 128 --temperature 0
@@ -105,7 +105,7 @@ both the key and completion. Never apply chat formatting to this recipe.
 ### Learn document facts, as with LoRA
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --backend cartridge \
   --train @examples/distillation/sakana_wiki.txt \
@@ -132,19 +132,19 @@ loop is not a substitute for fact learning.
 ### Sample, score, and inspect
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --cartridge-path cartridges/sakana-qa \
   --prompt "What does Sakana AI develop?" \
   --sample --temperature 0 --max-tokens 64 --no-thinking
 
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --cartridge-path cartridges/sakana-qa \
   --prompt "What does Sakana AI develop?" \
   --completion @expected-answer.txt --metric prob --stats --no-thinking
 
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --progress cartridges/sakana-qa \
   --probes cartridges/sakana-qa/generated/probes.jsonl --no-thinking
@@ -160,12 +160,12 @@ exclusive with the existing progress inputs.
 
 ```sh
 # Refinement: fresh Adam, new run, existing learned memory.
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --memorize @document.txt --from-cartridge cartridges/memory \
   --cartridge cartridges/refined --passes 2 --learning-rate 0.001
 
 # Exact continuation: original recipe/state, six total passes.
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --resume cartridges/memory --passes 6
 ```
 

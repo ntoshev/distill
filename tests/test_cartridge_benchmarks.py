@@ -3,11 +3,11 @@
 import mlx.core as mx
 import pytest
 from mlx_lm.models.cache import make_prompt_cache
-from distil.cartridge import Cartridge
-from distil.cartridge_training import CartridgeTrainingSession
-from distil.memorization import compile_windows
-from distil.prefill import prefill_last_logits, clone_prompt_cache
-from distil.sample import sample_text
+from distill.cartridge import Cartridge
+from distill.cartridge_training import CartridgeTrainingSession
+from distill.memorization import compile_windows
+from distill.prefill import prefill_last_logits, clone_prompt_cache
+from distill.sample import sample_text
 
 pytestmark = [pytest.mark.benchmark, pytest.mark.model]
 SOURCE = (

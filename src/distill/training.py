@@ -14,25 +14,25 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_map
 
-from distil.adapters import (
+from distill.adapters import (
     add_lora,
     continue_lora,
     lora_disabled,
     save_lora_adapter,
     supports_lora_batch_routing,
 )
-from distil.cli_config import resolve_speculative_policy
-from distil.prefill import DEFAULT_PREFILL_STEP_SIZE, prefill_cache, select_logits
-from distil.losses import kl_loss as _kl_loss
-from distil.rollout import save_rollout
-from distil.sample import (
+from distill.cli_config import resolve_speculative_policy
+from distill.prefill import DEFAULT_PREFILL_STEP_SIZE, prefill_cache, select_logits
+from distill.losses import kl_loss as _kl_loss
+from distill.rollout import save_rollout
+from distill.sample import (
     Sample,
     sample_completion,
     sample_speculative_completion,
     sample_speculative_completions,
 )
-from distil.scoring import align_scored_tokens
-from distil.templating import (
+from distill.scoring import align_scored_tokens
+from distill.templating import (
     apply_teacher_context, build_raw, prompt_messages, render_generation_prompt,
 )
 
@@ -241,7 +241,7 @@ def save_training_rollout(
         messages,
         [{"role": "assistant", "content": step.content}],
         extra={
-            "task": "distil-train",
+            "task": "distill-train",
             "model": model_name,
             "iteration": step.iteration,
             **({"item_id": item_id} if item_id is not None else {}),
@@ -721,7 +721,7 @@ class TrainingSession:
             if self.loss_chunk_size is not None:
                 if capture_feedback:
                     raise ValueError("Chunked KL does not support feedback capture")
-                from distil.chunked_kl import chunked_kl_grad
+                from distill.chunked_kl import chunked_kl_grad
                 loss, grads = chunked_kl_grad(
                     self.model, self.teacher_model, rollout,
                     chunk_size=self.loss_chunk_size, kl_direction=self.kl_direction,

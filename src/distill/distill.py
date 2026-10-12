@@ -10,19 +10,19 @@ from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
-from distil.adapters import lora_disabled
-from distil.cli_config import resolve_speculative_policy
-from distil.judge import judge_answer
-from distil.progress import Probe, score_probe
-from distil.sample import sample_completion
-from distil.stopping import (
+from distill.adapters import lora_disabled
+from distill.cli_config import resolve_speculative_policy
+from distill.judge import judge_answer
+from distill.progress import Probe, score_probe
+from distill.sample import sample_completion
+from distill.stopping import (
     ActiveRotation,
     LearningItem,
     answer_only_prompt,
     mastered,
 )
-from distil.training import TrainingSession, _step_payload, save_training_rollout
-from distil.templating import prompt_messages
+from distill.training import TrainingSession, _step_payload, save_training_rollout
+from distill.templating import prompt_messages
 
 
 class _DefaultSpeculativeTopK(Enum):
@@ -68,7 +68,7 @@ def _answer(
 
 def _copy_selected(checkpoint: Path, root: Path) -> Path:
     if (checkpoint / "cartridge.json").exists():
-        from distil.cartridge_checkpoint import copy_export
+        from distill.cartridge_checkpoint import copy_export
 
         return copy_export(checkpoint, root)
     for name in ("adapter_config.json", "adapters.safetensors"):
@@ -319,7 +319,7 @@ def run_continual(
     resume_state = None
     if resume_checkpoint:
         resume_state = session.restore(Path(resume_checkpoint))
-        from distil.cartridge_checkpoint import recover_logs, validate_resume_config
+        from distill.cartridge_checkpoint import recover_logs, validate_resume_config
 
         validate_resume_config(root, resume_state)
         recover_logs(root, resume_state["log_offsets"])
@@ -418,7 +418,7 @@ def run_continual(
             safe_rows.append(row)
         if backend == "cartridge":
             rotation.update(active)
-            from distil.cartridge_checkpoint import commit_checkpoint
+            from distill.cartridge_checkpoint import commit_checkpoint
 
             commit_checkpoint(
                 session,

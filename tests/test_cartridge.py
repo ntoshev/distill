@@ -3,7 +3,7 @@ import mlx.core as mx
 import pytest
 from mlx_lm.models.cache import make_prompt_cache
 from cartridge_helpers import tiny_model
-from distil.cartridge import Cartridge, model_identity
+from distill.cartridge import Cartridge, model_identity
 
 
 def setup_memory():

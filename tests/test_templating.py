@@ -2,7 +2,7 @@
 
 import pytest
 
-from distil.templating import (
+from distill.templating import (
     apply_teacher_context, build_chat, build_raw, build_rollout, prompt_messages,
     render_generation_prompt,
 )

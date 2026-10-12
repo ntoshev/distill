@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from distil.generation import (
+from distill.generation import (
     ensure_fits,
     fact_prompt,
     generate_facts,

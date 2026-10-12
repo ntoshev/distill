@@ -1,5 +1,5 @@
 [project]
-name = "distil"
+name = "distill"
 version = "0.1.0"
 description = "Visualize token likelihood and distill context into MLX LoRA adapters"
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-distil = "distil.cli:main"
+distill = "distill.cli:main"
 
 [dependency-groups]
 dev = [

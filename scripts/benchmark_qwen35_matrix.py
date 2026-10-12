@@ -13,9 +13,9 @@ from mlx_lm import load
 from mlx_lm.tuner.utils import remove_lora_layers
 from mlx.utils import tree_map
 
-from distil.sample import sample_completion, sample_speculative_completion
-from distil.templating import apply_teacher_context
-from distil.training import TrainingSession, _teacher_rows
+from distill.sample import sample_completion, sample_speculative_completion
+from distill.templating import apply_teacher_context
+from distill.training import TrainingSession, _teacher_rows
 
 
 MODELS = (

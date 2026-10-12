@@ -3,11 +3,11 @@
 import mlx.core as mx
 import pytest
 from mlx_lm.models.cache import make_prompt_cache
-from distil.cartridge import Cartridge
-from distil.cartridge_training import CartridgeTrainingSession
-from distil.memorization import compile_windows
-from distil.prefill import prefill_last_logits
-from distil.scoring import score_ids
+from distill.cartridge import Cartridge
+from distill.cartridge_training import CartridgeTrainingSession
+from distill.memorization import compile_windows
+from distill.prefill import prefill_last_logits
+from distill.scoring import score_ids
 
 pytestmark = pytest.mark.model
 SOURCE = (

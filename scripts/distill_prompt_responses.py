@@ -22,9 +22,9 @@ from mlx_lm.generate import BatchGenerator
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
-from distil.sample import Sample
-from distil.templating import prompt_messages, render_generation_prompt
-from distil.training import TrainingSession
+from distill.sample import Sample
+from distill.templating import prompt_messages, render_generation_prompt
+from distill.training import TrainingSession
 
 
 def read_rows(path):

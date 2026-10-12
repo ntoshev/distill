@@ -10,10 +10,10 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from distil.scoring import ScoreResult, TokenScore
+from distill.scoring import ScoreResult, TokenScore
 
 if TYPE_CHECKING:
-    from distil.progress import ProgressResult
+    from distill.progress import ProgressResult
 
 # Color stops for the likelihood gradient. Hex literals are intentional: many
 # editors show inline color previews for them.

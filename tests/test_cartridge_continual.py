@@ -1,14 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 import json
-from distil.distill import run_continual
-from distil.progress import Probe, ProbePoint
-from distil.stopping import LearningItem
-from distil.training import TrainStep
+from distill.distill import run_continual
+from distill.progress import Probe, ProbePoint
+from distill.stopping import LearningItem
+from distill.training import TrainStep
 
 
 def run_case(tmp_path, monkeypatch, *, unsafe_init=False, leak_at=None):
-    import distil.distill as controller
+    import distill.distill as controller
 
     class Model:
         def eval(self):

@@ -15,11 +15,11 @@ from mlx_lm import load
 from mlx_lm.models.cache import make_prompt_cache
 from mlx_lm.tuner.utils import remove_lora_layers
 
-from distil.adapters import lora_disabled
-from distil.chunked_kl import _head_logits, _parts, chunked_kl_grad
-from distil.sample import Sample
-from distil.templating import prompt_messages, render_generation_prompt
-from distil.training import TrainingSession, _kl_loss, _teacher_rows
+from distill.adapters import lora_disabled
+from distill.chunked_kl import _head_logits, _parts, chunked_kl_grad
+from distill.sample import Sample
+from distill.templating import prompt_messages, render_generation_prompt
+from distill.training import TrainingSession, _kl_loss, _teacher_rows
 from experiments.shared_prompt_forbidden.evaluate import load_scorer
 from scripts.diagnose_forbidden_prompt import MODEL, REVISION, summarize
 from scripts.distill_prompt_responses import (
@@ -252,9 +252,9 @@ def main():
     project=Path(__file__).resolve().parents[1]
     code_files=['scripts/train_forbidden_pilot.py','scripts/diagnose_forbidden_prompt.py',
                 'scripts/extend_forbidden_teacher.py',
-                'scripts/distill_prompt_responses.py','src/distil/training.py',
-                'src/distil/chunked_kl.py','src/distil/recurrent.py',
-                'src/distil/adapters.py','experiments/shared_prompt_forbidden/evaluate.py']
+                'scripts/distill_prompt_responses.py','src/distill/training.py',
+                'src/distill/chunked_kl.py','src/distill/recurrent.py',
+                'src/distill/adapters.py','experiments/shared_prompt_forbidden/evaluate.py']
     for name in code_files:
         dest=root/'training_code'/name
         dest.parent.mkdir(parents=True,exist_ok=True)

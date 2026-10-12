@@ -10,7 +10,7 @@ seeing it. The value follows the existing input convention: inline text,
 `@file`, or `-` for stdin.
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --train @examples/distillation/sakana_wiki.txt \
   --generator-model mlx-community/Qwen3.5-9B-6bit \
@@ -687,11 +687,11 @@ must not be treated as harmless metadata.
 Keep orchestration out of `cli.py`:
 
 ```text
-src/distil/generation.py   fact enumeration, generation prompts, parsing
-src/distil/stopping.py     mastery rotation, stop rules, selection
-src/distil/distill.py      generate → baseline → train → evaluate → finalize
-src/distil/training.py     evaluation callback and mutable active rotation
-src/distil/cli.py          argument validation and dispatch
+src/distill/generation.py   fact enumeration, generation prompts, parsing
+src/distill/stopping.py     mastery rotation, stop rules, selection
+src/distill/distill.py      generate → baseline → train → evaluate → finalize
+src/distill/training.py     evaluation callback and mutable active rotation
+src/distill/cli.py          argument validation and dispatch
 ```
 
 Existing sampling, scoring, progress, adapter, and rendering modules remain

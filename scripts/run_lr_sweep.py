@@ -73,7 +73,7 @@ def main() -> int:
     from mlx_lm import load
     from mlx_lm.tuner.utils import remove_lora_layers
 
-    from distil.training import load_prompts, train_lora
+    from distill.training import load_prompts, train_lora
 
     try:
         prompts = load_prompts(args.prompts)

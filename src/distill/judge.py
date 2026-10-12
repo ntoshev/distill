@@ -1,6 +1,6 @@
 """LLM-based answer equivalence judging."""
 
-from distil.sample import sample_completion
+from distill.sample import sample_completion
 
 
 JUDGE_SYSTEM = """You are a strict answer-equivalence classifier.

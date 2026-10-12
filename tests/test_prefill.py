@@ -3,7 +3,7 @@
 import mlx.core as mx
 import pytest
 
-from distil.prefill import prefill_last_logits, select_logits
+from distill.prefill import prefill_last_logits, select_logits
 
 
 class _FakeCache:

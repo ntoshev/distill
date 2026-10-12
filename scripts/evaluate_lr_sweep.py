@@ -12,7 +12,7 @@ HELDOUT_PROMPT = "Give the launch code assigned to Project Lumen. Answer with th
 
 
 def answer(model, tokenizer, prompt: str) -> str:
-    from distil.sample import sample_completion
+    from distill.sample import sample_completion
 
     return sample_completion(
         model,

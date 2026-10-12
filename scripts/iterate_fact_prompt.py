@@ -7,8 +7,8 @@ from pathlib import Path
 
 from mlx_lm import load
 
-from distil.generation import parse_lines
-from distil.sample import sample_completion
+from distill.generation import parse_lines
+from distill.sample import sample_completion
 
 
 PROMPTS = {

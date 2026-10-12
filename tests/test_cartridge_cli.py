@@ -1,8 +1,8 @@
 import json
 import mlx.core as mx
 from cartridge_helpers import tiny_model
-from distil.cartridge import model_identity
-from distil.cli import main
+from distill.cartridge import model_identity
+from distill.cli import main
 
 SOURCE = "The launch code is violet. The river is quiet. The sky is blue.\n"
 
@@ -12,7 +12,7 @@ def bind(monkeypatch):
         model, tokenizer = tiny_model()
         return model, tokenizer, model_identity(model, tokenizer, name)
 
-    monkeypatch.setattr("distil.cli._load_cartridge_base", load)
+    monkeypatch.setattr("distill.cli._load_cartridge_base", load)
 
 
 def test_memorize_complete_resume_and_raw_memory_progress(
@@ -84,8 +84,8 @@ def test_memorize_complete_resume_and_raw_memory_progress(
 
 def test_multifact_cli_and_exact_fact_resume(tmp_path, monkeypatch, capsys):
     bind(monkeypatch)
-    from distil.progress import ProbePoint
-    import distil.distill as controller
+    from distill.progress import ProbePoint
+    import distill.distill as controller
 
     monkeypatch.setattr(
         controller,
@@ -218,9 +218,9 @@ def test_utf8_files_preserve_crlf_and_key_whitespace(tmp_path, monkeypatch, caps
 
 def test_inference_loads_the_recorded_base_revision(tmp_path, monkeypatch):
     from argparse import Namespace
-    from distil.cli import _load_models
-    from distil.cli_config import CommandConfig, SamplingOptions
-    from distil.cartridge import Cartridge
+    from distill.cli import _load_models
+    from distill.cli_config import CommandConfig, SamplingOptions
+    from distill.cartridge import Cartridge
 
     model, tokenizer = tiny_model()
     identity = model_identity(model, tokenizer, "tiny")
@@ -233,7 +233,7 @@ def test_inference_loads_the_recorded_base_revision(tmp_path, monkeypatch):
         seen.append((name, revision))
         return model, tokenizer, identity
 
-    monkeypatch.setattr("distil.cli._load_cartridge_base", load)
+    monkeypatch.setattr("distill.cli._load_cartridge_base", load)
     args = Namespace(
         model="tiny",
         config=CommandConfig(

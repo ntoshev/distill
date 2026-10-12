@@ -13,16 +13,16 @@ compressed KV positions; the export can be larger than the document itself.
 ## Passage memorization
 
 ```sh
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --memorize @document.txt --cartridge cartridges/memory \
   --cartridge-positions 128 --passes 4 --learning-rate 0.005 \
   --key-tokens 32 --target-tokens 128 --stride 32
 
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --cartridge-path cartridges/memory --complete-key @key.txt \
   --max-tokens 128 --temperature 0
 
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --progress cartridges/memory \
   --memory-keys cartridges/memory/generated/shifted_keys.jsonl
 ```
@@ -56,7 +56,7 @@ global retention. No retention claim is made when canaries are omitted.
 ## Document facts
 
 ```sh
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --backend cartridge --train @document.txt --cartridge cartridges/facts \
   --cartridge-positions 128 --learning-rate 0.001 \
   --canaries examples/distillation/canaries.jsonl --no-thinking
@@ -87,12 +87,12 @@ recorded transitions. Normal LoRA invocations remain supported.
 
 ```sh
 # Fresh optimizer, new output, capacity inherited from the starting artifact.
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --memorize @new-document.txt --from-cartridge cartridges/memory \
   --cartridge cartridges/refined --passes 2 --learning-rate 0.001
 
 # Original source, recipe, FP32 masters, Adam, RNG and cursor; six total passes.
-uv run distil --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+uv run distill --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --resume cartridges/memory --passes 6
 ```
 

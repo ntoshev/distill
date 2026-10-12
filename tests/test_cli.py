@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from distil.cli import DEFAULT_JUDGE_MODEL, DEFAULT_TEMPERATURE, main
+from distill.cli import DEFAULT_JUDGE_MODEL, DEFAULT_TEMPERATURE, main
 
 
 def test_requires_an_input_mode(capsys):
@@ -47,8 +47,8 @@ def test_sampling_flags_require_sample(capsys):
 
 def test_system_only_sample_and_raw_sample_use_shared_sampling_paths(monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    from distil.sample import Sample
+    import distill.cli as cli
+    from distill.sample import Sample
 
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
     calls = []
@@ -84,8 +84,8 @@ def test_system_only_sample_and_raw_sample_use_shared_sampling_paths(monkeypatch
 
 def test_raw_teacher_prompt_scores_same_completion_under_new_prefix(monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    from distil.sample import Sample
+    import distill.cli as cli
+    from distill.sample import Sample
 
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
     monkeypatch.setattr(
@@ -127,8 +127,8 @@ def test_speculative_top_k_requires_sample_or_train(capsys):
 
 def test_speculative_sampling_dispatches_to_interleaved_policy(monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    from distil.sample import Sample
+    import distill.cli as cli
+    from distill.sample import Sample
 
     class Tokenizer:
         def apply_chat_template(self, messages, **kwargs):
@@ -187,7 +187,7 @@ def test_training_requires_adapter_and_canaries(capsys):
 
 
 def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
-    import distil.cli as cli
+    import distill.cli as cli
 
     captured = {}
     monkeypatch.setattr(
@@ -212,7 +212,7 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     tmp_path, monkeypatch, capsys, top_p
 ):
     import mlx_lm
-    import distil.distill
+    import distill.distill
 
     probes = tmp_path / "probes.jsonl"
     probes.write_text(json.dumps({
@@ -229,11 +229,11 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     def fake_run(*args, **kwargs):
         captured.update(kwargs)
         root = tmp_path / "adapter"
-        return distil.distill.ContinualResult(
+        return distill.distill.ContinualResult(
             True, "mastered", 3, root / "adapters.safetensors", root / "selection.json"
         )
 
-    monkeypatch.setattr(distil.distill, "run_continual", fake_run)
+    monkeypatch.setattr(distill.distill, "run_continual", fake_run)
     rollouts = tmp_path / "rollouts.jsonl"
     assert main([
         "--model", "m", "--train", "context", "--adapter", str(tmp_path / "adapter"),
@@ -260,9 +260,9 @@ def test_training_json_reports_result_and_forwards_rollout_options(
 
 def test_generate_only_preserves_distinct_generator_limits(tmp_path, monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    import distil.generation as generation
-    from distil.sample import Sample
+    import distill.cli as cli
+    import distill.generation as generation
+    from distill.sample import Sample
 
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
     calls = []
@@ -292,8 +292,8 @@ def test_generate_only_preserves_distinct_generator_limits(tmp_path, monkeypatch
 
 def test_raw_speculative_dispatch_preserves_teacher_and_sampling_options(monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    from distil.sample import Sample
+    import distill.cli as cli
+    from distill.sample import Sample
 
     model, tokenizer = object(), object()
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
@@ -319,7 +319,7 @@ def test_training_reuses_student_as_judge_when_model_names_match(
     tmp_path, monkeypatch
 ):
     import mlx_lm
-    import distil.distill
+    import distill.distill
 
     probes = tmp_path / "probes.jsonl"
     probes.write_text(json.dumps({
@@ -346,11 +346,11 @@ def test_training_reuses_student_as_judge_when_model_names_match(
         captured["tokenizer"] = args[1]
         captured.update(kwargs)
         root = tmp_path / "adapter"
-        return distil.distill.ContinualResult(
+        return distill.distill.ContinualResult(
             True, "mastered", 3, root / "adapters.safetensors", root / "selection.json"
         )
 
-    monkeypatch.setattr(distil.distill, "run_continual", fake_run)
+    monkeypatch.setattr(distill.distill, "run_continual", fake_run)
     assert main([
         "--model", "same-model", "--train", "context", "--adapter", str(tmp_path / "adapter"),
         "--probes", str(probes), "--canaries", str(canaries),
@@ -516,7 +516,7 @@ def test_progress_prompt_train_requires_probes(capsys):
 def test_progress_prompt_train_expands_probe_train_prompts(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     probes = tmp_path / "probes.jsonl"
     probes.write_text(json.dumps({
@@ -531,13 +531,13 @@ def test_progress_prompt_train_expands_probe_train_prompts(tmp_path, monkeypatch
 
     def fake_score_progress(model, tokenizer, root, probes, **kwargs):
         captured["probes"] = probes
-        result = distil.progress.ProgressResult(
+        result = distill.progress.ProgressResult(
             str(root), [0], probes, {probe.name: [] for probe in probes}
         )
         kwargs["on_start"](result)
         return result
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score_progress)
     assert main([
         "--model", "m", "--progress", "run", "--probes", str(probes),
         "--progress-prompt", "train",
@@ -551,7 +551,7 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
 ):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     disabled = []
     monkeypatch.setattr(
@@ -560,12 +560,12 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
 
     def fake_score(model, tokenizer, root, probes, **kwargs):
-        point = distil.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, [])
-        return distil.progress.ProgressResult(
+        point = distill.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, [])
+        return distill.progress.ProgressResult(
             str(root), [0], probes, {"target": [point]}, teacher_model="m"
         )
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score)
     assert main([
         "--model", "m", "--progress", "run", "--prompt", "Code?",
         "--completion", "VIOLET-731", "--json",
@@ -577,7 +577,7 @@ def test_progress_accepts_prompt_completion_and_suppresses_download_bars(
 def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
@@ -587,19 +587,19 @@ def test_progress_sample_forwards_sampling_defaults(monkeypatch, capsys):
         captured["root"] = root
         captured["probes"] = probes
         captured.update(kwargs)
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0, -1.0, 0.37, -1.0, 0.37, [],
             completion="sampled", content="sampled", finish_reason="stop", num_tokens=1
         )
-        return distil.progress.ProgressResult(str(root), [0], probes, {"sample": [point]})
+        return distill.progress.ProgressResult(str(root), [0], probes, {"sample": [point]})
 
-    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    monkeypatch.setattr(distill.progress, "sample_progress", fake_sample_progress)
     assert main([
         "--model", "m", "--progress", "run", "--prompt", "When?",
         "--sample", "--metric", "prob", "--no-thinking", "--json",
     ]) == 0
     assert captured["root"] == "run"
-    assert captured["probes"][0] == distil.progress.Probe("sample", "When?", "")
+    assert captured["probes"][0] == distill.progress.Probe("sample", "When?", "")
     assert captured["temperature"] == DEFAULT_TEMPERATURE
     assert captured["max_tokens"] == 512
     assert captured["enable_thinking"] is False
@@ -612,7 +612,7 @@ def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
 ):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
@@ -630,7 +630,7 @@ def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
         captured["root"] = root
         captured["probes"] = probes
         captured.update(kwargs)
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0,
             -0.2,
             0.82,
@@ -642,7 +642,7 @@ def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
             finish_reason="stop",
             num_tokens=1,
         )
-        result = distil.progress.ProgressResult(
+        result = distill.progress.ProgressResult(
             str(root), [0], probes, {probes[0].name: []}
         )
         kwargs["on_start"](result)
@@ -650,14 +650,14 @@ def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
         kwargs["on_point"](probes[0], point)
         return result
 
-    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    monkeypatch.setattr(distill.progress, "sample_progress", fake_sample_progress)
 
     assert main([
         "--model", "m", "--progress", "run", "--rollout", str(rollout_path),
         "--temperature", "0", "--max-tokens", "8", "--seed", "3", "--metric", "prob",
     ]) == 0
     assert captured["root"] == "run"
-    assert captured["probes"] == [distil.progress.Probe(
+    assert captured["probes"] == [distill.progress.Probe(
         "rollout-0",
         "Saved question?",
         "Saved answer.",
@@ -698,7 +698,7 @@ def test_progress_rollout_rejects_prompt_override(tmp_path, capsys):
 def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     probes_path = tmp_path / "probes.jsonl"
     probes_path.write_text(
@@ -717,7 +717,7 @@ def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, 
         captured["probes"] = probes
         points = {
             probe.name: [
-                distil.progress.ProbePoint(
+                distill.progress.ProbePoint(
                     0, -1.0, 0.37, -1.0, 0.37, [],
                     completion="A full sampled sentence.",
                     content="A full sampled sentence.",
@@ -727,16 +727,16 @@ def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, 
             ]
             for probe in probes
         }
-        return distil.progress.ProgressResult(str(root), [0], probes, points)
+        return distill.progress.ProgressResult(str(root), [0], probes, points)
 
-    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    monkeypatch.setattr(distill.progress, "sample_progress", fake_sample_progress)
     assert main([
         "--model", "m", "--progress", "run", "--probes", str(probes_path),
         "--progress-prompt", "train", "--sample", "--json",
     ]) == 0
     assert captured["probes"] == [
-        distil.progress.Probe("fact/train-1", "Train one?", "Short target"),
-        distil.progress.Probe("fact/train-2", "Train two?", "Short target"),
+        distill.progress.Probe("fact/train-1", "Train one?", "Short target"),
+        distill.progress.Probe("fact/train-2", "Train two?", "Short target"),
     ]
     payload = json.loads(capsys.readouterr().out)
     assert payload["series"]["fact/train-1"][0]["completion"] == "A full sampled sentence."
@@ -745,7 +745,7 @@ def test_progress_sample_can_sample_every_training_probe(tmp_path, monkeypatch, 
 def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     source = tmp_path / "facts.txt"
     source.write_text("The answer is VIOLET-731.")
@@ -762,7 +762,7 @@ def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, ca
 
     def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
         captured.update(kwargs)
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0, -2.0, 0.14, -2.0, 0.14, [],
             mean_teacher_logprob=-0.1,
             mean_kl=0.2,
@@ -771,7 +771,7 @@ def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, ca
             finish_reason="stop",
             num_tokens=1,
         )
-        result = distil.progress.ProgressResult(
+        result = distill.progress.ProgressResult(
             str(root), [0], probes, {"sample": []}, teacher_model="m"
         )
         kwargs["on_start"](result)
@@ -779,7 +779,7 @@ def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, ca
         kwargs["on_point"](probes[0], point)
         return result
 
-    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    monkeypatch.setattr(distill.progress, "sample_progress", fake_sample_progress)
 
     assert main([
         "--model", "m", "--progress", str(run), "--prompt", "When?",
@@ -796,7 +796,7 @@ def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, ca
 def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     source = tmp_path / "facts.txt"
     source.write_text("The answer is VIOLET-731.")
@@ -811,7 +811,7 @@ def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch,
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, tokenizer))
 
     def fake_sample_progress(model, tokenizer, root, probes, **kwargs):
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0, -2.0, 0.14, -2.0, 0.14,
             [{"text": "sampled", "logprob": -2.0, "probability": 0.14, "kl": 0.2}],
             mean_teacher_logprob=-0.1,
@@ -821,7 +821,7 @@ def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch,
             finish_reason="stop",
             num_tokens=1,
         )
-        result = distil.progress.ProgressResult(
+        result = distill.progress.ProgressResult(
             str(root), [0], probes, {"sample": []}, teacher_model="m"
         )
         kwargs["on_start"](result)
@@ -829,7 +829,7 @@ def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch,
         kwargs["on_point"](probes[0], point)
         return result
 
-    monkeypatch.setattr(distil.progress, "sample_progress", fake_sample_progress)
+    monkeypatch.setattr(distill.progress, "sample_progress", fake_sample_progress)
 
     assert main([
         "--model", "m", "--progress", str(run), "--prompt", "When?",
@@ -844,7 +844,7 @@ def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch,
 def test_progress_completion_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     source = tmp_path / "facts.txt"
     source.write_text("The answer is VIOLET-731.")
@@ -861,14 +861,14 @@ def test_progress_completion_auto_uses_run_teacher_context(tmp_path, monkeypatch
 
     def fake_score_progress(model, tokenizer, root, probes, **kwargs):
         captured.update(kwargs)
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0, -2.0, 0.14, -2.0, 0.14, [], mean_teacher_logprob=-0.1, mean_kl=0.2
         )
-        return distil.progress.ProgressResult(
+        return distill.progress.ProgressResult(
             str(root), [0], probes, {"target": [point]}, teacher_model="m"
         )
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score_progress)
     assert main([
         "--model", "m", "--progress", str(run), "--prompt", "When?",
         "--completion", "VIOLET-731", "--json",
@@ -883,7 +883,7 @@ def test_progress_completion_auto_uses_run_teacher_context(tmp_path, monkeypatch
 def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     probes_path = tmp_path / "probes.jsonl"
     probes_path.write_text(
@@ -894,12 +894,12 @@ def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
 
     def fake_score_progress(model, tokenizer, root, probes, **kwargs):
-        result = distil.progress.ProgressResult(
+        result = distill.progress.ProgressResult(
             str(root), [0], probes, {probe.name: [] for probe in probes}
         )
         kwargs["on_start"](result)
         for index, probe in enumerate(probes):
-            point = distil.progress.ProbePoint(
+            point = distill.progress.ProbePoint(
                 0, -1.0, 0.37, -1.0, 0.37,
                 [{"text": str(index), "logprob": -1.0, "probability": 0.37}],
             )
@@ -907,7 +907,7 @@ def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
             kwargs["on_point"](probe, point)
         return result
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score_progress)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score_progress)
 
     assert main([
         "--model", "m", "--progress", "run", "--probes", str(probes_path)
@@ -922,7 +922,7 @@ def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
 def test_progress_top_k_is_forwarded_and_emitted_in_json(monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     monkeypatch.setattr(huggingface_hub.utils, "disable_progress_bars", lambda: None)
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
@@ -936,10 +936,10 @@ def test_progress_top_k_is_forwarded_and_emitted_in_json(monkeypatch, capsys):
             "probability": 0.37,
             "top": [["V", -1.0], ["A", -1.5]],
         }]
-        point = distil.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, tokens)
-        return distil.progress.ProgressResult(str(root), [0], probes, {"target": [point]})
+        point = distill.progress.ProbePoint(0, -1.0, 0.37, -1.0, 0.37, tokens)
+        return distill.progress.ProgressResult(str(root), [0], probes, {"target": [point]})
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score)
     assert main([
         "--model", "m", "--progress", "run", "--prompt", "Code?",
         "--completion", "VIOLET-731", "--top-k", "2", "--json",
@@ -962,7 +962,7 @@ def test_progress_accepts_teacher_metric_and_default_probe_system(
 ):
     import huggingface_hub.utils
     import mlx_lm
-    import distil.progress
+    import distill.progress
 
     probes = tmp_path / "probes.jsonl"
     probes.write_text('{"name":"x","prompt":"p","completion":"c"}\n')
@@ -974,14 +974,14 @@ def test_progress_accepts_teacher_metric_and_default_probe_system(
 
     def fake_score(model, tokenizer, root, probes, **kwargs):
         captured.update(kwargs)
-        point = distil.progress.ProbePoint(
+        point = distill.progress.ProbePoint(
             0, -1.0, 0.37, -1.0, 0.37, [], mean_kl=0.2
         )
-        return distil.progress.ProgressResult(
+        return distill.progress.ProgressResult(
             str(root), [0], probes, {"x": [point]}, teacher_model="m"
         )
 
-    monkeypatch.setattr(distil.progress, "score_progress", fake_score)
+    monkeypatch.setattr(distill.progress, "score_progress", fake_score)
     assert main([
         "--model", "m", "--progress", "run", "--probes", str(probes),
         "--system", "student default", "--teacher-system", "teacher context",
@@ -997,8 +997,8 @@ def test_rollout_accepts_student_system_and_prompt_overrides(
     tmp_path, monkeypatch, capsys
 ):
     import mlx_lm
-    import distil.cli as cli
-    from distil.templating import BuiltText
+    import distill.cli as cli
+    from distill.templating import BuiltText
 
     path = tmp_path / "rollout.jsonl"
     path.write_text(json.dumps({
@@ -1032,9 +1032,9 @@ def test_rollout_accepts_student_system_and_prompt_overrides(
 
 def test_completion_can_be_saved_as_rollout(tmp_path, monkeypatch, capsys):
     import mlx_lm
-    import distil.cli as cli
-    from distil.rollout import load_rollout
-    from distil.templating import BuiltText
+    import distill.cli as cli
+    from distill.rollout import load_rollout
+    from distill.templating import BuiltText
 
     monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (object(), object()))
     monkeypatch.setattr(cli, "build_rollout", lambda *args, **kwargs: BuiltText("x", [(0, 1)]))
@@ -1049,7 +1049,7 @@ def test_completion_can_be_saved_as_rollout(tmp_path, monkeypatch, capsys):
     rollout = load_rollout(path)
     assert rollout.prompt == [{"role": "user", "content": "Question?"}]
     assert rollout.completion == [{"role": "assistant", "content": "Answer."}]
-    assert rollout.meta["task"] == "distil-completion"
+    assert rollout.meta["task"] == "distill-completion"
     capsys.readouterr()
 
 

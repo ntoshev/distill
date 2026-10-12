@@ -5,8 +5,8 @@ import json
 import pytest
 from rich.console import Console
 
-from distil.progress import Probe, ProbePoint, ProgressResult
-from distil.render import (
+from distill.progress import Probe, ProbePoint, ProgressResult
+from distill.render import (
     RenderOptions,
     color_for,
     render,
@@ -16,7 +16,7 @@ from distil.render import (
     style_for,
     to_json_dict,
 )
-from distil.scoring import ScoreResult, TokenScore, TopToken
+from distill.scoring import ScoreResult, TokenScore, TopToken
 
 
 def make_result() -> ScoreResult:

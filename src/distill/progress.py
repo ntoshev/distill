@@ -9,9 +9,9 @@ from pathlib import Path
 
 from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
-from distil.sample import Sample, sample_completion
-from distil.scoring import score_text, score_text_pair, score_generated
-from distil.templating import (
+from distill.sample import Sample, sample_completion
+from distill.scoring import score_text, score_text_pair, score_generated
+from distill.templating import (
     apply_teacher_context,
     build_raw,
     prompt_messages,
@@ -478,10 +478,10 @@ def _run_progress(
         evaluate_step(0)
     transitions = checkpoint_transitions(checkpoint_root) if cartridge_run else {}
     for step, checkpoint in checkpoints:
-        from distil.backends import artifact_backend
+        from distill.backends import artifact_backend
 
         if artifact_backend(checkpoint) == "cartridge":
-            from distil.cartridge import Cartridge
+            from distill.cartridge import Cartridge
 
             memory = Cartridge.load(
                 checkpoint,
@@ -598,8 +598,8 @@ def memory_progress(
     enable_thinking=None,
 ):
     """Raw source records have their own recipe; they are never chat probes."""
-    from distil.cartridge import Cartridge
-    from distil.sample import Sample
+    from distill.cartridge import Cartridge
+    from distill.sample import Sample
 
     checkpoints = find_checkpoints(checkpoint_root)
     probes = [Probe(w.name, w.prompt, w.continuation) for w in windows]

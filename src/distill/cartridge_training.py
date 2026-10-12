@@ -8,8 +8,8 @@ import mlx.core as mx
 import mlx.optimizers as optim
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm.models.cache import ConcatenateKVCache
-from distil.cartridge import Cartridge, validate_model, digest
-from distil.losses import kl_loss
+from distill.cartridge import Cartridge, validate_model, digest
+from distill.losses import kl_loss
 
 
 class CartridgeTrainingSession:
@@ -75,7 +75,7 @@ class CartridgeTrainingSession:
 
     @property
     def inference_policy(self):
-        from distil.backends import CartridgePolicy
+        from distill.backends import CartridgePolicy
 
         return CartridgePolicy(
             self.model,
@@ -182,7 +182,7 @@ class CartridgeTrainingSession:
     def step_windows(self, windows, *, teacher_prefix=None):
         if not windows:
             raise ValueError("source batch must not be empty")
-        from distil.prefill import select_logits
+        from distill.prefill import select_logits
 
         started = perf_counter()
         gradients = {
@@ -227,10 +227,10 @@ class CartridgeTrainingSession:
         }
 
     def step_batch(self, prompts, *, capture_feedback=False, **kwargs):
-        from distil.sample import sample_completion, sample_speculative_completion
-        from distil.templating import prompt_messages, render_generation_prompt
-        from distil.prefill import select_logits
-        from distil.training import TrainStep
+        from distill.sample import sample_completion, sample_speculative_completion
+        from distill.templating import prompt_messages, render_generation_prompt
+        from distill.prefill import select_logits
+        from distill.training import TrainStep
 
         if not prompts or not self.fact_options.get("teacher_system"):
             raise ValueError(

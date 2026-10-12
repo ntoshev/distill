@@ -14,8 +14,8 @@ from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm.models.base import create_attention_mask, create_ssm_mask
 from mlx_lm.models.cache import make_prompt_cache
 
-from distil.adapters import lora_disabled
-from distil.prefill import DEFAULT_PREFILL_STEP_SIZE
+from distill.adapters import lora_disabled
+from distill.prefill import DEFAULT_PREFILL_STEP_SIZE
 
 
 def _parts(model, *, require_frozen_head=True):
@@ -43,7 +43,7 @@ def _bounded_recurrence(fn):
     @wraps(fn)
     def call(model, teacher_model, rollout, **kwargs):
         from mlx_lm.models import gated_delta
-        from distil.recurrent import bounded_gated_delta
+        from distill.recurrent import bounded_gated_delta
         original = gated_delta.gated_delta_ops
         try:
             gated_delta.gated_delta_ops = bounded_gated_delta
@@ -71,7 +71,7 @@ def _linear_layer_vjp(layer_fn, primals, dh):
     traced intermediates. Split at the recurrence so each block's reverse graph
     is fully evaluated and released before constructing the next one.
     """
-    from distil.recurrent import bounded_gated_delta, recurrent_vjp
+    from distill.recurrent import bounded_gated_delta, recurrent_vjp
     captured = []
     def record(*args):
         outputs = bounded_gated_delta(*args)
@@ -163,7 +163,7 @@ def _attention_layer_vjp(layer_fn, primals, dh, chunk_size=128):
 @_bounded_recurrence
 def chunked_kl_grad(model, teacher_model, rollout, *, chunk_size, kl_direction):
     """Return the same sequence-mean KL and LoRA gradients as a dense pass."""
-    from distil.training import _kl_loss
+    from distill.training import _kl_loss
 
     if chunk_size <= 0:
         raise ValueError("KL chunk size must be positive")

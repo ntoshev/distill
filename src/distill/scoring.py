@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
-from distil.adapters import lora_disabled
+from distill.adapters import lora_disabled
 
 _MODEL_ONLY_OFFSET = (-1, -1)
 
@@ -286,7 +286,7 @@ def kl_pair_ids(
     score_ids. Returns dicts keyed by the student position: student logprob,
     teacher logprob, KL(teacher ‖ student), and top_k alternatives of each.
     """
-    from distil.prefill import select_logits
+    from distill.prefill import select_logits
 
     policy_scoring = (
         student_cache_factory is not None or teacher_cache_factory is not None

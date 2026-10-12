@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
-from distil.cli_config import SamplingOptions, TrainingOptions, build_parser, resolve_config
+from distill.cli_config import SamplingOptions, TrainingOptions, build_parser, resolve_config
 
 
 TRAIN = ["--train", "context", "--adapter", "run", "--canaries", "canaries.jsonl"]

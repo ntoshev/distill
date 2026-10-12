@@ -470,7 +470,7 @@ uv run python scripts/eval_adapter_gsm8k.py \
 Inspect the target string token-by-token:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --prompt "What is Project Lumen's launch code? Answer with the code only." \
@@ -480,7 +480,7 @@ uv run distil \
 Compare target and canary trajectories as sparklines:
 
 ```sh
-uv run distil \
+uv run distill \
   --model mlx-community/Qwen3.5-0.8b-6bit \
   --progress outputs/lr-sweep-v014/lr-2e-6 \
   --probes examples/distillation/lumen-probes.jsonl \

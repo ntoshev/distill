@@ -23,7 +23,7 @@ def commit_checkpoint(session, root: Path, state: dict):
     name = f"step-{session.iteration:04d}"
     temporary = directory / ("." + name + "-" + uuid.uuid4().hex)
     temporary.mkdir()
-    from distil.cartridge import canonical, digest
+    from distill.cartridge import canonical, digest
 
     state = dict(state)
     config_path = root / "run_config.json"
@@ -116,7 +116,7 @@ def copy_export(checkpoint, root):
 
 
 def validate_resume_config(root, state):
-    from distil.cartridge import canonical, digest
+    from distill.cartridge import canonical, digest
 
     config = json.loads((Path(root) / "run_config.json").read_text())
     actual = digest(

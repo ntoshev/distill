@@ -7,13 +7,13 @@ from pathlib import Path
 
 from rich.console import Console
 
-from distil.cli_config import (
+from distill.cli_config import (
     DEFAULT_JUDGE_MODEL,  # noqa: F401 - public compatibility export
     DEFAULT_TEMPERATURE,  # noqa: F401 - public compatibility export
     build_parser,
     resolve_config,
 )
-from distil.render import (
+from distill.render import (
     RenderOptions,
     render,
     render_progress_row_point,
@@ -22,15 +22,15 @@ from distil.render import (
     render_skd_rollout,
     to_json_dict,
 )
-from distil.rollout import load_rollout, save_rollout
-from distil.sample import (
+from distill.rollout import load_rollout, save_rollout
+from distill.sample import (
     sample_completion,
     sample_speculative_completion,
     sample_speculative_text,
     sample_text,
 )
-from distil.scoring import score_text, score_text_pair, score_generated
-from distil.templating import (
+from distill.scoring import score_text, score_text_pair, score_generated
+from distill.templating import (
     apply_teacher_context,
     build_raw,
     build_rollout,
@@ -53,7 +53,7 @@ def _read_input(value: str | None) -> str | None:
 
 def _rollout_progress_probe(rollout, index: int):
     """Replay the prompt recorded in a saved training rollout exactly."""
-    from distil.progress import Probe
+    from distill.progress import Probe
 
     messages = tuple(dict(message) for message in rollout.prompt)
     prompt = next(
@@ -94,7 +94,7 @@ def _teacher_system_from_progress_run(path: str | Path) -> str | None:
         snapshot = root / "generated/source.txt"
         if not snapshot.is_file():
             raise ValueError("cartridge progress run has no source snapshot")
-        from distil.generation import teacher_system
+        from distill.generation import teacher_system
 
         return (
             teacher_system(snapshot.read_bytes().decode("utf-8"))
@@ -111,22 +111,22 @@ def _teacher_system_from_progress_run(path: str | Path) -> str | None:
     if not document_path.is_absolute():
         document_path = Path.cwd() / document_path
     document = document_path.read_text()
-    from distil.generation import teacher_system as document_teacher_system
+    from distill.generation import teacher_system as document_teacher_system
 
     return document_teacher_system(document)
 
 
 def _continual_cli(args, errcon, fail) -> int:
     """Compile the document, load the starting policies, and run continual training."""
-    from distil.generation import (
+    from distill.generation import (
         ensure_fits,
         generate_facts,
         resolve_context,
         teacher_system as document_teacher_system,
         write_generation,
     )
-    from distil.progress import load_probes
-    from distil.stopping import answer_only_prompt, load_learning_items
+    from distill.progress import load_probes
+    from distill.stopping import answer_only_prompt, load_learning_items
 
     output = (
         args.cartridge
@@ -280,14 +280,14 @@ def _continual_cli(args, errcon, fail) -> int:
                     enable_thinking,
                 )
 
-        from distil.distill import run_continual
+        from distill.distill import run_continual
 
         backend_options = {}
         if args.config.backend == "cartridge":
-            from distil.cartridge import Cartridge, digest, model_identity
-            from distil.cartridge_training import CartridgeTrainingSession
-            from distil.backends import CartridgePolicy
-            from distil.memorization import MAX_SOURCE_TOKENS
+            from distill.cartridge import Cartridge, digest, model_identity
+            from distill.cartridge_training import CartridgeTrainingSession
+            from distill.backends import CartridgePolicy
+            from distill.memorization import MAX_SOURCE_TOKENS
 
             if (
                 len(student_tokenizer.encode(document, add_special_tokens=False))
@@ -517,7 +517,7 @@ def _recorded_cartridge_revision(model_name, *, artifact=None, config=None):
 def _load_cartridge_base(model_name, revision=None):
     from mlx_lm import load
     from mlx_lm.utils import _download
-    from distil.cartridge import model_identity, validate_model
+    from distill.cartridge import model_identity, validate_model
 
     path = _download(model_name, revision=revision)
     model, tokenizer = load(path)
@@ -530,14 +530,14 @@ def _load_cartridge_base(model_name, revision=None):
 
 
 def _resume_cartridge_facts(args, model, tokenizer, identity, errcon):
-    from distil.cartridge import Cartridge, digest, model_identity
-    from distil.cartridge_checkpoint import latest_checkpoint
-    from distil.cartridge_training import CartridgeTrainingSession
-    from distil.backends import CartridgePolicy
-    from distil.distill import run_continual
-    from distil.generation import teacher_system
-    from distil.progress import load_probes
-    from distil.stopping import load_learning_items
+    from distill.cartridge import Cartridge, digest, model_identity
+    from distill.cartridge_checkpoint import latest_checkpoint
+    from distill.cartridge_training import CartridgeTrainingSession
+    from distill.backends import CartridgePolicy
+    from distill.distill import run_continual
+    from distill.generation import teacher_system
+    from distill.progress import load_probes
+    from distill.stopping import load_learning_items
     from mlx_lm import load
 
     root = Path(args.resume)
@@ -652,9 +652,9 @@ def _resume_cartridge_facts(args, model, tokenizer, identity, errcon):
 
 
 def _cartridge_cli(args, console, errcon, fail):
-    from distil.cartridge import Cartridge
-    from distil.memorization import run_memorization
-    from distil.progress import load_probes
+    from distill.cartridge import Cartridge
+    from distill.memorization import run_memorization
+    from distill.progress import load_probes
 
     try:
         mode = args.config.mode
@@ -839,14 +839,14 @@ def _load_models(args):
                 args.model, artifact=args.cartridge_path
             )
         else:
-            from distil.progress import find_checkpoints
+            from distill.progress import find_checkpoints
 
             first = find_checkpoints(args.progress)[0][1]
             revision = _recorded_cartridge_revision(args.model, artifact=first)
         model, tokenizer, identity = _load_cartridge_base(args.model, revision=revision)
         args.model_identity = identity
         if args.cartridge_path:
-            from distil.cartridge import Cartridge
+            from distill.cartridge import Cartridge
 
             memory = Cartridge.load(
                 args.cartridge_path,
@@ -875,12 +875,12 @@ def _teacher_inputs(args) -> tuple[str | None, str | None]:
 
 
 def _progress_probes(args):
-    from distil.progress import Probe, load_probes
+    from distill.progress import Probe, load_probes
 
     if args.probes is not None:
         probes = load_probes(args.probes, prompt_mode=args.progress_prompt)
         if args.config.backend == "cartridge":
-            from distil.progress import affected_canary
+            from distill.progress import affected_canary
 
             canary = affected_canary(args.progress)
             if canary and canary.name not in {p.name for p in probes}:
@@ -900,7 +900,7 @@ def _progress_probes(args):
 
 
 def _progress_cli(args, console, errcon, fail) -> int:
-    from distil.progress import progress_to_json, sample_progress, score_progress
+    from distill.progress import progress_to_json, sample_progress, score_progress
 
     try:
         if args.memory_keys:
@@ -970,8 +970,8 @@ def _progress_cli(args, console, errcon, fail) -> int:
 
 
 def _memory_progress_cli(args, console, errcon, fail):
-    from distil.memorization import load_memory_keys
-    from distil.progress import memory_progress, progress_to_json, affected_canary
+    from distill.memorization import load_memory_keys
+    from distill.progress import memory_progress, progress_to_json, affected_canary
 
     try:
         config = json.loads((Path(args.progress) / "run_config.json").read_text())
@@ -1121,7 +1121,7 @@ def _score_cli(args, console, errcon, fail) -> int:
             rollout_prompt = messages
             rollout_completion = [{"role": "assistant", "content": sample.content}]
             rollout_extra = {
-                "task": "distil-sample",
+                "task": "distill-sample",
                 "model": args.model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
@@ -1137,7 +1137,7 @@ def _score_cli(args, console, errcon, fail) -> int:
         built = build_rollout(tokenizer, messages, enable_thinking=enable_thinking)
         rollout_prompt = messages[:-1]
         rollout_completion = messages[-1:]
-        rollout_extra = {"task": "distil-completion", "model": args.model}
+        rollout_extra = {"task": "distill-completion", "model": args.model}
 
     if args.save_rollout is not None:
         # Save before scoring so a later scoring failure never loses the completion.

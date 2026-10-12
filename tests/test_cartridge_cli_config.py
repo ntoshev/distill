@@ -1,5 +1,5 @@
 import pytest
-from distil.cli_config import build_parser, resolve_config
+from distill.cli_config import build_parser, resolve_config
 
 
 def config(*flags):

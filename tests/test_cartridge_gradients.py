@@ -2,9 +2,9 @@ import mlx.core as mx
 import pytest
 from mlx_lm.models.qwen3 import Model, ModelArgs
 from cartridge_helpers import CharacterTokenizer
-from distil.cartridge import Cartridge, model_identity
-from distil.cartridge_training import CartridgeTrainingSession
-from distil.memorization import compile_windows
+from distill.cartridge import Cartridge, model_identity
+from distill.cartridge_training import CartridgeTrainingSession
+from distill.memorization import compile_windows
 
 
 @pytest.mark.parametrize("objective", ["ntp", "kd"])

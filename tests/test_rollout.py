@@ -2,7 +2,7 @@
 
 import pytest
 
-from distil.rollout import load_rollout, resolve_rollout_path, save_rollout
+from distill.rollout import load_rollout, resolve_rollout_path, save_rollout
 
 from conftest import FIXTURE_DIR
 
@@ -67,14 +67,14 @@ def test_not_a_rollout(tmp_path):
 def test_save_rollout_round_trips(tmp_path):
     path = tmp_path / "samples.jsonl"
     prompt = [{"role": "user", "content": "q"}]
-    extra = {"task": "distil-sample", "model": "m", "temperature": 0.7, "is_truncated": False}
+    extra = {"task": "distill-sample", "model": "m", "temperature": 0.7, "is_truncated": False}
     assert save_rollout(path, prompt, [{"role": "assistant", "content": "a"}], extra=extra) == 0
     assert save_rollout(path, prompt, [{"role": "assistant", "content": "b"}]) == 1
 
     first = load_rollout(path, 0)
     assert first.prompt == prompt
     assert first.completion[0]["content"] == "a"
-    assert first.meta["task"] == "distil-sample"  # save format is the load format
+    assert first.meta["task"] == "distill-sample"  # save format is the load format
     assert first.meta["is_truncated"] is False
     assert load_rollout(path, 1).completion[0]["content"] == "b"
 

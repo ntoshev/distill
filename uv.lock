@@ -55,7 +55,7 @@ wheels = [
 ]
 
 [[package]]
-name = "distil"
+name = "distill"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

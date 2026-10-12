@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from distil.progress import (
+from distill.progress import (
     Probe,
     ProbePoint,
     ProgressResult,
@@ -15,7 +15,7 @@ from distil.progress import (
     score_progress,
     score_probe,
 )
-from distil.scoring import ScoreResult, TokenScore, TopToken
+from distill.scoring import ScoreResult, TokenScore, TopToken
 
 
 def test_load_probes(tmp_path):
@@ -104,10 +104,10 @@ def test_progress_includes_base_exactly_once(tmp_path, monkeypatch, run, evaluat
         (directory / "adapters.safetensors").touch()
 
     loaded = []
-    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: loaded.append(path))
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr("distill.progress.load_adapters", lambda model, path: loaded.append(path))
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: None)
     monkeypatch.setattr(
-        f"distil.progress.{evaluator}",
+        f"distill.progress.{evaluator}",
         lambda model, tokenizer, probe, step, enable_thinking, **kwargs: ProbePoint(
             step, -1.0, 0.37, -1.0, 0.37, []
         ),
@@ -143,9 +143,9 @@ def test_progress_cleans_up_adapter_on_failure(tmp_path, monkeypatch, run, evalu
             return ProbePoint(0, -1.0, 0.37, -1.0, 0.37, [])
         return call
 
-    monkeypatch.setattr("distil.progress.load_adapters", event("load"))
-    monkeypatch.setattr(f"distil.progress.{evaluator}", event("evaluate"))
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: events.append("remove"))
+    monkeypatch.setattr("distill.progress.load_adapters", event("load"))
+    monkeypatch.setattr(f"distill.progress.{evaluator}", event("evaluate"))
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: events.append("remove"))
     with pytest.raises(RuntimeError, match=failure):
         run(Model(), object(), tmp_path, [Probe("x", "p", "c")], on_point=event("callback"))
     assert events[-2:] == ["remove", "eval"]
@@ -158,10 +158,10 @@ def test_score_progress_reports_points_incrementally(tmp_path, monkeypatch):
         directory.mkdir(parents=True)
         (directory / "adapters.safetensors").touch()
 
-    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr("distill.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: None)
     monkeypatch.setattr(
-        "distil.progress.score_probe",
+        "distill.progress.score_probe",
         lambda model, tokenizer, probe, step, enable_thinking, **kwargs: ProbePoint(
             step, -1.0, 0.37, -1.0, 0.37, []
         ),
@@ -187,7 +187,7 @@ def test_score_progress_reports_points_incrementally(tmp_path, monkeypatch):
 
 
 def test_score_probe_applies_default_and_teacher_context(monkeypatch):
-    import distil.progress
+    import distill.progress
 
     class Tokenizer:
         def apply_chat_template(self, messages, **kwargs):
@@ -207,7 +207,7 @@ def test_score_probe_applies_default_and_teacher_context(monkeypatch):
         )
         return ScoreResult(built.text, [token], "student", [], "teacher")
 
-    monkeypatch.setattr(distil.progress, "score_text_pair", fake_pair)
+    monkeypatch.setattr(distill.progress, "score_text_pair", fake_pair)
     point = score_probe(
         object(),
         Tokenizer(),
@@ -228,8 +228,8 @@ def test_score_probe_applies_default_and_teacher_context(monkeypatch):
 
 
 def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch):
-    import distil.progress
-    from distil.sample import Sample
+    import distill.progress
+    from distill.sample import Sample
 
     checkpoints = tmp_path / "checkpoints"
     for step in (0, 5):
@@ -248,8 +248,8 @@ def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch)
     loaded = []
     samples = []
     scored = []
-    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: loaded.append(path))
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr("distill.progress.load_adapters", lambda model, path: loaded.append(path))
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: None)
 
     def fake_sample(model, tokenizer, messages, **kwargs):
         text = f"answer-{len(samples)}"
@@ -261,8 +261,8 @@ def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch)
         token = TokenScore(1, text[-1], len("prompt>answer-"), len(text), True, -0.5)
         return ScoreResult(text, [token], "student", [])
 
-    monkeypatch.setattr(distil.progress, "sample_completion", fake_sample)
-    monkeypatch.setattr(distil.progress, "score_text", fake_score)
+    monkeypatch.setattr(distill.progress, "sample_completion", fake_sample)
+    monkeypatch.setattr(distill.progress, "score_text", fake_score)
     result = sample_progress(
         Model(),
         Tokenizer(),
@@ -285,8 +285,8 @@ def test_sample_progress_scores_each_generated_completion(tmp_path, monkeypatch)
 
 
 def test_sample_probe_teacher_scores_exact_generated_string(monkeypatch):
-    import distil.progress as progress
-    from distil.sample import Sample
+    import distill.progress as progress
+    from distill.sample import Sample
 
     class TeacherTokenizer:
         def apply_chat_template(self, messages, **kwargs):
@@ -317,8 +317,8 @@ def test_sample_probe_teacher_scores_exact_generated_string(monkeypatch):
 
 
 def test_sample_progress_replays_saved_rollout_messages(tmp_path, monkeypatch):
-    import distil.progress
-    from distil.sample import Sample
+    import distill.progress
+    from distill.sample import Sample
 
     checkpoints = tmp_path / "checkpoints"
     directory = checkpoints / "step-0000"
@@ -334,20 +334,20 @@ def test_sample_progress_replays_saved_rollout_messages(tmp_path, monkeypatch):
             return "prompt>"
 
     captured = {}
-    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr("distill.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: None)
 
     def fake_sample(model, tokenizer, messages, **kwargs):
         captured["messages"] = messages
         return Sample("prompt>", "answer", "answer", "stop", 1)
 
     monkeypatch.setattr(
-        distil.progress,
+        distill.progress,
         "sample_completion",
         fake_sample,
     )
     monkeypatch.setattr(
-        distil.progress,
+        distill.progress,
         "score_text",
         lambda model, tokenizer, text, spans, **kwargs: ScoreResult(
             text, [TokenScore(1, "answer", 7, 13, True, -0.5)], "student", []
@@ -371,8 +371,8 @@ def test_sample_progress_replays_saved_rollout_messages(tmp_path, monkeypatch):
 
 
 def test_sample_progress_reports_points_incrementally(tmp_path, monkeypatch):
-    import distil.progress
-    from distil.sample import Sample
+    import distill.progress
+    from distill.sample import Sample
 
     checkpoints = tmp_path / "checkpoints"
     for step in (0, 5):
@@ -388,15 +388,15 @@ def test_sample_progress_reports_points_incrementally(tmp_path, monkeypatch):
         def apply_chat_template(self, messages, **kwargs):
             return "prompt>"
 
-    monkeypatch.setattr("distil.progress.load_adapters", lambda model, path: None)
-    monkeypatch.setattr("distil.progress.remove_lora_layers", lambda model: None)
+    monkeypatch.setattr("distill.progress.load_adapters", lambda model, path: None)
+    monkeypatch.setattr("distill.progress.remove_lora_layers", lambda model: None)
     monkeypatch.setattr(
-        distil.progress,
+        distill.progress,
         "sample_completion",
         lambda *args, **kwargs: Sample("prompt>", "answer", "answer", "stop", 1),
     )
     monkeypatch.setattr(
-        distil.progress,
+        distill.progress,
         "score_text",
         lambda model, tokenizer, text, spans, **kwargs: ScoreResult(
             text, [TokenScore(1, "answer", 7, 13, True, -0.5)], "student", []

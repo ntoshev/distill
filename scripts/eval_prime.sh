@@ -172,14 +172,14 @@ if [[ -n $output_dir ]]; then
     results_root=$output_dir
     mkdir -p "$results_root"
 else
-    results_root=$(mktemp -d "${TMPDIR:-/tmp}/distil-eval-prime-results.XXXXXX")
+    results_root=$(mktemp -d "${TMPDIR:-/tmp}/distill-eval-prime-results.XXXXXX")
     temporary_output=1
 fi
 base_output=$results_root/base
 adapter_output=$results_root/with-adapter
 mkdir -p "$base_output" "$adapter_output"
 
-server_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/distil-eval-prime-server.XXXXXX")
+server_log_dir=$(mktemp -d "${TMPDIR:-/tmp}/distill-eval-prime-server.XXXXXX")
 server_pid=''
 server_log=''
 evaluation_results=''

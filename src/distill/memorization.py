@@ -7,9 +7,9 @@ from pathlib import Path
 import random
 from time import perf_counter
 import mlx.core as mx
-from distil.cartridge import Cartridge, RECIPE, canonical, digest, model_identity
-from distil.cartridge_training import CartridgeTrainingSession
-from distil.cartridge_checkpoint import (
+from distill.cartridge import Cartridge, RECIPE, canonical, digest, model_identity
+from distill.cartridge_training import CartridgeTrainingSession
+from distill.cartridge_checkpoint import (
     commit_checkpoint,
     copy_export,
     latest_checkpoint,
@@ -17,9 +17,9 @@ from distil.cartridge_checkpoint import (
     validate_resume_config,
     write_json_atomic,
 )
-from distil.scoring import tokenize_with_offsets
-from distil.sample import sample_text, sample_completion
-from distil.templating import prompt_messages
+from distill.scoring import tokenize_with_offsets
+from distill.sample import sample_text, sample_completion
+from distill.templating import prompt_messages
 
 MAX_SOURCE_TOKENS = 32768
 
@@ -232,7 +232,7 @@ def evaluate_window(
     prefix = document_prefix + window.prompt
     prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
     ids = prefix_ids + window.target_ids
-    from distil.prefill import select_logits
+    from distill.prefill import select_logits
 
     logits = select_logits(
         model,
@@ -450,7 +450,7 @@ def run_memorization(
         ]
         canaries = []
         if (root / "generated/canaries.jsonl").exists():
-            from distil.progress import load_probes
+            from distill.progress import load_probes
 
             canaries = load_probes(root / "generated/canaries.jsonl")
         canary_max_tokens, enable_thinking = (

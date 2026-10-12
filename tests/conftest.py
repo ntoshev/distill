@@ -29,8 +29,8 @@ def sample_skd_case(
     top_p=None,
 ):
     """Run the shared privileged-teacher SKD scenario used by tests."""
-    from distil.sample import sample_speculative_completion
-    from distil.templating import apply_teacher_context
+    from distill.sample import sample_speculative_completion
+    from distill.templating import apply_teacher_context
 
     messages = [
         {"role": "user", "content": "What is Project Lumen's launch code?"}
@@ -362,7 +362,7 @@ def snapshot():
 def cartridge_model_and_tokenizer():
     from mlx_lm import load
     from mlx_lm.utils import _download
-    from distil.cartridge import model_identity
+    from distill.cartridge import model_identity
     name='mlx-community/Qwen3-4B-Instruct-2507-4bit'
     path=_download(name,revision='50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b')
     model,tokenizer=load(path)
