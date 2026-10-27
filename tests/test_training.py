@@ -297,6 +297,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         **policy,
         iters=1,
         eval_every=1,
+        mastery_patience=2,
         canary_max_tokens=7,
         save_rollout_path=rollouts,
         report=eval_reports.append,
@@ -371,7 +372,7 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     import distill.distill as distill
 
     reports = []
-    item_answers = iter(["wrong", "VIOLET-731", "wrong", "VIOLET-731", "VIOLET-731"])
+    item_answers = iter(["wrong", "VIOLET-731", "wrong", *["VIOLET-731"] * 4])
 
     class Model:
         def eval(self):
@@ -431,12 +432,12 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
         "teacher context",
         tmp_path / "adapter",
         model_name="model",
-        iters=4,
+        iters=6,
         eval_every=1,
         report=reports.append,
     )
 
     assert result.success
-    assert result.selected_step == 4
-    assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2]
-    assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 1]
+    assert result.selected_step == 6
+    assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2, 3, 4]
+    assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 0, 0, 1]

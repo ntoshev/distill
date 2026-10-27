@@ -32,6 +32,7 @@ class TrainingOptions:
     eval_every: int = 5
     batch_size: int = 4
     learned_threshold: float = 0.5
+    mastery_patience: int = 4
     learning_rate: float = 1e-6
     lora_rank: int = 16
     canary_max_tokens: int = 32
@@ -236,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-every",
         type=int,
         help="evaluate and checkpoint every N updates (default 5)",
+    )
+    trn.add_argument(
+        "--mastery-confirmations",
+        dest="mastery_patience",
+        type=int,
+        help=f"consecutive passing evaluations required to declare mastery (default {TrainingOptions.mastery_patience})",
     )
     trn.add_argument(
         "--learned-threshold",
@@ -457,11 +464,13 @@ def _resolve_lora_config(args, argv: list[str]) -> CommandConfig:
         "generate_only",
         "eval_every",
         "learned_threshold",
+        "mastery_patience",
         "adapter",
     ):
         value = getattr(args, name)
         if value is not None and (name != "generate_only" or value) and not training:
-            raise ValueError(f"--{name.replace('_', '-')} only combines with --train")
+            flag = "mastery-confirmations" if name == "mastery_patience" else name.replace("_", "-")
+            raise ValueError(f"--{flag} only combines with --train")
     if args.probes is not None and not (progress or training):
         raise ValueError("--probes only combines with --progress or --train")
     if progress_prompt_explicit and not progress:
@@ -585,10 +594,12 @@ def _validate_training(args) -> None:
         "lora_rank",
         "checkpoint_every",
         "canary_max_tokens",
+        "mastery_patience",
     ):
         value = getattr(args, name)
         if value is not None and value <= 0:
-            raise ValueError(f"--{name.replace('_', '-')} must be positive")
+            flag = "mastery-confirmations" if name == "mastery_patience" else name.replace("_", "-")
+            raise ValueError(f"--{flag} must be positive")
     if args.questions_per_fact is not None and args.questions_per_fact != 2:
         raise ValueError("--questions-per-fact must be exactly 2")
     if args.eval_every is not None and args.eval_every <= 0:

@@ -107,7 +107,7 @@ def run_continual(
     eval_every: int = 5,
     batch_size: int = 4,
     learned_threshold: float = 0.5,
-    mastery_patience: int = 2,
+    mastery_patience: int = 4,
     mastery_max_tokens: int = 32,
     learning_rate: float = 1e-6,
     lora_rank: int = 16,

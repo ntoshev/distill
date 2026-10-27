@@ -208,8 +208,9 @@ def test_training_accepts_json_rollouts_and_canary_limit(monkeypatch):
 
 
 @pytest.mark.parametrize("top_p", [None, 0.9])
+@pytest.mark.parametrize("mastery_patience", [None, 2])
 def test_training_json_reports_result_and_forwards_rollout_options(
-    tmp_path, monkeypatch, capsys, top_p
+    tmp_path, monkeypatch, capsys, top_p, mastery_patience
 ):
     import mlx_lm
     import distill.distill
@@ -241,9 +242,11 @@ def test_training_json_reports_result_and_forwards_rollout_options(
         "--canary-max-tokens", "9", "--save-rollout", str(rollouts),
         "--judge-model", "judge", "--json",
         *([] if top_p is None else ["--speculative-top-p", str(top_p)]),
+        *([] if mastery_patience is None else ["--mastery-confirmations", str(mastery_patience)]),
     ]) == 0
     assert captured["canary_max_tokens"] == 9
     assert captured["batch_size"] == 4
+    assert captured["mastery_patience"] == (4 if mastery_patience is None else mastery_patience)
     assert captured["save_rollout_path"] == str(rollouts)
     assert captured["speculative_top_k"] == (3 if top_p is None else None)
     assert captured["speculative_top_p"] == top_p

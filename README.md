@@ -252,8 +252,11 @@ replay. Supplying explicit progress inputs instead evaluates saved checkpoints.
 `--train` takes the trusted document itself. The tool enumerates its facts,
 generates aligned train/held-out questions plus an exact source-grounded completion,
 then trains only on teacher/student KL. Facts retire from the training rotation
-after their greedy held-out answer passes a frozen LLM equivalence judge at two
-consecutive evaluations, and return if they regress. The judge treats the
+after their greedy held-out answer passes a frozen LLM equivalence judge at four
+consecutive evaluations, and return if they regress. Set `--mastery-confirmations N`
+to change the required number of consecutive passes (default 4, must be positive).
+Confirmations count evaluations, whose spacing is controlled by `--eval-every`;
+`--iters` remains an upper limit on optimizer updates. The judge treats the
 source-grounded reference as authoritative and compares values without seeing
 the factual question or document, preventing its world knowledge from replacing
 the reference. Training and held-out
