@@ -609,7 +609,7 @@ def render_checkpoint_grid(
 
 
 class CheckpointDisplay:
-    """Shared live grid and status line; redirected output gets one final grid."""
+    """Append checkpoints to terminal scrollback; redirected output gets a final grid."""
 
     def __init__(
         self, console, *, metric="prob", show_special_tokens=False, enabled=True
@@ -620,16 +620,14 @@ class CheckpointDisplay:
         self.enabled = enabled
         self.result = None
         self.status = "Evaluating base model…"
-        self.live = None
+        self._streaming = False
+        self._printed = 0
+        self._printed_status = None
 
     def start(self):
-        from rich.live import Live
-
-        if self.enabled and getattr(self.console.file, "isatty", lambda: False)():
-            self.live = Live(
-                self._renderable(), console=self.console, refresh_per_second=4
-            )
-            self.live.start()
+        self._streaming = self.enabled and getattr(
+            self.console.file, "isatty", lambda: False
+        )()
         return self
 
     def _renderable(self):
@@ -637,17 +635,11 @@ class CheckpointDisplay:
 
         parts = []
         if self.result and self.result.steps:
-            # Keep the base and most recent checkpoints visible in a short terminal.
-            budget = max(2, self.console.height - 8)
-            indices = list(range(len(self.result.steps)))
-            if self.live and len(indices) > budget:
-                indices = [0, *indices[-(budget - 1) :]]
             parts.append(
                 checkpoint_grid(
                     self.result,
                     self.metric,
                     show_special_tokens=self.show_special_tokens,
-                    indices=indices,
                 )
             )
             parts.append(Text(GRID_LEGEND, style="grey50"))
@@ -659,12 +651,37 @@ class CheckpointDisplay:
             self.result = result
         if status is not None:
             self.status = status
-        if self.live:
-            self.live.update(self._renderable(), refresh=True)
+        if self._streaming and self.result:
+            complete = min(
+                [len(self.result.steps), *(
+                    len(self.result.series[p.name]) for p in self.result.probes
+                )]
+            )
+            if complete > self._printed:
+                table = checkpoint_grid(
+                    self.result,
+                    self.metric,
+                    show_special_tokens=self.show_special_tokens,
+                    indices=range(self._printed, complete),
+                )
+                # Fixed column proportions keep separately printed rows aligned.
+                table.expand = True
+                table.columns[0].width = 16
+                for column in table.columns[1:]:
+                    column.ratio = 1
+                table.show_header = self._printed == 0
+                self.console.print(table)
+                self.console.print(Text(self.status, style="grey50"))
+                self._printed = complete
+                self._printed_status = self.status
 
     def stop(self):
-        if self.live:
-            self.live.stop()
-            self.live = None
+        if self._streaming:
+            self.update()
+            if self.result:
+                self.console.print(GRID_LEGEND, style="grey50")
+                if self.status != self._printed_status:
+                    self.console.print(Text(self.status, style="grey50"))
+            self._streaming = False
         elif self.enabled and self.result:
             self.console.print(self._renderable())

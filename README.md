@@ -225,12 +225,13 @@ uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
   --eval-every 1 --no-thinking
 ```
 
-The native live grid shows the scored held-out target beside actual generated
+The native checkpoint grid shows the scored held-out target beside actual generated
 canary answers at each evaluation. Each token retains its own student
 probability and token boundary. `p` is the geometric-mean probability, including
-generated end tokens; `--show-special-tokens` reveals their spellings. A single
-status line shows loss, timing, and accepted student/replacement teacher counts.
-Redirected output prints the completed grid once.
+generated end tokens; `--show-special-tokens` reveals their spellings. New rows
+and evaluation status append to terminal scrollback, preserving every checkpoint
+without redrawing or hiding earlier output. This also applies to progress
+evaluation. Redirected output prints the completed grid once.
 
 Inline canaries use their initial generated answers as retention baselines;
 they do not independently establish factual correctness. Use `--canaries PATH`

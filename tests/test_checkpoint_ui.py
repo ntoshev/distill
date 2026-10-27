@@ -304,3 +304,39 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
     assert (
         replay.series["target"][1].label != "learned"
     )  # High probability did not pass recall.
+
+
+@pytest.mark.parametrize("terminal", [True, False])
+def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
+    from distill.render import CheckpointDisplay
+
+    class Output(io.StringIO):
+        def isatty(self):
+            return terminal
+
+    output = Output()
+    console = Console(file=output, width=80, height=5, force_terminal=terminal)
+    probe = Probe("target", "Code?", "V")
+    result = ProgressResult("run", [], [probe], {"target": []})
+    display = CheckpointDisplay(console).start()
+    for step in range(12):
+        result.steps.append(step)
+        result.series["target"].append(
+            ProbePoint(
+                step, -1, math.exp(-1), -1, math.exp(-1),
+                [{"text": f"checkpoint-{step:02d}", "logprob": -1}],
+            )
+        )
+        display.update(result, status=f"Scored checkpoint {step}")
+        display.update(status="Training…")
+        if terminal:
+            assert f"checkpoint-{step:02d}" in output.getvalue()
+        else:
+            assert output.getvalue() == ""
+    display.stop()
+    text = output.getvalue()
+    for step in range(12):
+        assert text.count(f"checkpoint-{step:02d}") == 1
+    assert text.count("target · scored") == 1
+    assert "\x1b[1A" not in text  # No cursor-up redraws erase scrollback.
+    assert "Training…" in text
