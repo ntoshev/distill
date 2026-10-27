@@ -373,6 +373,45 @@ The example progress commands require the local sweep artifacts. Recreate them
 with the commands in [EXPERIMENTS.md](EXPERIMENTS.md); generated sweep folders
 are intentionally ignored because they contain large adapter checkpoints.
 
+## Learn a discrete reversal prompt
+
+The frozen-model reversal experiment learns a shared system prompt with PEZ or
+GCG, comparing lengths 1, 2, 4, 8, and 16 across three optimizer seeds.
+Answers come from a programmatic oracle. Evaluation uses the exported text
+prompt in ordinary greedy generation, with separate fresh-list, unseen-word,
+and longer-list tests.
+
+```sh
+# Exact cached snapshot used by this evaluation.
+REVERSAL_MODEL=/Users/stefanpetrov/.cache/huggingface/hub/models--mlx-community--Qwen3.5-4B-6bit/snapshots/fbb1092aa9daef007603ea9273cd24c225a409f1
+DISTIL_BENCHMARK_SYSTEM_ID=mac16-9-m4-max-14cpu-32gpu-36gb \
+uv run python scripts/run_reversal_suite.py \
+  --model "$REVERSAL_MODEL" \
+  --output-dir outputs/reversal-pez-fixed-20261009 --dataset-seed 20261010 \
+  --methods pez --lengths 1 2 4 8 16 --seeds 0 1 2 \
+  --steps 200 --batch-size 2 --learning-rate .01 \
+  --pez-optimizer adafactor --pez-gradient-clip 1 \
+  --initialization neutral --checkpoint-selection accuracy --eval-every 10
+
+uv run python scripts/analyze_reversal_prompt.py \
+  --output-dir outputs/reversal-pez-fixed-20261009 --methods pez
+```
+
+The suite preserves interrupted arms before restarting and reuses completed
+arms with an identical configuration. It saves real generated token IDs, stop
+reasons, checkpoint prompts, per-seed results, and optimizer timings. See the
+[protocol](experiments/reversal_prompt/PROTOCOL.md) for the objective, tokenizer
+constraints, gradient checks, and numerical limits of the quantized model.
+The [completed evaluation](experiments/reversal_prompt/RESULTS.md) compares all
+lengths, optimizer seeds, manual instructions, random search, and continuous
+controls in the historical setup. GCG learned partial reversal; the ten-token
+manual instruction was more reliable. Historical PEZ scored 0%.
+The [PEZ diagnosis](experiments/reversal_prompt/PEZ_DIAGNOSIS.md) documents the
+Adam correction and development ablations; the
+[corrective evaluation](experiments/reversal_prompt/PEZ_RESULTS.md) reports the
+separate fresh-data rerun reproduced above. A lower training loss alone does not
+establish successful discrete-prompt learning.
+
 ## Development
 
 ```sh
