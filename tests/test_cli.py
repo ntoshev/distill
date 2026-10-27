@@ -670,9 +670,9 @@ def test_progress_rollout_replays_saved_prompt_and_scores_displayed_completion(
     assert captured["max_tokens"] == 8
     assert captured["seed"] == 3
     output = capsys.readouterr().out
-    assert "token probability within the sampled completion" in output
+    assert "· generated" in output
     assert "fresh" in output
-    assert "student p=81.9%" in output
+    assert "p=82.0%" in output
 
 
 def test_progress_rejects_sample_and_rollout_together(tmp_path, capsys):
@@ -789,11 +789,11 @@ def test_progress_sample_auto_uses_run_teacher_context(tmp_path, monkeypatch, ca
     assert "Private reference document" in captured["teacher_system"]
     assert "The answer is VIOLET-731." in captured["teacher_system"]
     output = capsys.readouterr().out
-    assert "token probability within the sampled completion" in output
-    assert "teacher p=90.5%" in output
+    assert "· generated" in output
+    assert "p=14.0%" in output
 
 
-def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch, capsys):
+def test_progress_sample_defaults_to_student_probability_with_auto_teacher(tmp_path, monkeypatch, capsys):
     import huggingface_hub.utils
     import mlx_lm
     import distill.progress
@@ -836,9 +836,9 @@ def test_progress_sample_defaults_to_kl_with_auto_teacher(tmp_path, monkeypatch,
         "--sample", "--no-thinking",
     ]) == 0
     output = capsys.readouterr().out
-    assert "teacher ‖ student" in output
-    assert "sampled completion" in output
-    assert "KL= 0.200" in output
+    assert "sample · generated" in output
+    assert "p=14.0%" in output
+    assert "KL=" not in output
 
 
 def test_progress_completion_auto_uses_run_teacher_context(tmp_path, monkeypatch, capsys):
@@ -913,10 +913,10 @@ def test_progress_probes_stream_rows(monkeypatch, tmp_path, capsys):
         "--model", "m", "--progress", "run", "--probes", str(probes_path)
     ]) == 0
     output = capsys.readouterr().out
-    assert "checkpoint probes" in output
+    assert "· scored" in output
     assert "a" in output
     assert "b" in output
-    assert "student p=36.8%" in output
+    assert "p=37.0%" in output
 
 
 def test_progress_top_k_is_forwarded_and_emitted_in_json(monkeypatch, capsys):

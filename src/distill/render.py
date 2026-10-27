@@ -547,22 +547,124 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
     return payload
 
 
-def render_checkpoint_grid(result, console, metric="prob"):
-    """Dense cartridge grid: one checkpoint per row, one sequence per column."""
+def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices=None):
+    """One checkpoint per row; color only the tokens actually stored in that cell."""
     table = Table(box=None, padding=(0, 1), collapse_padding=True, show_edge=False)
     table.add_column("step", style="grey50", no_wrap=True)
     for probe in result.probes:
-        table.add_column(probe.name, overflow="fold")
-    for row_index, step in enumerate(result.steps):
+        generated = probe.dynamic or any(
+            p.completion is not None for p in result.series[probe.name]
+        )
+        table.add_column(
+            f"{probe.name} · {'generated' if generated else 'scored'}", overflow="fold"
+        )
+    complete = min(
+        [len(result.steps), *(len(result.series[p.name]) for p in result.probes)]
+    )
+    for row_index in (
+        range(complete) if indices is None else (i for i in indices if i < complete)
+    ):
+        step = result.steps[row_index]
         points = [result.series[p.name][row_index] for p in result.probes]
-        label = points[0].label or f"{step}"
+        transition = points[0].label
+        label = (
+            "base"
+            if transition == "base" or step in {-1, 0} and transition is None
+            else str(step)
+        )
+        if transition and transition != "base":
+            label += " " + transition
         cells = []
         for point in points:
             cell = Text()
             for token in point.tokens:
+                special = token.get(
+                    "special",
+                    token["text"] in {"<|im_end|>", "<|endoftext|>", "</s>", "<eos>"},
+                )
+                if special and not show_special_tokens:
+                    continue
                 value = token.get("kl") if metric == "kl" else token["logprob"]
+                if value is None:
+                    raise ValueError(
+                        "KL display requires teacher scores for every displayed token"
+                    )
                 cell.append(token["text"], style=style_for(value, metric))
             cell.append(f"  p={point.mean_probability:.1%}", style="grey50")
             cells.append(cell)
         table.add_row(label, *cells)
-    console.print(table)
+    return table
+
+
+GRID_LEGEND = "p = geometric-mean student probability, including generated end tokens."
+
+
+def render_checkpoint_grid(
+    result, console, metric="prob", *, show_special_tokens=False
+):
+    console.print(
+        checkpoint_grid(result, metric, show_special_tokens=show_special_tokens)
+    )
+    console.print(GRID_LEGEND, style="grey50")
+
+
+class CheckpointDisplay:
+    """Shared live grid and status line; redirected output gets one final grid."""
+
+    def __init__(
+        self, console, *, metric="prob", show_special_tokens=False, enabled=True
+    ):
+        self.console = console
+        self.metric = metric
+        self.show_special_tokens = show_special_tokens
+        self.enabled = enabled
+        self.result = None
+        self.status = "Evaluating base model…"
+        self.live = None
+
+    def start(self):
+        from rich.live import Live
+
+        if self.enabled and getattr(self.console.file, "isatty", lambda: False)():
+            self.live = Live(
+                self._renderable(), console=self.console, refresh_per_second=4
+            )
+            self.live.start()
+        return self
+
+    def _renderable(self):
+        from rich.console import Group
+
+        parts = []
+        if self.result and self.result.steps:
+            # Keep the base and most recent checkpoints visible in a short terminal.
+            budget = max(2, self.console.height - 8)
+            indices = list(range(len(self.result.steps)))
+            if self.live and len(indices) > budget:
+                indices = [0, *indices[-(budget - 1) :]]
+            parts.append(
+                checkpoint_grid(
+                    self.result,
+                    self.metric,
+                    show_special_tokens=self.show_special_tokens,
+                    indices=indices,
+                )
+            )
+            parts.append(Text(GRID_LEGEND, style="grey50"))
+        parts.append(Text(self.status, style="grey50"))
+        return Group(*parts)
+
+    def update(self, result=None, status=None):
+        if result is not None:
+            self.result = result
+        if status is not None:
+            self.status = status
+        if self.live:
+            self.live.update(self._renderable(), refresh=True)
+
+    def stop(self):
+        if self.live:
+            self.live.stop()
+            self.live = None
+        elif self.enabled and self.result:
+            self.console.print(self._renderable())

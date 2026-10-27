@@ -7,7 +7,7 @@ from pathlib import Path
 
 from mlx_lm import load
 
-from distil.prompt_optimization import PromptLayout, PromptObjective, ReversalCase, evaluate_prompt
+from distill.prompt_optimization import PromptLayout, PromptObjective, ReversalCase, evaluate_prompt
 
 MODEL = "/Users/stefanpetrov/.cache/huggingface/hub/models--mlx-community--Qwen3.5-4B-6bit/snapshots/fbb1092aa9daef007603ea9273cd24c225a409f1"
 

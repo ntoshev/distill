@@ -15,8 +15,8 @@ from time import perf_counter
 import mlx.core as mx
 import mlx.optimizers as optim
 
-from distil.chunked_kl import _head_logits, _parts
-from distil.templating import render_generation_prompt
+from distill.chunked_kl import _head_logits, _parts
+from distill.templating import render_generation_prompt
 
 
 WORDS = """apple river chair table bread cloud grass stone book tree light water

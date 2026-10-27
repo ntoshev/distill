@@ -98,6 +98,14 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--prompt", help="prompt / context (not scored)")
     src.add_argument("--completion", help="text to score")
     src.add_argument(
+        "--eval-prompt", help="held-out question for inline single-fact training"
+    )
+    src.add_argument(
+        "--canary",
+        action="append",
+        help="inline retention question; repeat for each canary",
+    )
+    src.add_argument(
         "--raw",
         action="store_true",
         help="skip the chat template when scoring or sampling",
@@ -260,6 +268,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     out = p.add_argument_group("output")
     out.add_argument(
+        "--show-special-tokens",
+        action="store_true",
+        help="show end-token spellings in checkpoint grids",
+    )
+    out.add_argument(
         "--metric",
         choices=["logprob", "prob", "kl"],
         help="color scale; kl needs a teacher and is its default",
@@ -356,7 +369,7 @@ def _resolve_lora_config(args, argv: list[str]) -> CommandConfig:
     rollout_file = args.rollout is not None
     rollout_progress = progress and rollout_file
     standalone_rollout = rollout_file and not progress
-    standalone_completion = args.completion is not None and not progress
+    standalone_completion = args.completion is not None and not (progress or training)
     sampled_progress_mode = (args.sample or rollout_progress) and progress
     if (
         sum(
@@ -375,6 +388,20 @@ def _resolve_lora_config(args, argv: list[str]) -> CommandConfig:
         )
     if judge_model_explicit and not training:
         raise ValueError("--judge-model only combines with --train")
+    if args.eval_prompt is not None and not training:
+        raise ValueError("--eval-prompt only combines with --train")
+    if args.canary and not (training or progress):
+        raise ValueError("--canary only combines with --train or --progress")
+    if args.canary and args.canaries:
+        raise ValueError("use only one of --canary or --canaries")
+    if args.canary and any(not value.strip() for value in args.canary):
+        raise ValueError("--canary must not be empty")
+    if args.canary and len(set(args.canary)) != len(args.canary):
+        raise ValueError("duplicate --canary questions")
+    if args.show_special_tokens and not (training or progress):
+        raise ValueError(
+            "--show-special-tokens only combines with --train or --progress"
+        )
     if args.index is not None and not rollout_file:
         raise ValueError("--index only combines with --rollout")
     if args.top_k is not None and args.top_k < 0:
@@ -507,16 +534,34 @@ def _validate_training(args) -> None:
         )
     if args.teacher_prompt is not None:
         raise ValueError("--teacher-prompt does not combine with --train")
-    if args.prompt is not None:
-        raise ValueError(
-            "--prompt does not combine with --train; put prompts in the training file"
-        )
+    inline = any(
+        value is not None for value in (args.prompt, args.eval_prompt, args.completion)
+    )
+    if inline:
+        if not all(
+            value and value.strip()
+            for value in (args.prompt, args.eval_prompt, args.completion)
+        ):
+            raise ValueError(
+                "inline --train requires --prompt, --eval-prompt and --completion"
+            )
+        if args.prompt.strip() == args.eval_prompt.strip():
+            raise ValueError("--eval-prompt must differ from the training --prompt")
+        if (
+            args.probes
+            or args.generator_model
+            or args.questions_per_fact
+            or args.generate_only
+        ):
+            raise ValueError(
+                "inline --train cannot combine with --probes or generation options"
+            )
     if args.raw:
         raise ValueError("--raw does not combine with --train")
     if args.metric or args.stats or args.worst or args.hide_context:
         raise ValueError("scoring output flags do not combine with --train")
-    if not args.generate_only and args.canaries is None:
-        raise ValueError("--train requires --canaries")
+    if not args.generate_only and args.canaries is None and not args.canary:
+        raise ValueError("--train requires --canaries or --canary")
     if args.generate_only and args.probes is not None:
         raise ValueError("--generate-only does not combine with --probes")
     if args.probes is not None and (
@@ -573,7 +618,14 @@ def _validate_progress(args) -> None:
             rollout_progress,
         ]
     )
-    if progress_inputs != 1:
+    recorded = (
+        progress_inputs == 0 and (Path(args.progress) / "eval_metrics.jsonl").is_file()
+    )
+    if recorded and (args.prompt is not None or args.canary or args.system is not None):
+        raise ValueError(
+            "recorded --progress replays saved inputs; supply --completion or --sample to override"
+        )
+    if progress_inputs != 1 and not recorded:
         raise ValueError(
             "--progress requires exactly one of --completion, --probes, --sample or --rollout"
         )

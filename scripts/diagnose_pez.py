@@ -14,7 +14,7 @@ import mlx.core as mx
 import mlx.optimizers as optim
 from mlx_lm import load
 
-from distil.prompt_optimization import PEZ, PromptLayout, PromptObjective, PromptVocabulary, evaluate_prompt, reversal_splits
+from distill.prompt_optimization import PEZ, PromptLayout, PromptObjective, PromptVocabulary, evaluate_prompt, reversal_splits
 
 
 MODEL = "/Users/stefanpetrov/.cache/huggingface/hub/models--mlx-community--Qwen3.5-4B-6bit/snapshots/fbb1092aa9daef007603ea9273cd24c225a409f1"
@@ -79,9 +79,9 @@ def main():
             splits = reversal_splits(tokenizer, seed=args.dataset_seed)
             save(output / "development_data.json", {name: [c.to_dict() for c in splits[name]] for name in ("train", "validation")})
             save(output / f"provenance-{time.time_ns()}.json", {"model_snapshot": MODEL, "dataset_seed": args.dataset_seed,
-                 "source_sha256": hashlib.sha256(Path("src/distil/prompt_optimization.py").read_bytes()).hexdigest(),
+                 "source_sha256": hashlib.sha256(Path("src/distill/prompt_optimization.py").read_bytes()).hexdigest(),
                  "selection": "development validation CE and generation; no test feedback", "variants": VARIANTS})
-            for source in (Path(__file__), Path("src/distil/prompt_optimization.py")):
+            for source in (Path(__file__), Path("src/distill/prompt_optimization.py")):
                 digest = hashlib.sha256(source.read_bytes()).hexdigest()
                 snapshot = output / "source_snapshots" / digest / source.name
                 snapshot.parent.mkdir(parents=True, exist_ok=True)

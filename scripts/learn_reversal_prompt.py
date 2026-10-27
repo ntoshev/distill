@@ -23,7 +23,7 @@ from mlx.utils import tree_flatten
 from mlx_lm import load
 from mlx_lm.utils import _download
 
-from distil.prompt_optimization import (GCG, PEZ, SoftPrompt, NEUTRAL_INITIAL_PROMPTS, COPY_INITIAL_PROMPTS, PromptLayout, PromptObjective,
+from distill.prompt_optimization import (GCG, PEZ, SoftPrompt, NEUTRAL_INITIAL_PROMPTS, COPY_INITIAL_PROMPTS, PromptLayout, PromptObjective,
     PromptVocabulary, evaluate_prompt, evaluate_soft_prompt, reversal_splits)
 
 
@@ -441,7 +441,7 @@ def main():
     write_json(manifest_path, manifest)
     provenance["source_sha256"] = {
         str(path.relative_to(Path(__file__).resolve().parents[1])): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (Path(__file__).resolve(), Path(__file__).resolve().parents[1] / "src/distil/prompt_optimization.py")}
+        for path in (Path(__file__).resolve(), Path(__file__).resolve().parents[1] / "src/distill/prompt_optimization.py")}
     for relative, digest in provenance["source_sha256"].items():
         path = Path(__file__).resolve().parents[1] / relative
         target = args.output_dir / "source_snapshots" / digest / path.name

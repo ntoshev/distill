@@ -39,17 +39,18 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="mlx-community/Qwen3.5-0.8B-4bit")
     parser.add_argument("--specs", default=DEFAULT_SPECS)
-    parser.add_argument(
-        "--prompts", type=Path, default=Path("examples/distillation/lumen-questions.txt")
-    )
-    parser.add_argument(
-        "--teacher", type=Path, default=Path("examples/distillation/lumen-teacher.txt")
-    )
-    parser.add_argument(
+    prompts_group = parser.add_mutually_exclusive_group()
+    prompts_group.add_argument("--prompts", type=Path)
+    prompts_group.add_argument("--prompt", action="append", help="inline training question; repeatable")
+    teacher_group = parser.add_mutually_exclusive_group()
+    teacher_group.add_argument("--teacher", type=Path)
+    teacher_group.add_argument("--teacher-text", help="inline privileged teacher context")
+    canaries_group = parser.add_mutually_exclusive_group()
+    canaries_group.add_argument(
         "--canaries",
         type=Path,
-        default=Path("examples/distillation/contamination-canaries.txt"),
     )
+    canaries_group.add_argument("--canary", action="append", help="inline retention question; repeatable")
     parser.add_argument(
         "--speculative-top-k",
         type=int,
@@ -76,9 +77,13 @@ def main() -> int:
     from distill.training import load_prompts, train_lora
 
     try:
-        prompts = load_prompts(args.prompts)
-        canaries = load_prompts(args.canaries)
-        teacher_system = args.teacher.read_text()
+        prompts = args.prompt or load_prompts(args.prompts or Path("examples/distillation/lumen-questions.txt"))
+        canaries = args.canary or load_prompts(args.canaries or Path("examples/distillation/contamination-canaries.txt"))
+        teacher_system = args.teacher_text if args.teacher_text is not None else (
+            args.teacher or Path("examples/distillation/lumen-teacher.txt")
+        ).read_text()
+        if not all(text.strip() for text in [*prompts, *canaries, teacher_system]):
+            raise ValueError("prompts, canaries, and teacher context must not be empty")
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
@@ -97,9 +102,9 @@ def main() -> int:
             {"label": label, "learning_rate": learning_rate, "steps": steps}
             for label, learning_rate, steps in specs
         ],
-        "prompts": str(args.prompts),
-        "teacher": str(args.teacher),
-        "canaries": str(args.canaries),
+        "prompts": prompts,
+        "teacher": teacher_system,
+        "canaries": canaries,
         "kl_direction": args.kl_direction,
         "sampling": {
             "policy": "speculative" if args.speculative_top_k is not None else "student",

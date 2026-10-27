@@ -4,7 +4,7 @@ import json
 import math
 import shutil
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from time import perf_counter
@@ -13,7 +13,14 @@ from typing import Callable
 from distill.adapters import lora_disabled
 from distill.cli_config import resolve_speculative_policy
 from distill.judge import judge_answer
-from distill.progress import Probe, score_probe
+from distill.progress import (
+    Probe,
+    ProgressResult,
+    score_probe,
+    sample_probe,
+    progress_to_json,
+    evaluation_transition,
+)
 from distill.sample import sample_completion
 from distill.stopping import (
     ActiveRotation,
@@ -126,6 +133,7 @@ def run_continual(
     backend="lora",
     artifact_config=None,
     resume_checkpoint=None,
+    capture_progress: bool = False,
 ) -> ContinualResult:
     # Explicit None still disables speculation; only an omitted K defaults to 3.
     if speculative_top_k is _DefaultSpeculativeTopK.VALUE:
@@ -135,6 +143,9 @@ def run_continual(
         raise ValueError("training needs at least one probe")
     if not canaries:
         raise ValueError("--canaries must contain at least one probe")
+    names = [item.name for item in items] + [p.name for p in canaries]
+    if len(names) != len(set(names)):
+        raise ValueError("training targets and canaries must have distinct names")
     if from_adapter is not None and (teacher_model is None or teacher_model is model):
         raise ValueError(
             "starting-adapter training requires a separate frozen starting-model teacher"
@@ -209,7 +220,7 @@ def run_continual(
                 judge_model,
                 judge_tokenizer,
                 probe.prompt,
-                probe.completion,
+                probe.completion or canary_baselines[probe.name],
                 canary_baselines[probe.name],
                 enable_thinking=enable_thinking,
             )
@@ -277,6 +288,7 @@ def run_continual(
         "speculative_top_p": speculative_top_p,
         "kl_direction": kl_direction,
         "enable_thinking": enable_thinking,
+        "capture_progress": capture_progress,
     }
     if artifact_config:
         run_config.update(artifact_config)
@@ -313,6 +325,7 @@ def run_continual(
     safe_rows: list[dict] = []
     last_loss = None
     latest_training_rollout: dict | None = None
+    previous_evaluation = None
 
     rotation = ActiveRotation(items, seed)
     rotation.update(set(items_by_name))
@@ -329,17 +342,20 @@ def run_continual(
         safe_rows = resume_state["safe_rows"]
         last_loss = resume_state["last_loss"]
         latest_training_rollout = resume_state["latest_training_rollout"]
+        previous_evaluation = resume_state["last_evaluation"]
 
     def evaluate(step: int, checkpoint: Path) -> tuple[dict, set[str]]:
+        nonlocal previous_evaluation
         started = perf_counter()
         policy = session.inference_policy if backend == "cartridge" else None
         cache_options = {"cache_factory": policy.new_cache} if policy else {}
-        scores = {
+        target_points = {
             name: score_probe(
                 model, tokenizer, probe, step, enable_thinking, **cache_options
-            ).mean_probability
+            )
             for name, probe in item_probes.items()
         }
+        scores = {name: point.mean_probability for name, point in target_points.items()}
         probability_learned = mastered(scores, learned_threshold)
         confirmations = {}
         for name, probe in item_probes.items():
@@ -375,16 +391,33 @@ def run_continual(
             if streak >= mastery_patience
         }
         canary_rows = []
+        canary_points = {}
         for probe in canaries:
-            content = _answer(
-                model,
-                tokenizer,
-                probe,
-                max_tokens=canary_max_tokens,
-                enable_thinking=enable_thinking,
-                default_system=student_system,
-                **cache_options,
-            )
+            if capture_progress:
+                point = sample_probe(
+                    model,
+                    tokenizer,
+                    probe,
+                    step,
+                    enable_thinking,
+                    max_tokens=canary_max_tokens,
+                    temperature=0,
+                    seed=0,
+                    default_system=student_system,
+                    **cache_options,
+                )
+                canary_points[probe.name] = point
+                content = point.content.strip()
+            else:
+                content = _answer(
+                    model,
+                    tokenizer,
+                    probe,
+                    max_tokens=canary_max_tokens,
+                    enable_thinking=enable_thinking,
+                    default_system=student_system,
+                    **cache_options,
+                )
             baseline = canary_baselines[probe.name]
             canary_rows.append(
                 {
@@ -392,6 +425,12 @@ def run_continual(
                     "baseline": baseline,
                     "content": content,
                     "changed": content != baseline,
+                    "contaminated": content != baseline
+                    and any(
+                        content == item.completion.strip()
+                        and baseline != item.completion.strip()
+                        for item in items
+                    ),
                 }
             )
         active = {item.name for item in items} - learned
@@ -412,6 +451,22 @@ def run_continual(
             "evaluation_seconds": perf_counter() - started,
             "training_rollout": latest_training_rollout,
         }
+        if capture_progress:
+            label = evaluation_transition(row, previous_evaluation)
+            probes = [
+                *item_probes.values(),
+                *(replace(p, dynamic=True) for p in canaries),
+            ]
+            points = {**target_points, **canary_points}
+            row["progress"] = progress_to_json(
+                ProgressResult(
+                    str(root),
+                    [step],
+                    probes,
+                    {p.name: [replace(points[p.name], label=label)] for p in probes},
+                )
+            )
+        previous_evaluation = row
         with eval_file.open("a") as file:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
         if not row["canary_changed"]:
@@ -529,6 +584,12 @@ def run_continual(
                         "loss": last_loss,
                         "batch_size": len(steps),
                         "num_tokens": sum(step.num_tokens for step in steps),
+                        "accepted_tokens": sum(
+                            step.accepted_tokens or 0 for step in steps
+                        ),
+                        "replaced_tokens": sum(
+                            step.replaced_tokens or 0 for step in steps
+                        ),
                         "timing": {
                             "rollout_seconds": first_step.batch_rollout_seconds,
                             "distill_seconds": first_step.batch_distill_seconds,

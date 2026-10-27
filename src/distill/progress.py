@@ -106,7 +106,18 @@ def load_probes(path: str | Path, prompt_mode: str = "test") -> list[Probe]:
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             raise ValueError(f"invalid probe on line {line_number}: {error}") from error
         for probe in row_probes:
-            required = (probe.name, probe.prompt, probe.completion)
+            from dataclasses import replace
+
+            probe = replace(probe, dynamic=bool(row.get("dynamic", False)))
+            required = (
+                (probe.name, probe.prompt)
+                if probe.dynamic
+                else (probe.name, probe.prompt, probe.completion)
+            )
+            if not isinstance(probe.completion, str):
+                raise ValueError(
+                    f"invalid probe on line {line_number}: completion must be a string"
+                )
             if not all(isinstance(value, str) and value for value in required):
                 raise ValueError(
                     f"invalid probe on line {line_number}: fields must be non-empty strings"
@@ -301,13 +312,22 @@ def _completion_point(
             )
     scored = result.scored
     sequence_logprob = sum(token.logprob for token in scored)
+    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_ids.update(getattr(tokenizer, "eos_token_ids", []) or [])
     return ProbePoint(
         step=step,
         mean_logprob=result.mean_logprob,
         mean_probability=math.exp(result.mean_logprob),
         sequence_logprob=sequence_logprob,
         sequence_probability=math.exp(sequence_logprob),
-        tokens=[_token_payload(token) for token in scored],
+        tokens=[
+            dict(
+                _token_payload(token),
+                token_id=token.token_id,
+                special=token.token_id in special_ids,
+            )
+            for token in scored
+        ],
         mean_teacher_logprob=(
             result.mean_teacher_logprob if teacher_model is not None else None
         ),
@@ -476,7 +496,7 @@ def _run_progress(
         evaluate_step(-1)
     elif not has_step_zero:
         evaluate_step(0)
-    transitions = checkpoint_transitions(checkpoint_root) if cartridge_run else {}
+    transitions = checkpoint_transitions(checkpoint_root)
     for step, checkpoint in checkpoints:
         from distill.backends import artifact_backend
 
@@ -495,7 +515,7 @@ def _run_progress(
             evaluate_step(step)
         else:
             current_factory = None
-            current_label = None
+            current_label = "base" if step == 0 else transitions.get(step)
             try:
                 load_adapters(model, str(checkpoint))
                 evaluate_step(step)
@@ -690,26 +710,65 @@ def memory_progress(
     return result
 
 
+def evaluation_transition(row, previous=None):
+    """Labels describe measured recall/retention, never probability thresholds."""
+    previous = previous or {}
+    if row["iteration"] == 0:
+        return "base"
+    changed = bool(row.get("canary_changed"))
+    leaked = any(c.get("contaminated", False) for c in row.get("canaries", []))
+    prior_leak = any(c.get("contaminated", False) for c in previous.get("canaries", []))
+    if leaked and not prior_leak:
+        return "leak"
+    if changed and not previous.get("canary_changed"):
+        return "changed"
+    if not changed and previous.get("canary_changed"):
+        return "recovered"
+    if row.get("mastered", 0) == row.get("total", -1) and previous.get(
+        "mastered", 0
+    ) != previous.get("total", -1):
+        return "learned"
+    return None
+
+
+def recorded_progress(root):
+    """Replay persisted evaluation tokens without generating or rescoring text."""
+    result = None
+    for line in (Path(root) / "eval_metrics.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        payload = row.get("progress")
+        if payload is None:
+            raise ValueError(
+                "run has no saved token grid; pass --prompt/--completion or --probes to rescore it"
+            )
+        probes = [Probe(**p) for p in payload["probes"]]
+        if result is None:
+            result = ProgressResult(str(root), [], probes, {p.name: [] for p in probes})
+        if probes != result.probes:
+            raise ValueError("recorded progress probes changed within the run")
+        result.steps.extend(payload["steps"])
+        for probe in probes:
+            result.series[probe.name].extend(
+                ProbePoint(**p) for p in payload["series"][probe.name]
+            )
+    if result is None:
+        raise ValueError("run has no recorded evaluations")
+    return result
+
+
 def checkpoint_transitions(root):
     path = Path(root) / "eval_metrics.jsonl"
     if not path.exists():
         return {}
     transitions = {}
-    leaking = False
-    learned = False
+    previous = None
     for line in path.read_text().splitlines():
         row = json.loads(line)
         step = row["iteration"]
-        changed = bool(row.get("canary_changed"))
-        mastered = row.get("mastered", 0) == row.get("total", -1)
-        if step and changed and not leaking:
-            transitions[step] = "leak"
-        elif step and not changed and leaking:
-            transitions[step] = "recovered"
-        elif step and mastered and not learned:
-            transitions[step] = "learned"
-        leaking = changed
-        learned = mastered
+        label = evaluation_transition(row, previous)
+        if label:
+            transitions[step] = label
+        previous = row
     return transitions
 
 

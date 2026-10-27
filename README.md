@@ -8,6 +8,9 @@
 - memorizing raw passage continuations with a learned attention memory;
 - inspecting learning and contamination across saved checkpoints.
 
+See the [three-step demo](DEMO.md) for copyable CLI inputs and colored output:
+sequence surprise, top-p teacher guidance, and single-fact training with canaries.
+
 The current single-fact experiment learns `VIOLET-731`. Top-5 Speculative KD
 creates a checkpoint where the fact is learned before any measured canary
 contamination, but a small GSM8K diagnostic remains below the frozen base.
@@ -207,6 +210,45 @@ the production vocabulary and chunk sizes on M4 Max.
 
 ## Continual document learning
 
+For a single fact, supply all texts directly. The training question and held-out
+question must differ; this bypasses fact and question generation:
+
+```sh
+uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
+  --train "Project Lumen's launch code is VIOLET-731." \
+  --prompt "What is Project Lumen's launch code? Answer with the code only." \
+  --eval-prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
+  --completion "VIOLET-731" \
+  --canary "What is 7 plus 5? Answer with the number only." \
+  --canary "What color is grass usually? Answer with the color only." \
+  --adapter adapters/lumen-inline --speculative-top-p 0.9 \
+  --eval-every 1 --no-thinking
+```
+
+The native live grid shows the scored held-out target beside actual generated
+canary answers at each evaluation. Each token retains its own student
+probability and token boundary. `p` is the geometric-mean probability, including
+generated end tokens; `--show-special-tokens` reveals their spellings. A single
+status line shows loss, timing, and accepted student/replacement teacher counts.
+Redirected output prints the completed grid once.
+
+Inline canaries use their initial generated answers as retention baselines;
+they do not independently establish factual correctness. Use `--canaries PATH`
+with reference completions when baseline correctness needs to be checked.
+`learned` requires the existing held-out generation judge and patience policy.
+`changed` includes punctuation drift; `leak` means an answer changed to an exact
+target completion. These labels do not change the existing stopping policy.
+
+Replay the recorded grid without loading model weights or regenerating text:
+
+```sh
+uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
+  --progress adapters/lumen-inline --color always
+```
+
+The run saves inputs and exact per-token scores in `eval_metrics.jsonl` for
+replay. Supplying explicit progress inputs instead evaluates saved checkpoints.
+
 `--train` takes the trusted document itself. The tool enumerates its facts,
 generates aligned train/held-out questions plus an exact source-grounded completion,
 then trains only on teacher/student KL. Facts retire from the training rotation
@@ -322,7 +364,7 @@ uv run distill \
   --completion "VIOLET-731" --metric prob --no-thinking
 ```
 
-Compare several targets and canaries as compact sparklines:
+Compare several targets and canaries in the same checkpoint grid:
 
 ```sh
 uv run distill \

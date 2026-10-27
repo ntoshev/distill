@@ -16,10 +16,8 @@ from distill.cli_config import (
 from distill.render import (
     RenderOptions,
     render,
-    render_progress_row_point,
     render_checkpoint_grid,
-    render_progress_rows_header,
-    render_skd_rollout,
+    CheckpointDisplay,
     to_json_dict,
 )
 from distill.rollout import load_rollout, save_rollout
@@ -125,8 +123,8 @@ def _continual_cli(args, errcon, fail) -> int:
         teacher_system as document_teacher_system,
         write_generation,
     )
-    from distill.progress import load_probes
-    from distill.stopping import answer_only_prompt, load_learning_items
+    from distill.progress import Probe, ProbePoint, ProgressResult, load_probes
+    from distill.stopping import LearningItem, answer_only_prompt, load_learning_items
 
     output = (
         args.cartridge
@@ -147,8 +145,30 @@ def _continual_cli(args, errcon, fail) -> int:
             return fail(f"invalid existing selection file: {selection}")
     try:
         document, source = resolve_context(args.train, stdin=sys.stdin.read)
-        canaries = load_probes(args.canaries) if not args.generate_only else []
+        canaries = (
+            [
+                Probe(f"canary-{i}", _read_input(prompt), "", dynamic=True)
+                for i, prompt in enumerate(args.canary, 1)
+            ]
+            if args.canary
+            else load_probes(args.canaries)
+            if not args.generate_only
+            else []
+        )
         items = load_learning_items(args.probes) if args.probes else None
+        if args.eval_prompt is not None:
+            prompt, heldout, completion = map(
+                _read_input, (args.prompt, args.eval_prompt, args.completion)
+            )
+            if not all(text and text.strip() for text in (prompt, heldout, completion)):
+                raise ValueError("inline training texts must not be empty")
+            if prompt.strip() == heldout.strip():
+                raise ValueError("--eval-prompt must differ from the training --prompt")
+            items = [
+                LearningItem("target", heldout, completion, (prompt,), fact=document)
+            ]
+        if any(not p.prompt or not p.prompt.strip() for p in canaries):
+            raise ValueError("canary question must not be empty")
     except (FileNotFoundError, OSError, ValueError) as error:
         return fail(str(error))
 
@@ -164,6 +184,23 @@ def _continual_cli(args, errcon, fail) -> int:
     generator_name = args.generator_model or args.model
     student = student_tokenizer = None
     probes_path = Path(args.probes) if args.probes else None
+    canaries_path = Path(args.canaries) if args.canaries else None
+    if args.eval_prompt is not None or args.canary:
+        generated_dir = Path(output) / "generated"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        if args.eval_prompt is not None:
+            probes_path = generated_dir / "probes.jsonl"
+            probes_path.write_text(
+                "".join(json.dumps(asdict(item)) + "\n" for item in items)
+            )
+        if args.canary:
+            canaries_path = generated_dir / "canaries.jsonl"
+            canaries_path.write_text(
+                "".join(json.dumps(asdict(probe)) + "\n" for probe in canaries)
+            )
+    display = CheckpointDisplay(
+        errcon, show_special_tokens=args.show_special_tokens, enabled=not args.json
+    )
 
     def generated() -> int:
         if args.json:
@@ -339,7 +376,8 @@ def _continual_cli(args, errcon, fail) -> int:
             (generated_dir / "source.txt").write_text(document, encoding="utf-8")
             import shutil
 
-            shutil.copyfile(args.canaries, generated_dir / "canaries.jsonl")
+            if canaries_path.resolve() != (generated_dir / "canaries.jsonl").resolve():
+                shutil.copyfile(canaries_path, generated_dir / "canaries.jsonl")
             if args.probes:
                 shutil.copyfile(args.probes, generated_dir / "probes.jsonl")
             if teacher_memory:
@@ -408,42 +446,52 @@ def _continual_cli(args, errcon, fail) -> int:
             }
 
         def report(row):
-            errcon.print(
-                f"eval {row['iteration']}: mastered={row['mastered']}/{row['total']}  "
-                f"probability={row['probability_mastered']}/{row['total']}  "
-                f"active={len(row['active_item_ids'])}  changed={row['canary_changed']}  "
-                f"time={row['evaluation_seconds']:.2f}s",
-                style="grey50",
-            )
-            if row.get("training_rollout"):
-                render_skd_rollout(
-                    row["training_rollout"],
-                    errcon,
-                    label=f"skd@{row['iteration']}",
+            payload = row.get("progress")
+            if payload:
+                if display.result is None:
+                    probes = [Probe(**p) for p in payload["probes"]]
+                    display.result = ProgressResult(
+                        str(output), [], probes, {p.name: [] for p in probes}
+                    )
+                display.result.steps.extend(payload["steps"])
+                for probe in display.result.probes:
+                    display.result.series[probe.name].extend(
+                        ProbePoint(**p) for p in payload["series"][probe.name]
+                    )
+            rollout = row.get("training_rollout") or {}
+            display.update(
+                status=(
+                    f"eval {row['iteration']}  learned={row['mastered']}/{row['total']}  "
+                    f"changed={row['canary_changed']}  eval={row['evaluation_seconds']:.2f}s  "
+                    + (
+                        f"loss={row['loss']:.4f}  "
+                        if row.get("loss") is not None
+                        else ""
+                    )
+                    + f"teacher replacements={rollout.get('replaced_tokens', 0)}"
                 )
+            )
 
         def train_report(event):
             if event["event"] == "question":
-                errcon.print(
-                    f"train batch size: {event['batch_size']}",
-                    style="grey50",
-                )
-                errcon.print(
-                    f"train 1 question: {event['prompt']}",
-                    style="grey50",
-                    markup=False,
-                )
+                display.update(status=f"Training {event['batch_size']} question(s)")
                 return
             timing = event["timing"]
-            errcon.print(
-                f"train {event['iteration']}: loss={event['loss']:.4f}  "
-                f"tokens={event['num_tokens']}  time={timing['total_seconds']:.2f}s  "
-                f"(rollout={timing['rollout_seconds']:.2f}s  "
-                f"distill={timing['distill_seconds']:.2f}s  "
-                f"update={timing['optimizer_seconds']:.2f}s)",
-                style="grey50",
+            display.update(
+                status=(
+                    f"train {event['iteration']}: loss={event['loss']:.4f}  "
+                    f"tokens={event['num_tokens']}  time={timing['total_seconds']:.2f}s  "
+                    f"student={event.get('accepted_tokens', 0)}  "
+                    f"teacher={event.get('replaced_tokens', 0)}"
+                )
             )
 
+        if not args.json:
+            for probe in canaries:
+                errcon.print(
+                    f"{probe.name}: {probe.prompt}", style="grey50", markup=False
+                )
+        display.start()
         result = run_continual(
             student,
             student_tokenizer,
@@ -465,7 +513,8 @@ def _continual_cli(args, errcon, fail) -> int:
             **sampling.kwargs(),
             source=source,
             probes_path=probes_path,
-            canaries_path=args.canaries,
+            canaries_path=canaries_path,
+            capture_progress=True,
             save_rollout_path=args.save_rollout,
             report=report,
             train_report=train_report,
@@ -480,6 +529,8 @@ def _continual_cli(args, errcon, fail) -> int:
         return 130
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         return fail(str(error))
+    finally:
+        display.stop()
 
     payload = {
         "success": result.success,
@@ -640,6 +691,7 @@ def _resume_cartridge_facts(args, model, tokenizer, identity, errcon):
         backend="cartridge",
         resume_checkpoint=checkpoint,
         artifact_config=artifact_config,
+        capture_progress=config.get("capture_progress", False),
         inference_policy=CartridgePolicy(model, tokenizer, identity, memory)
         if config.get("from_cartridge")
         else None,
@@ -877,8 +929,14 @@ def _teacher_inputs(args) -> tuple[str | None, str | None]:
 def _progress_probes(args):
     from distill.progress import Probe, load_probes
 
+    inline_canaries = [
+        Probe(f"canary-{i}", _read_input(prompt), "", dynamic=True)
+        for i, prompt in enumerate(args.canary or [], 1)
+    ]
     if args.probes is not None:
-        probes = load_probes(args.probes, prompt_mode=args.progress_prompt)
+        probes = (
+            load_probes(args.probes, prompt_mode=args.progress_prompt) + inline_canaries
+        )
         if args.config.backend == "cartridge":
             from distill.progress import affected_canary
 
@@ -888,19 +946,58 @@ def _progress_probes(args):
         return probes, _read_input(args.system)
     if args.rollout is not None:
         index = args.index if args.index is not None else 0
-        return [_rollout_progress_probe(load_rollout(args.rollout, index), index)], None
+        return [
+            _rollout_progress_probe(load_rollout(args.rollout, index), index),
+            *inline_canaries,
+        ], None
     completion = None if args.config.sampled_progress else _read_input(args.completion)
     prompt = _read_input(args.prompt) or ""
     system = _read_input(args.system)
     if args.config.sampled_progress:
-        return [Probe("sample", prompt, "", system)], system
+        return [Probe("sample", prompt, "", system), *inline_canaries], system
     if not completion:
         raise ValueError("--completion must not be empty")
-    return [Probe("target", prompt, completion, system)], system
+    return [Probe("target", prompt, completion, system), *inline_canaries], system
 
 
 def _progress_cli(args, console, errcon, fail) -> int:
-    from distill.progress import progress_to_json, sample_progress, score_progress
+    from distill.progress import (
+        ProgressResult,
+        progress_to_json,
+        sample_progress,
+        score_progress,
+        recorded_progress,
+    )
+
+    if not any(
+        (
+            args.probes,
+            args.completion is not None,
+            args.sample,
+            args.rollout,
+            args.memory_keys,
+        )
+    ):
+        try:
+            result = recorded_progress(args.progress)
+            if args.metric == "kl":
+                return fail(
+                    "recorded grids contain student probabilities; supply explicit probes to score KL"
+                )
+            if args.json:
+                print(
+                    json.dumps(progress_to_json(result), ensure_ascii=False, indent=2)
+                )
+            else:
+                render_checkpoint_grid(
+                    result,
+                    console,
+                    args.metric or "prob",
+                    show_special_tokens=args.show_special_tokens,
+                )
+            return 0
+        except (OSError, ValueError, KeyError) as error:
+            return fail(str(error))
 
     try:
         if args.memory_keys:
@@ -916,29 +1013,33 @@ def _progress_cli(args, console, errcon, fail) -> int:
         args
     )
     config = args.config
-    metric = args.metric or (
-        "prob"
-        if config.backend == "cartridge"
-        else "kl"
-        if config.teacher_mode
-        else "prob"
+    metric = args.metric or "prob"
+    display = CheckpointDisplay(
+        console,
+        metric=metric,
+        show_special_tokens=args.show_special_tokens,
+        enabled=not args.json,
     )
-    layout = {}
+    accumulating = None
 
     def on_start(result):
-        if not args.json and args.config.backend != "cartridge":
-            layout.update(
-                render_progress_rows_header(
-                    result,
-                    console,
-                    metric,
-                    sampled=config.sampled_progress,
-                )
-            )
+        nonlocal accumulating
+        accumulating = result
+        display.start()
 
     def on_point(probe, point):
-        if not args.json and args.config.backend != "cartridge":
-            render_progress_row_point(probe, point, console, metric, layout)
+        if accumulating is None:
+            return
+        count = min(len(points) for points in accumulating.series.values())
+        if count:
+            partial = ProgressResult(
+                accumulating.checkpoint_root,
+                accumulating.steps[:count],
+                accumulating.probes,
+                {name: points[:count] for name, points in accumulating.series.items()},
+                accumulating.teacher_model,
+            )
+            display.update(partial, status=f"Scored checkpoint {partial.steps[-1]}")
 
     options = dict(
         enable_thinking=config.sampling.enable_thinking,
@@ -960,12 +1061,14 @@ def _progress_cli(args, console, errcon, fail) -> int:
         options.update(model_name=args.model, model_identity=args.model_identity)
     try:
         result = evaluate(model, tokenizer, args.progress, probes, **options)
+        display.update(result, status=f"{len(result.steps)} checkpoints evaluated")
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         return fail(str(error))
+    finally:
+        display.stop()
     if args.json:
         print(json.dumps(progress_to_json(result), ensure_ascii=False, indent=2))
-    elif args.config.backend == "cartridge":
-        render_checkpoint_grid(result, console, metric)
+
     return 0
 
 
@@ -1304,7 +1407,14 @@ def main(argv: list[str] | None = None) -> int:
         width=args.width,
         height=25 if args.width is not None else None,
     )
-    errcon = Console(stderr=True)
+    errcon = Console(
+        stderr=True,
+        force_terminal=True if args.color == "always" else None,
+        no_color=args.color == "never",
+        color_system={"never": None, "auto": "auto", "always": "truecolor"}[args.color],
+        width=args.width,
+        height=25 if args.width is not None else None,
+    )
 
     def fail(message: str) -> int:
         errcon.print(f"[red]error:[/red] {message}")
@@ -1316,6 +1426,9 @@ def main(argv: list[str] | None = None) -> int:
             config.mode == "progress"
             and not config.teacher_mode
             and args.memory_keys is None
+            and any(
+                (args.probes, args.completion is not None, args.sample, args.rollout)
+            )
         ):
             system = _teacher_system_from_progress_run(args.progress)
             config = replace(
