@@ -145,14 +145,10 @@ def run_continual(
         raise ValueError(f"refusing existing cartridge output: {root}")
     root.mkdir(parents=True, exist_ok=True)
     selection_file = root / "selection.json"
-    if selection_file.is_file():
-        previous = json.loads(selection_file.read_text())
-        if previous.get("stopped") in {"success", "already_mastered"}:
-            raise ValueError(f"refusing to overwrite successful adapter run: {root}")
-
     metrics_file = root / "training_metrics.jsonl"
     eval_file = root / "eval_metrics.jsonl"
     if not resume_checkpoint:
+        selection_file.unlink(missing_ok=True)
         metrics_file.write_text("")
         eval_file.write_text("")
 

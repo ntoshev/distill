@@ -133,16 +133,6 @@ def _continual_cli(args, errcon, fail) -> int:
     )
     if args.config.backend == "cartridge" and Path(output).exists():
         return fail(f"refusing existing cartridge output: {output}")
-    selection = Path(output) / "selection.json"
-    if selection.is_file():
-        try:
-            if json.loads(selection.read_text()).get("stopped") in {
-                "success",
-                "already_mastered",
-            }:
-                return fail(f"refusing to overwrite successful adapter run: {output}")
-        except (OSError, json.JSONDecodeError):
-            return fail(f"invalid existing selection file: {selection}")
     try:
         document, source = resolve_context(args.train, stdin=sys.stdin.read)
         canaries = (
@@ -286,9 +276,12 @@ def _continual_cli(args, errcon, fail) -> int:
         if args.teacher_model is not None:
             teacher, teacher_tokenizer = load(args.teacher_model)
         elif args.from_adapter is not None:
-            teacher, teacher_tokenizer = load(
+            teacher, _ = load(
                 args.model, adapter_path=args.from_adapter
             )
+            # The same model/adapter has identical tokenization. Reuse the
+            # tokenizer so exact rollout IDs align across separate weights.
+            teacher_tokenizer = student_tokenizer
         else:
             teacher, teacher_tokenizer = student, student_tokenizer
 

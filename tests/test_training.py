@@ -279,6 +279,14 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
     )
 
     rollouts = tmp_path / "rollouts.jsonl"
+    output = tmp_path / "adapter"
+    output.mkdir()
+    (output / "selection.json").write_text('{"stopped": "success"}')
+    (output / "training_metrics.jsonl").write_text("old metrics\n")
+    (output / "eval_metrics.jsonl").write_text("old evaluations\n")
+    (output / "adapters.safetensors").write_bytes(b"old adapter")
+    old_checkpoint = output / "checkpoints" / "step-0999"
+    old_checkpoint.mkdir(parents=True)
     student = Model()
     result = distill.run_continual(
         student,
@@ -300,6 +308,9 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         train_report=train_reports.append,
     )
     assert result.success
+    assert (output / "adapters.safetensors").read_bytes() == b""
+    assert not old_checkpoint.exists()
+    assert json.loads((output / "selection.json").read_text())["selected_step"] == 1
     assert [(step, len(probes), limits) for step, probes, limits in batch_calls] == [
         (-1, 1, [7]), (0, 3, [32, 32, 7]), (1, 3, [32, 32, 7]),
     ]

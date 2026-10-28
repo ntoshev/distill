@@ -261,6 +261,46 @@ def test_training_json_reports_result_and_forwards_rollout_options(
     assert payload["selected_step"] == 3
 
 
+def test_continuation_shares_tokenizer_with_separate_frozen_teacher(tmp_path, monkeypatch):
+    import mlx_lm
+    import distill.distill
+
+    starting_adapter = tmp_path / "starting"
+    output = tmp_path / "continued"
+    output.mkdir()
+    (output / "selection.json").write_text('{"stopped": "success"}')
+    loaded = []
+
+    def load(model_name, *, adapter_path):
+        assert model_name == "m"
+        assert adapter_path == str(starting_adapter)
+        pair = (object(), object())
+        loaded.append(pair)
+        return pair
+
+    def run(model, tokenizer, *args, **kwargs):
+        assert len(loaded) == 2
+        assert (model, tokenizer) == loaded[0]
+        assert kwargs["teacher_model"] is loaded[1][0]
+        assert kwargs["teacher_model"] is not model
+        # Exact generated IDs can be aligned across the two weight copies.
+        assert kwargs["teacher_tokenizer"] is tokenizer
+        assert kwargs["from_adapter"] == str(starting_adapter)
+        return distill.distill.ContinualResult(
+            True, "mastered", 6, output / "adapters.safetensors", output / "selection.json"
+        )
+
+    monkeypatch.setattr(mlx_lm, "load", load)
+    monkeypatch.setattr(distill.distill, "run_continual", run)
+    assert main([
+        "--model", "m", "--train", "private context",
+        "--prompt", "training question", "--eval-prompt", "held-out question",
+        "--completion", "answer", "--canary", "2+2?",
+        "--from-adapter", str(starting_adapter), "--adapter", str(output),
+        "--judge-model", "m", "--speculative-top-p", "0.9", "--json",
+    ]) == 0
+
+
 def test_generate_only_preserves_distinct_generator_limits(tmp_path, monkeypatch, capsys):
     import mlx_lm
     import distill.cli as cli
