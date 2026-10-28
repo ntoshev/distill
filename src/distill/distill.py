@@ -12,16 +12,14 @@ from typing import Callable
 
 from distill.adapters import lora_disabled
 from distill.cli_config import resolve_speculative_policy
-from distill.judge import judge_answer
+from distill.judge import judge_answers
 from distill.progress import (
     Probe,
     ProgressResult,
-    score_probe,
-    sample_probe,
+    evaluate_probes,
     progress_to_json,
     evaluation_transition,
 )
-from distill.sample import sample_completion
 from distill.stopping import (
     ActiveRotation,
     LearningItem,
@@ -43,34 +41,6 @@ class ContinualResult:
     selected_step: int | None
     adapter_file: Path | None
     selection_file: Path
-
-
-def _messages(probe: Probe, default_system: str | None = None) -> list[dict]:
-    return prompt_messages(
-        probe.prompt, probe.system if probe.system is not None else default_system
-    )
-
-
-def _answer(
-    model,
-    tokenizer,
-    probe: Probe,
-    *,
-    max_tokens: int,
-    enable_thinking: bool | None,
-    default_system: str | None = None,
-    cache_factory=None,
-) -> str:
-    return sample_completion(
-        model,
-        tokenizer,
-        _messages(probe, default_system),
-        max_tokens=max_tokens,
-        temperature=0.0,
-        seed=0,
-        enable_thinking=enable_thinking,
-        **({"cache_factory": cache_factory} if cache_factory else {}),
-    ).content.strip()
 
 
 def _copy_selected(checkpoint: Path, root: Path) -> Path:
@@ -195,36 +165,35 @@ def run_continual(
         judge_tokenizer = teacher_tokenizer or tokenizer
     elif judge_tokenizer is None:
         raise ValueError("a separate judge model requires its tokenizer")
+    baseline_points = evaluate_probes(
+        model,
+        tokenizer,
+        [replace(probe, dynamic=True) for probe in canaries],
+        -1,
+        enable_thinking,
+        max_tokens=[canary_max_tokens] * len(canaries),
+        default_system=student_system,
+        **({"cache_factory": inference_policy.new_cache} if inference_policy else {}),
+    )
     canary_baselines = {
-        probe.name: _answer(
-            model,
-            tokenizer,
-            probe,
-            max_tokens=canary_max_tokens,
-            enable_thinking=enable_thinking,
-            default_system=student_system,
-            **(
-                {"cache_factory": inference_policy.new_cache}
-                if inference_policy
-                else {}
-            ),
-        )
-        for probe in canaries
+        probe.name: point.content.strip()
+        for probe, point in zip(canaries, baseline_points)
     }
     judge_context = nullcontext() if separate_judge else lora_disabled(model)
     with judge_context:
-        invalid = [
-            probe.name
-            for probe in canaries
-            if not judge_answer(
-                judge_model,
-                judge_tokenizer,
-                probe.prompt,
-                probe.completion or canary_baselines[probe.name],
-                canary_baselines[probe.name],
-                enable_thinking=enable_thinking,
-            )
-        ]
+        baseline_verdicts = judge_answers(
+            judge_model,
+            judge_tokenizer,
+            [
+                (
+                    probe.completion or canary_baselines[probe.name],
+                    canary_baselines[probe.name],
+                )
+                for probe in canaries
+            ],
+            enable_thinking=enable_thinking,
+        )
+    invalid = [probe.name for probe, passed in zip(canaries, baseline_verdicts) if not passed]
     if invalid:
         raise ValueError(
             "starting model does not satisfy canary completion: " + ", ".join(invalid)
@@ -349,36 +318,43 @@ def run_continual(
         started = perf_counter()
         policy = session.inference_policy if backend == "cartridge" else None
         cache_options = {"cache_factory": policy.new_cache} if policy else {}
-        target_points = {
-            name: score_probe(
-                model, tokenizer, probe, step, enable_thinking, **cache_options
-            )
-            for name, probe in item_probes.items()
-        }
+        targets = list(item_probes.values())
+        points = evaluate_probes(
+            model,
+            tokenizer,
+            [
+                *targets,
+                *(replace(p, dynamic=True) for p in targets),
+                *(replace(p, dynamic=True) for p in canaries),
+            ],
+            step,
+            enable_thinking,
+            max_tokens=[mastery_max_tokens] * (2 * len(targets))
+            + [canary_max_tokens] * len(canaries),
+            default_system=student_system,
+            **cache_options,
+        )
+        target_points = dict(zip(item_probes, points[: len(targets)]))
+        answers = points[len(targets) : 2 * len(targets)]
+        canary_points = dict(
+            zip((p.name for p in canaries), points[2 * len(targets) :])
+        )
         scores = {name: point.mean_probability for name, point in target_points.items()}
         probability_learned = mastered(scores, learned_threshold)
         confirmations = {}
-        for name, probe in item_probes.items():
-            content = _answer(
-                model,
-                tokenizer,
-                probe,
-                max_tokens=mastery_max_tokens,
+        contents = [point.content.strip() for point in answers]
+        judge_context = nullcontext() if separate_judge else lora_disabled(model)
+        with judge_context:
+            verdicts = judge_answers(
+                judge_model,
+                judge_tokenizer,
+                [
+                    (probe.completion, content)
+                    for probe, content in zip(targets, contents)
+                ],
                 enable_thinking=enable_thinking,
-                default_system=student_system,
-                **cache_options,
             )
-            item = items_by_name[name]
-            judge_context = nullcontext() if separate_judge else lora_disabled(model)
-            with judge_context:
-                passed = judge_answer(
-                    judge_model,
-                    judge_tokenizer,
-                    item.prompt,
-                    item.completion,
-                    content,
-                    enable_thinking=enable_thinking,
-                )
+        for name, content, passed in zip(item_probes, contents, verdicts):
             mastery_streaks[name] = mastery_streaks[name] + 1 if passed else 0
             confirmations[name] = {
                 "content": content,
@@ -391,33 +367,8 @@ def run_continual(
             if streak >= mastery_patience
         }
         canary_rows = []
-        canary_points = {}
         for probe in canaries:
-            if capture_progress:
-                point = sample_probe(
-                    model,
-                    tokenizer,
-                    probe,
-                    step,
-                    enable_thinking,
-                    max_tokens=canary_max_tokens,
-                    temperature=0,
-                    seed=0,
-                    default_system=student_system,
-                    **cache_options,
-                )
-                canary_points[probe.name] = point
-                content = point.content.strip()
-            else:
-                content = _answer(
-                    model,
-                    tokenizer,
-                    probe,
-                    max_tokens=canary_max_tokens,
-                    enable_thinking=enable_thinking,
-                    default_system=student_system,
-                    **cache_options,
-                )
+            content = canary_points[probe.name].content.strip()
             baseline = canary_baselines[probe.name]
             canary_rows.append(
                 {

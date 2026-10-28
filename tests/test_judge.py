@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from distill.judge import JUDGE_SYSTEM, judge_answer
+from distill.judge import JUDGE_SYSTEM, judge_answer, judge_answers
 
 
 @pytest.mark.parametrize(
@@ -49,3 +49,23 @@ def test_judge_answer_parses_verdict(monkeypatch, verdict, expected):
             },
         )
     ]
+
+
+def test_judge_answers_uses_one_batch_and_keeps_reference_authority(monkeypatch):
+    calls = []
+
+    def batch(model, tokenizer, messages, **kwargs):
+        calls.append((messages, kwargs))
+        return [SimpleNamespace(content="YES"), SimpleNamespace(content="NO")]
+
+    monkeypatch.setattr("distill.judge.sample_completions", batch)
+    assert judge_answers(
+        None, None, [("VIOLET-731", "VIOLET-731"), ("10 goals", "11")],
+        enable_thinking=False,
+    ) == [True, False]
+    assert len(calls) == 1
+    messages, options = calls[0]
+    assert options == {"max_tokens": 16, "enable_thinking": False}
+    assert all(row[0]["content"] == JUDGE_SYSTEM for row in messages)
+    assert "<REFERENCE>10 goals</REFERENCE>" in messages[1][1]["content"]
+    assert "<CANDIDATE>11</CANDIDATE>" in messages[1][1]["content"]

@@ -7,7 +7,7 @@ from distill.stopping import LearningItem
 from distill.training import TrainStep
 
 
-def run_case(tmp_path, monkeypatch, *, unsafe_init=False, leak_at=None):
+def run_case(tmp_path, monkeypatch, stub_continual_evaluation, *, unsafe_init=False, leak_at=None):
     import distill.distill as controller
 
     class Model:
@@ -58,14 +58,10 @@ def run_case(tmp_path, monkeypatch, *, unsafe_init=False, leak_at=None):
             )
         return "incorrect"
 
-    monkeypatch.setattr(controller, "_answer", answer)
-    monkeypatch.setattr(
-        controller,
-        "score_probe",
-        lambda m, t, p, s, *a, **kw: ProbePoint(s, -2.0, 0.1, -2.0, 0.1, []),
-    )
-    monkeypatch.setattr(
-        controller, "judge_answer", lambda m, t, p, c, a, **kw: a == "base"
+    stub_continual_evaluation(
+        answer=answer,
+        score=lambda m, t, p, s, *a, **kw: ProbePoint(s, -2.0, 0.1, -2.0, 0.1, []),
+        judge=lambda m, t, p, c, a, **kw: a == "base",
     )
     result = run_continual(
         Model(),
@@ -84,25 +80,25 @@ def run_case(tmp_path, monkeypatch, *, unsafe_init=False, leak_at=None):
 
 
 def test_initialization_alarm_does_not_publish_an_unsafe_root_export(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, stub_continual_evaluation
 ):
-    result, root = run_case(tmp_path, monkeypatch, unsafe_init=True)
+    result, root = run_case(tmp_path, monkeypatch, stub_continual_evaluation, unsafe_init=True)
     assert not result.success and result.selected_step is None
     assert not (root / "cartridge.safetensors").exists()
     assert json.loads((root / "selection.json").read_text())["reason"] == "locality"
 
 
 def test_later_canary_alarm_selects_last_safe_checkpoint_and_keeps_latest(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, stub_continual_evaluation
 ):
-    result, root = run_case(tmp_path, monkeypatch, leak_at=2)
+    result, root = run_case(tmp_path, monkeypatch, stub_continual_evaluation, leak_at=2)
     assert not result.success and result.selected_step == 0
     assert (root / "cartridge.safetensors").exists()
     assert json.loads((root / "latest.json").read_text())["step"] == 2
 
 
-def test_final_noninterval_update_is_evaluated_and_committed(tmp_path, monkeypatch):
-    result, root = run_case(tmp_path, monkeypatch)
+def test_final_noninterval_update_is_evaluated_and_committed(tmp_path, monkeypatch, stub_continual_evaluation):
+    result, root = run_case(tmp_path, monkeypatch, stub_continual_evaluation)
     assert json.loads((root / "latest.json").read_text())["step"] == 3
     assert [
         json.loads(line)["iteration"]

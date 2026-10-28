@@ -28,6 +28,49 @@ BATCH_PROMPTS = [
 ]
 
 
+@pytest.mark.parametrize("fixture", ["model_and_tokenizer", "model_4b_and_tokenizer"])
+def test_continual_evaluation_batch(timing_benchmark, request, fixture):
+    """Time the full eval, including fixed scoring, four canaries, and the judge."""
+    from distill.judge import judge_answer
+    from distill.progress import score_probe, sample_probe
+    from test_eval_batch import TARGET, CANARIES, batched_eval
+
+    model, tokenizer = request.getfixturevalue(fixture)
+
+    def sequential():
+        score_probe(model, tokenizer, TARGET, 0, False)
+        answer = sample_completion(
+            model,
+            tokenizer,
+            [{"role": "user", "content": TARGET.prompt}],
+            max_tokens=16,
+            enable_thinking=False,
+        )
+        judge_answer(
+            model,
+            tokenizer,
+            TARGET.prompt,
+            TARGET.completion,
+            answer.content.strip(),
+            enable_thinking=False,
+        )
+        for probe in CANARIES:
+            sample_probe(
+                model, tokenizer, probe, 0, False, max_tokens=16, temperature=0
+            )
+        mx.synchronize()
+
+    size = "4b" if fixture == "model_4b_and_tokenizer" else "0_8b"
+    (points, _), _ = timing_benchmark.relative(
+        f"continual_evaluation_batch_{size}",
+        lambda: batched_eval(model, tokenizer),
+        reference_name=f"continual_evaluation_sequential_{size}",
+        reference_operation=sequential,
+    )
+    assert len(points) == 6
+    assert [p.content for p in points[2:4]] == ["12", "Paris"]
+
+
 def test_score_prompt_completion(timing_benchmark, model, tokenizer):
     """Score a representative prompt/completion and calculate its summaries."""
     rollout = load_rollout(FIXTURE_DIR / "results.jsonl", 0)

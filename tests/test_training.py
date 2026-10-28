@@ -207,7 +207,7 @@ def test_shared_rollout_alignment_preserves_rows_text_and_teacher_logits(
 @pytest.mark.parametrize("policy", [{}, {"speculative_top_k": None}, {"speculative_top_p": 0.9}])
 @pytest.mark.parametrize("separate_judge", [False, True])
 def test_continual_training_uses_canary_limit_and_saves_rollouts(
-    tmp_path, monkeypatch, separate_judge, policy
+    tmp_path, monkeypatch, separate_judge, policy, stub_continual_evaluation
 ):
     import distill.distill as distill
 
@@ -264,23 +264,19 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         answer_calls.append((probe.name, kwargs["max_tokens"]))
         return probe.completion
 
-    def fake_score(model, tokenizer, probe, step, enable_thinking):
+    def fake_score(model, tokenizer, probe, step, enable_thinking, **kwargs):
         scored_prompts.append(probe.prompt)
         probability = 0.9 if state["learned"] else 0.1
         return ProbePoint(step, -1.0, probability, -1.0, probability, [])
 
     def fake_judge(model, tokenizer, question, expected, generated, **kwargs):
-        judge_calls.append((question, kwargs.get("system")))
+        judge_calls.append((expected, generated))
         return generated == expected
 
     monkeypatch.setattr(distill, "TrainingSession", Session)
-    monkeypatch.setattr(distill, "_answer", fake_answer)
-    monkeypatch.setattr(
-        distill,
-        "judge_answer",
-        fake_judge,
+    batch_calls = stub_continual_evaluation(
+        answer=fake_answer, score=fake_score, judge=fake_judge,
     )
-    monkeypatch.setattr(distill, "score_probe", fake_score)
 
     rollouts = tmp_path / "rollouts.jsonl"
     student = Model()
@@ -304,6 +300,9 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         train_report=train_reports.append,
     )
     assert result.success
+    assert [(step, len(probes), limits) for step, probes, limits in batch_calls] == [
+        (-1, 1, [7]), (0, 3, [32, 32, 7]), (1, 3, [32, 32, 7]),
+    ]
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
     assert all(limit == 32 for name, limit in answer_calls if name == "fact")
     assert scored_prompts == [
@@ -360,14 +359,14 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
     }
     assert feedback_capture_calls == [True]
     assert judge_calls == [
-        ("2+2?", None),
-        ("heldout", None),
-        ("heldout", None),
+        ("4", "4"),
+        ("VIOLET-731", "VIOLET-731"),
+        ("VIOLET-731", "VIOLET-731"),
     ]
 
 
 def test_continual_mastery_requires_consecutive_whole_answer_passes(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, stub_continual_evaluation
 ):
     import distill.distill as distill
 
@@ -411,18 +410,14 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     def fake_answer(model, tokenizer, probe, **kwargs):
         return "4" if probe.name == "canary" else next(item_answers)
 
-    def fake_score(model, tokenizer, probe, step, enable_thinking):
+    def fake_score(model, tokenizer, probe, step, enable_thinking, **kwargs):
         return ProbePoint(step, -1.0, 0.9, -1.0, 0.9, [])
 
     monkeypatch.setattr(distill, "TrainingSession", Session)
-    monkeypatch.setattr(distill, "_answer", fake_answer)
-    monkeypatch.setattr(
-        distill,
-        "judge_answer",
-        lambda model, tokenizer, question, expected, generated, **kwargs: generated
-        == expected,
+    stub_continual_evaluation(
+        answer=fake_answer, score=fake_score,
+        judge=lambda model, tokenizer, question, expected, generated, **kw: generated == expected,
     )
-    monkeypatch.setattr(distill, "score_probe", fake_score)
 
     result = distill.run_continual(
         Model(),

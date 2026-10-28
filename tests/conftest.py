@@ -368,3 +368,53 @@ def cartridge_model_and_tokenizer():
     model,tokenizer=load(path)
     identity=model_identity(model,tokenizer,name,model_path=path)
     return model,tokenizer,identity
+
+
+@pytest.fixture
+def stub_continual_evaluation(monkeypatch):
+    """Stub the batched boundary while retaining per-probe scenario callbacks."""
+    import distill.distill as controller
+    from distill.progress import ProbePoint
+
+    def install(*, answer, score, judge, sample=None):
+        targets = []
+        judge_probes = []
+        calls = []
+
+        def evaluate(
+            model, tokenizer, probes, step, enable_thinking, *, max_tokens, **kw
+        ):
+            targets[:] = [p for p in probes if not p.dynamic]
+            judge_probes[:] = targets or probes
+            calls.append((step, probes, max_tokens))
+            points = []
+            for index, (probe, limit) in enumerate(zip(probes, max_tokens)):
+                if not probe.dynamic:
+                    point = score(model, tokenizer, probe, step, enable_thinking, **kw)
+                elif sample and targets and index >= 2 * len(targets):
+                    point = sample(
+                        model,
+                        tokenizer,
+                        probe,
+                        step,
+                        enable_thinking,
+                        max_tokens=limit,
+                        **kw,
+                    )
+                else:
+                    content = answer(model, tokenizer, probe, max_tokens=limit, **kw)
+                    point = ProbePoint(step, -1, 0.5, -1, 0.5, [], content=content)
+                points.append(point)
+            return points
+
+        def judges(model, tokenizer, pairs, **kw):
+            return [
+                judge(model, tokenizer, probe.prompt, expected, actual, **kw)
+                for probe, (expected, actual) in zip(judge_probes, pairs)
+            ]
+
+        monkeypatch.setattr(controller, "judge_answers", judges)
+        monkeypatch.setattr(controller, "evaluate_probes", evaluate)
+        return calls
+
+    return install

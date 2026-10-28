@@ -204,7 +204,7 @@ def test_recorded_replay_never_loads_model(tmp_path, monkeypatch, capsys):
 
 
 def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, stub_continual_evaluation
 ):
     import distill.distill as controller
     from distill.stopping import LearningItem
@@ -232,28 +232,6 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
             ]
 
     monkeypatch.setattr(controller, "TrainingSession", Session)
-    monkeypatch.setattr(
-        controller,
-        "_answer",
-        lambda m, t, p, **kw: "Green" if p.name == "grass" else "wrong",
-    )
-    monkeypatch.setattr(
-        controller,
-        "judge_answer",
-        lambda m, t, p, expected, actual, **kw: expected == actual,
-    )
-    monkeypatch.setattr(
-        controller,
-        "score_probe",
-        lambda m, t, p, step, *a, **kw: ProbePoint(
-            step,
-            -0.1,
-            math.exp(-0.1),
-            -0.1,
-            math.exp(-0.1),
-            [{"text": p.completion, "logprob": -0.1}],
-        ),
-    )
     calls = []
 
     def sample(m, t, probe, step, *args, **kwargs):
@@ -276,7 +254,19 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
             finish_reason="stop",
         )
 
-    monkeypatch.setattr(controller, "sample_probe", sample)
+    stub_continual_evaluation(
+        answer=lambda m, t, p, **kw: "Green" if p.name == "grass" else "wrong",
+        judge=lambda m, t, p, expected, actual, **kw: expected == actual,
+        score=lambda m, t, p, step, *a, **kw: ProbePoint(
+            step,
+            -0.1,
+            math.exp(-0.1),
+            -0.1,
+            math.exp(-0.1),
+            [{"text": p.completion, "logprob": -0.1}],
+        ),
+        sample=sample,
+    )
     result = controller.run_continual(
         Model(),
         object(),

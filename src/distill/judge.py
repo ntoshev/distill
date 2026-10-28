@@ -1,6 +1,6 @@
 """LLM-based answer equivalence judging."""
 
-from distill.sample import sample_completion
+from distill.sample import sample_completion, sample_completions
 
 
 JUDGE_SYSTEM = """You are a strict answer-equivalence classifier.
@@ -31,6 +31,32 @@ CANDIDATE: June 12 to July 19, 2026
 VERDICT: NO"""
 
 
+def _judge_messages(expected: str, generated: str) -> list[dict]:
+    return [
+        {"role": "system", "content": JUDGE_SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                f"<REFERENCE>{expected}</REFERENCE>\n"
+                f"<CANDIDATE>{generated}</CANDIDATE>\n"
+                "<VERDICT>"
+            ),
+        },
+    ]
+
+
+def judge_answers(model, tokenizer, answers: list[tuple[str, str]], *, enable_thinking):
+    """Judge all (reference, candidate) pairs in one dependent decode batch."""
+    samples = sample_completions(
+        model,
+        tokenizer,
+        [_judge_messages(expected, generated) for expected, generated in answers],
+        max_tokens=16,
+        enable_thinking=enable_thinking,
+    )
+    return [sample.content.strip().casefold().startswith("yes") for sample in samples]
+
+
 def judge_answer(
     model,
     tokenizer,
@@ -46,18 +72,10 @@ def judge_answer(
     the question prevents the classifier from replacing that authority with
     its own world knowledge.
     """
-    prompt = (
-        f"<REFERENCE>{expected}</REFERENCE>\n"
-        f"<CANDIDATE>{generated}</CANDIDATE>\n"
-        "<VERDICT>"
-    )
     sample = sample_completion(
         model,
         tokenizer,
-        [
-            {"role": "system", "content": JUDGE_SYSTEM},
-            {"role": "user", "content": prompt},
-        ],
+        _judge_messages(expected, generated),
         max_tokens=16,
         temperature=0.0,
         seed=0,

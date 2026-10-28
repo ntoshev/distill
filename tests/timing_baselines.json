@@ -77,6 +77,16 @@
         "cartridge_qwen3_4b_p128_skd_update_16": {
           "median_seconds": 1.701301,
           "regression_tolerance": 0.2
+        },
+        "continual_evaluation_batch_0_8b": {
+          "reference": "continual_evaluation_sequential_0_8b",
+          "median_multiple": 0.146153,
+          "regression_tolerance": 0.2
+        },
+        "continual_evaluation_batch_4b": {
+          "reference": "continual_evaluation_sequential_4b",
+          "median_multiple": 0.458467,
+          "regression_tolerance": 0.2
         }
       }
     },

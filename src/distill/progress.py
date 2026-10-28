@@ -9,8 +9,15 @@ from pathlib import Path
 
 from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
 
-from distill.sample import Sample, sample_completion
-from distill.scoring import score_text, score_text_pair, score_generated
+from distill.sample import Sample, sample_completion, _sample_batch, _render_prompt
+from distill.scoring import (
+    score_text,
+    score_text_pair,
+    score_generated,
+    token_pieces,
+    _tokenize_for_scoring,
+    _scored_positions,
+)
 from distill.templating import (
     apply_teacher_context,
     build_raw,
@@ -239,6 +246,104 @@ def score_probe(
         teacher_without_adapter=teacher_without_adapter,
         **({"cache_factory": cache_factory} if cache_factory else {}),
     )
+
+
+def evaluate_probes(
+    model,
+    tokenizer,
+    probes: list[Probe],
+    step: int,
+    enable_thinking: bool | None,
+    *,
+    max_tokens: list[int],
+    default_system: str | None = None,
+    cache_factory=None,
+) -> list[ProbePoint]:
+    """Score fixed targets and generate dynamic answers in one decode batch.
+
+    Fixed rows follow the same whole-string tokenization and span selection as
+    score_probe. Dynamic rows retain the actual generated IDs, including EOS.
+    Neither kind needs a second model pass to color its tokens.
+    """
+    if len(max_tokens) != len(probes):
+        raise ValueError("one token limit is required per probe")
+    rendered, limits, forced, records = [], [], [], []
+    for probe, limit in zip(probes, max_tokens):
+        messages = _probe_messages(probe, default_system)
+        text, ids = _render_prompt(tokenizer, messages, enable_thinking)
+        if probe.dynamic:
+            rendered.append((text, ids))
+            limits.append(limit)
+            forced.append(None)
+            records.append(None)
+        else:
+            built = build_raw(text, probe.completion)
+            ids, offsets = _tokenize_for_scoring(tokenizer, built.text)
+            positions = _scored_positions(ids, offsets, built.spans)
+            if not positions:
+                raise ValueError(
+                    f"probe {probe.name!r} has no scorable completion tokens"
+                )
+            first, last = positions[0], positions[-1] + 1
+            rendered.append((text, ids[:first]))
+            forced.append(ids[first:last])
+            limits.append(last - first)
+            records.append(
+                [
+                    (position - first, ids[position], built.text[start:end])
+                    for position in positions
+                    for start, end in [offsets[position]]
+                ]
+            )
+    samples = _sample_batch(
+        model,
+        tokenizer,
+        rendered,
+        limits,
+        forced_token_ids=forced,
+        cache_factory=cache_factory,
+    )
+    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_ids.update(getattr(tokenizer, "eos_token_ids", []) or [])
+    points = []
+    for sample, record in zip(samples, records):
+        pieces = (
+            record
+            if record is not None
+            else [
+                (index, tid, piece)
+                for index, (tid, piece) in enumerate(
+                    zip(sample.token_ids, token_pieces(tokenizer, sample.token_ids))
+                )
+            ]
+        )
+        tokens = [
+            dict(
+                text=piece,
+                token_id=tid,
+                special=tid in special_ids,
+                logprob=sample.token_logprobs[index],
+                probability=math.exp(sample.token_logprobs[index]),
+            )
+            for index, tid, piece in pieces
+        ]
+        sequence = sum(token["logprob"] for token in tokens)
+        mean = sequence / len(tokens) if tokens else float("nan")
+        points.append(
+            ProbePoint(
+                step,
+                mean,
+                math.exp(mean),
+                sequence,
+                math.exp(sequence),
+                tokens,
+                completion=sample.completion_text if record is None else None,
+                content=sample.content if record is None else None,
+                finish_reason=sample.finish_reason if record is None else None,
+                num_tokens=sample.num_tokens if record is None else None,
+            )
+        )
+    return points
 
 
 def _completion_point(

@@ -49,6 +49,8 @@ class Sample:
     # re-encoding would merge. Preserve the actual continuation when available.
     token_ids: list[int] | None = None
     speculative_top_p: float | None = None
+    # Untempered model log probabilities for these exact IDs, captured at decode.
+    token_logprobs: list[float] | None = None
 
 
 def _render_prompt(tokenizer, messages, enable_thinking):
@@ -143,6 +145,119 @@ def sample_text(
         seed=seed,
         cache_factory=cache_factory,
     )
+
+
+def sample_completions(
+    model,
+    tokenizer,
+    messages_batch: list[list[dict]],
+    *,
+    max_tokens: int | list[int] = 512,
+    enable_thinking: bool | None = None,
+    cache_factory=None,
+) -> list[Sample]:
+    """Greedily decode prompts together, retaining IDs and model probabilities."""
+    rendered = [
+        _render_prompt(tokenizer, messages, enable_thinking)
+        for messages in messages_batch
+    ]
+    limits = [max_tokens] * len(rendered) if isinstance(max_tokens, int) else max_tokens
+    return _sample_batch(
+        model, tokenizer, rendered, limits, cache_factory=cache_factory
+    )
+
+
+def _sample_batch(
+    model,
+    tokenizer,
+    rendered: list[tuple[str, list[int]]],
+    limits: list[int],
+    *,
+    forced_token_ids: list[list[int] | None] | None = None,
+    cache_factory=None,
+) -> list[Sample]:
+    """Batch prefill/decode, optionally teacher-forcing selected scoring rows.
+
+    Forced rows use samplers, never logits processors: returned probabilities
+    remain the model's original distribution, including for non-greedy tokens.
+    """
+    from mlx_lm.generate import BatchGenerator, SequenceStateMachine
+
+    if len(limits) != len(rendered) or any(limit <= 0 for limit in limits):
+        raise ValueError("one positive token limit is required per prompt")
+    forced = (
+        forced_token_ids if forced_token_ids is not None else [None] * len(rendered)
+    )
+    if len(forced) != len(rendered):
+        raise ValueError("one forcing policy is required per prompt")
+    if any(not ids for _, ids in rendered):
+        raise ValueError("batch prompts must contain at least one token")
+    if any(ids is not None and len(ids) != limit for ids, limit in zip(forced, limits)):
+        raise ValueError("forced token counts must match their limits")
+    if not rendered:
+        return []
+
+    def forced_sampler(ids):
+        remaining = iter(ids)
+        # MLX-LM pipelines one extra prediction beyond the final returned token.
+        return lambda logits: mx.array([next(remaining, ids[-1])])
+
+    def greedy_sampler(logits):
+        return mx.argmax(logits, axis=-1)
+
+    stop_tokens = [[tid] for tid in _eos_token_ids(tokenizer)]
+    generator = BatchGenerator(
+        model,
+        stop_tokens=stop_tokens,
+        prefill_batch_size=len(rendered),
+        completion_batch_size=len(rendered),
+        # Match scoring's float32 normalization even for low-precision weights.
+        logits_processors=[lambda tokens, logits: logits.astype(mx.float32)],
+    )
+    try:
+        uids = generator.insert(
+            [ids for _, ids in rendered],
+            max_tokens=limits,
+            caches=[cache_factory() for _ in rendered] if cache_factory else None,
+            # Keep every row callable. MLX-LM's filter skips an all-None sampler
+            # list, leaving stale rows when a finished batch is later extended.
+            samplers=[
+                forced_sampler(ids) if ids is not None else greedy_sampler
+                for ids in forced
+            ],
+            state_machines=[
+                SequenceStateMachine()
+                if ids is not None
+                else SequenceStateMachine(
+                    {"normal": [(seq, None) for seq in stop_tokens]}, initial="normal"
+                )
+                for ids in forced
+            ],
+        )
+        token_ids = {uid: [] for uid in uids}
+        logprobs = {uid: [] for uid in uids}
+        reasons = {}
+        while responses := generator.next_generated():
+            for response in responses:
+                token_ids[response.uid].append(response.token)
+                logprobs[response.uid].append(response.logprobs[response.token].item())
+                reasons[response.uid] = response.finish_reason
+        return [
+            Sample(
+                prompt_text=text,
+                completion_text=tokenizer.decode(token_ids[uid]),
+                content=tokenizer._tokenizer.decode(
+                    token_ids[uid], skip_special_tokens=True
+                ),
+                finish_reason=reasons[uid],
+                num_tokens=len(token_ids[uid]),
+                token_ids=token_ids[uid],
+                token_logprobs=logprobs[uid],
+            )
+            for uid, (text, _) in zip(uids, rendered)
+        ]
+    finally:
+        generator.close()
 
 
 def _sample_text(

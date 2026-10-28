@@ -129,6 +129,16 @@ tokens that precede it tests membership without sorting the vocabulary. This
 policy applies to generic, shared-model, and multi-rollout decoding, and records
 `speculative_top_p` in sample/run/rollout metadata and `top_p` in step metrics.
 
+Continual evaluation batches fixed target scoring, greedy held-out answers,
+and all canaries through MLX-LM's batched prefill and decode. Fixed target rows
+teacher-force their canonical completion IDs; generated rows retain their actual
+IDs and untempered token probabilities, so canary coloring needs no rescoring.
+Per-row limits and EOS handling remain independent. Answer equivalence judging
+runs as a second batch because it depends on the generated answers, with LoRA
+disabled when the judge shares the student model. Startup canary generation and
+validation are also batched. Quantized kernels can produce slightly different
+probabilities or near-tied token choices than sequential evaluation.
+
 Training writes:
 
 ```text

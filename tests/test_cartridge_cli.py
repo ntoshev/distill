@@ -82,29 +82,18 @@ def test_memorize_complete_resume_and_raw_memory_progress(
     assert [p.get("label") for p in first[:2]] == ["base", "initialized"]
 
 
-def test_multifact_cli_and_exact_fact_resume(tmp_path, monkeypatch, capsys):
+def test_multifact_cli_and_exact_fact_resume(tmp_path, monkeypatch, capsys, stub_continual_evaluation):
     bind(monkeypatch)
     from distill.progress import ProbePoint
     import distill.distill as controller
 
-    monkeypatch.setattr(
-        controller,
-        "_answer",
-        lambda m, t, p, **kw: "base" if p.name == "canary" else "wrong",
-    )
-    monkeypatch.setattr(
-        controller, "judge_answer", lambda m, t, p, c, a, **kw: a == "base"
-    )
-    monkeypatch.setattr(
-        controller, "sample_probe",
-        lambda m, t, p, step, *a, **kw: ProbePoint(
+    stub_continual_evaluation(
+        answer=lambda m, t, p, **kw: "base" if p.name == "canary" else "wrong",
+        judge=lambda m, t, p, c, a, **kw: a == "base",
+        sample=lambda m, t, p, step, *a, **kw: ProbePoint(
             step, -0.1, 0.9, -0.1, 0.9, [], completion="base", content="base"
         ),
-    )
-    monkeypatch.setattr(
-        controller,
-        "score_probe",
-        lambda m, t, p, s, *a, **kw: ProbePoint(s, -2.0, 0.1, -2.0, 0.1, []),
+        score=lambda m, t, p, s, *a, **kw: ProbePoint(s, -2.0, 0.1, -2.0, 0.1, []),
     )
     probes = tmp_path / "probes.jsonl"
     probes.write_text(
