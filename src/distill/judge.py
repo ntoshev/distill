@@ -45,16 +45,36 @@ def _judge_messages(expected: str, generated: str) -> list[dict]:
     ]
 
 
-def judge_answers(model, tokenizer, answers: list[tuple[str, str]], *, enable_thinking):
-    """Judge all (reference, candidate) pairs in one dependent decode batch."""
-    samples = sample_completions(
-        model,
-        tokenizer,
-        [_judge_messages(expected, generated) for expected, generated in answers],
-        max_tokens=16,
-        enable_thinking=enable_thinking,
-    )
-    return [sample.content.strip().casefold().startswith("yes") for sample in samples]
+def judge_answers(
+    model,
+    tokenizer,
+    answers: list[tuple[str, str]],
+    *,
+    enable_thinking,
+    cache: dict[tuple[str, str], bool] | None = None,
+):
+    """Batch unseen pairs and reuse verdicts for exact reference/candidate matches.
+
+    A supplied cache must belong to one frozen judge and thinking configuration.
+    The continual runner owns a fresh cache per run; no student outputs are cached.
+    """
+    verdicts = {} if cache is None else cache
+    pending = list(dict.fromkeys(pair for pair in answers if pair not in verdicts))
+    if pending:
+        samples = sample_completions(
+            model,
+            tokenizer,
+            [_judge_messages(expected, generated) for expected, generated in pending],
+            max_tokens=16,
+            enable_thinking=enable_thinking,
+        )
+        verdicts.update(
+            {
+                pair: sample.content.strip().casefold().startswith("yes")
+                for pair, sample in zip(pending, samples, strict=True)
+            }
+        )
+    return [verdicts[pair] for pair in answers]
 
 
 def judge_answer(

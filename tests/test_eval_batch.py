@@ -61,7 +61,7 @@ def sequential_eval(model, tokenizer):
     return [fixed, *answers], verdicts
 
 
-def batched_eval(model, tokenizer):
+def batched_eval(model, tokenizer, *, judge_cache=None):
     probes = [TARGET, replace(TARGET, dynamic=True), *CANARIES]
     points = evaluate_probes(
         model, tokenizer, probes, 0, False, max_tokens=[16] * len(probes)
@@ -71,6 +71,7 @@ def batched_eval(model, tokenizer):
         tokenizer,
         [(TARGET.completion, points[1].content.strip())],
         enable_thinking=False,
+        cache=judge_cache,
     )
     mx.synchronize()
     return points, verdicts
@@ -144,13 +145,29 @@ def test_fixed_scoring_includes_tokens_after_eos_and_boundary_merges(model, toke
 
 
 @pytest.mark.model
-def test_batch_judge_matches_sequential(model, tokenizer):
+def test_batch_judge_matches_sequential(model, tokenizer, monkeypatch):
     pairs = [("VIOLET-731", "VIOLET-731"), ("VIOLET-731", "P-001"), ("10 goals", "10")]
     expected = [
         judge_answer(model, tokenizer, "", a, b, enable_thinking=False)
         for a, b in pairs
     ]
-    assert judge_answers(model, tokenizer, pairs, enable_thinking=False) == expected
+    cache = {}
+    assert (
+        judge_answers(model, tokenizer, pairs, enable_thinking=False, cache=cache)
+        == expected
+    )
+
+    def no_generation(*args, **kwargs):
+        pytest.fail("cached judge verdicts must not regenerate")
+
+    monkeypatch.setattr("distill.judge.sample_completions", no_generation)
+    assert judge_answers(
+        model,
+        tokenizer,
+        list(reversed(pairs)),
+        enable_thinking=False,
+        cache=cache,
+    ) == list(reversed(expected))
 
 
 @pytest.mark.model

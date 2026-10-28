@@ -165,6 +165,9 @@ def run_continual(
         judge_tokenizer = teacher_tokenizer or tokenizer
     elif judge_tokenizer is None:
         raise ValueError("a separate judge model requires its tokenizer")
+    # Judge weights stay frozen (LoRA is disabled when sharing the student).
+    # Scope verdicts to this run so models and configurations cannot share them.
+    judge_cache: dict[tuple[str, str], bool] = {}
     baseline_points = evaluate_probes(
         model,
         tokenizer,
@@ -192,6 +195,7 @@ def run_continual(
                 for probe in canaries
             ],
             enable_thinking=enable_thinking,
+            cache=judge_cache,
         )
     invalid = [probe.name for probe, passed in zip(canaries, baseline_verdicts) if not passed]
     if invalid:
@@ -353,6 +357,7 @@ def run_continual(
                     for probe, content in zip(targets, contents)
                 ],
                 enable_thinking=enable_thinking,
+                cache=judge_cache,
             )
         for name, content, passed in zip(item_probes, contents, verdicts):
             mastery_streaks[name] = mastery_streaks[name] + 1 if passed else 0

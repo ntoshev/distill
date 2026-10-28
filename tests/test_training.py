@@ -415,9 +415,30 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
 
     monkeypatch.setattr(distill, "TrainingSession", Session)
     stub_continual_evaluation(
-        answer=fake_answer, score=fake_score,
-        judge=lambda model, tokenizer, question, expected, generated, **kw: generated == expected,
+        answer=fake_answer,
+        score=fake_score,
+        judge=lambda model, tokenizer, question, expected, generated, **kw: (
+            generated == expected
+        ),
     )
+    # Exercise the real judge cache while keeping model generation inexpensive.
+    from types import SimpleNamespace
+    from distill.judge import judge_answers
+
+    judged = []
+
+    def generate_verdicts(model, tokenizer, messages, **kwargs):
+        texts = [row[1]["content"] for row in messages]
+        judged.extend(texts)
+        return [
+            SimpleNamespace(
+                content="NO" if "<CANDIDATE>wrong</CANDIDATE>" in text else "YES"
+            )
+            for text in texts
+        ]
+
+    monkeypatch.setattr(distill, "judge_answers", judge_answers)
+    monkeypatch.setattr("distill.judge.sample_completions", generate_verdicts)
 
     result = distill.run_continual(
         Model(),
@@ -436,3 +457,8 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     assert result.selected_step == 6
     assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2, 3, 4]
     assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 0, 0, 1]
+    # One baseline pair plus two distinct target answers; all seven checkpoint
+    # answers still generated and consecutive confirmations still required.
+    assert len(judged) == 3
+    assert sum("<CANDIDATE>wrong</CANDIDATE>" in text for text in judged) == 1
+    assert next(item_answers, None) is None

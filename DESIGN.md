@@ -139,6 +139,13 @@ disabled when the judge shares the student model. Startup canary generation and
 validation are also batched. Quantized kernels can produce slightly different
 probabilities or near-tied token choices than sequential evaluation.
 
+Each continual run keeps an in-memory cache of frozen-judge verdicts keyed by
+the exact (reference, candidate) strings. Both YES and NO are reused; unseen
+pairs are deduplicated and judged together. Student answers and canaries are
+still generated at every evaluation, and every checkpoint updates the mastery
+streak even when its verdict is cached. The cache is discarded between runs
+and rebuilt after resume.
+
 Training writes:
 
 ```text

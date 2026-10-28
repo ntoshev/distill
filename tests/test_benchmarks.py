@@ -71,6 +71,25 @@ def test_continual_evaluation_batch(timing_benchmark, request, fixture):
     assert [p.content for p in points[2:4]] == ["12", "Paris"]
 
 
+@pytest.mark.parametrize("fixture", ["model_and_tokenizer", "model_4b_and_tokenizer"])
+def test_continual_evaluation_cached_judge(timing_benchmark, request, fixture):
+    """Time fresh student generation with a previously judged repeated answer."""
+    from test_eval_batch import TARGET, batched_eval
+
+    model, tokenizer = request.getfixturevalue(fixture)
+    cache = {}
+    size = "4b" if fixture == "model_4b_and_tokenizer" else "0_8b"
+    (points, verdicts), _ = timing_benchmark.relative(
+        f"continual_evaluation_cached_judge_{size}",
+        lambda: batched_eval(model, tokenizer, judge_cache=cache),
+        reference_name=f"continual_evaluation_batch_{size}",
+        reference_operation=lambda: batched_eval(model, tokenizer),
+    )
+    assert len(points) == 6
+    assert len(cache) == 1
+    assert verdicts == [cache[TARGET.completion, points[1].content.strip()]]
+
+
 def test_score_prompt_completion(timing_benchmark, model, tokenizer):
     """Score a representative prompt/completion and calculate its summaries."""
     rollout = load_rollout(FIXTURE_DIR / "results.jsonl", 0)
