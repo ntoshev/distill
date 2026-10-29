@@ -62,6 +62,9 @@ class CartridgeTrainingSession:
         self.fact_options = fact_options
         self.source_loss_and_grad = mx.value_and_grad(self._source_loss)
         self.trajectory_loss_and_grad = mx.value_and_grad(self._loss_sum)
+        self.trajectory_loss_and_grad_with_scores = mx.value_and_grad(
+            lambda *args: self._loss_sum(*args, capture_logprobs=True)
+        )
         mx.eval(self.parameters, self.optimizer.state)
 
     def inference_cartridge(self):
@@ -85,7 +88,8 @@ class CartridgeTrainingSession:
         )
 
     def _loss_sum(
-        self, parameters, ids, target_positions, target_ids, teacher_rows=None
+        self, parameters, ids, target_positions, target_ids, teacher_rows=None,
+        *, capture_logprobs=False,
     ):
         """Checkpoint pure cache transitions; never detach prefix or prompt state.
 
@@ -101,6 +105,7 @@ class CartridgeTrainingSession:
         rows = [p - 1 for p in target_positions]
         loss = mx.array(0.0, mx.float32)
         target_cursor = 0
+        logprobs = []
         for start in range(0, rows[-1] + 1, self.logit_chunk_size):
             end = min(start + self.logit_chunk_size, rows[-1] + 1)
             selected = [r - start for r in rows if start <= r < end]
@@ -132,6 +137,13 @@ class CartridgeTrainingSession:
             )
             count = len(selected)
             if count:
+                if capture_logprobs:
+                    chosen = mx.take_along_axis(
+                        logits,
+                        mx.array(target_ids[target_cursor:target_cursor + count])[:, None],
+                        axis=-1,
+                    )[:, 0]
+                    logprobs.append(mx.stop_gradient(chosen - mx.logsumexp(logits, axis=-1)))
                 if teacher_rows is None:
                     chosen = mx.take_along_axis(
                         logits,
@@ -153,7 +165,7 @@ class CartridgeTrainingSession:
                         ).sum()
                     )
                 target_cursor += count
-        return loss
+        return (loss, mx.concatenate(logprobs)) if capture_logprobs else loss
 
     def _source_loss(self, parameters, window, teacher_rows=None):
         return self._loss_sum(
@@ -230,7 +242,7 @@ class CartridgeTrainingSession:
         from distill.sample import sample_completion, sample_speculative_completion
         from distill.templating import prompt_messages, render_generation_prompt
         from distill.prefill import select_logits
-        from distill.training import TrainStep
+        from distill.training import TrainStep, rollout_token_payload
 
         if not prompts or not self.fact_options.get("teacher_system"):
             raise ValueError(
@@ -309,14 +321,22 @@ class CartridgeTrainingSession:
                     if self.teacher_cartridge
                     else None,
                 )
-            loss, grads = self.trajectory_loss_and_grad(
+            loss_fn = (
+                self.trajectory_loss_and_grad_with_scores
+                if capture_feedback else self.trajectory_loss_and_grad
+            )
+            value, grads = loss_fn(
                 self.parameters,
                 student_prefix + ids,
                 list(range(len(student_prefix), len(student_prefix) + len(ids))),
                 ids,
                 teacher,
             )
+            loss, student_logprobs = value if capture_feedback else (value, None)
             mx.eval(loss, grads)
+            rollout_tokens = rollout_token_payload(
+                self.tokenizer, ids, student_logprobs.tolist(), sample.teacher_sampled
+            ) if student_logprobs is not None else []
             mean = loss.item() / len(ids)
             gradients = {
                 name: gradients[name] + grads[name] / len(ids) / len(prompts)
@@ -326,10 +346,11 @@ class CartridgeTrainingSession:
             distill_seconds = perf_counter() - started
             feedback = None
             if capture_feedback:
-                logp = teacher - mx.logsumexp(teacher, axis=-1, keepdims=True)
+                teacher_logits = teacher.astype(mx.float32)
                 probabilities = mx.take_along_axis(
-                    logp, mx.array(ids)[:, None], axis=-1
-                )[:, 0].tolist()
+                    teacher_logits, mx.array(ids)[:, None], axis=-1
+                )[:, 0] - mx.logsumexp(teacher_logits, axis=-1)
+                probabilities = probabilities.tolist()
                 feedback = [
                     {
                         "text": self.tokenizer.decode([token]),
@@ -358,6 +379,7 @@ class CartridgeTrainingSession:
                     rollout_seconds=rollout_seconds,
                     distill_seconds=distill_seconds,
                     teacher_feedback=feedback,
+                    rollout_tokens=rollout_tokens,
                 )
             )
             rollout_total += rollout_seconds

@@ -3,7 +3,7 @@
 import json
 import math
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
@@ -39,6 +39,7 @@ class Probe:
     # verbatim rather than reconstructing a one-user-message conversation.
     messages: tuple[dict, ...] | None = None
     dynamic: bool = False
+    role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -703,6 +704,7 @@ def progress_to_json(result: ProgressResult) -> dict:
                 key: value
                 for key, value in asdict(probe).items()
                 if key != "messages" and (key != "dynamic" or value)
+                and (key != "role" or value is not None)
             }
             for probe in result.probes
         ],
@@ -853,6 +855,14 @@ def recorded_progress(root):
                 "run has no saved token grid; pass --prompt/--completion or --probes to rescore it"
             )
         probes = [Probe(**p) for p in payload["probes"]]
+        canary_names = {c["name"] for c in row.get("canaries", [])}
+        probes = [
+            replace(p, role=(
+                "canary" if p.name in canary_names
+                else "rollout" if p.dynamic else "target"
+            )) if p.role is None and "canaries" in row else p
+            for p in probes
+        ]
         if result is None:
             result = ProgressResult(str(root), [], probes, {p.name: [] for p in probes})
         if probes != result.probes:

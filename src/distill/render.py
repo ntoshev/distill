@@ -551,9 +551,18 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
     """One checkpoint per row; color only the tokens actually stored in that cell."""
     table = Table(box=None, padding=(0, 1), collapse_padding=True, show_edge=False)
     table.add_column("step", style="grey50", no_wrap=True)
+    probes = result.probes
     if result.training_rollouts:
-        table.add_column("train rollout · unscored", overflow="fold")
-    for probe in result.probes:
+        table.add_column("train rollout", overflow="fold")
+        target_names = {p.name for p in probes if not p.dynamic}
+        probes = [
+            p for p in probes
+            if p.role == "canary" or (
+                p.role is None and p.dynamic
+                and not any(p.name.startswith(name + "/rollout") for name in target_names)
+            )
+        ]
+    for probe in probes:
         generated = probe.dynamic or any(
             p.completion is not None for p in result.series[probe.name]
         )
@@ -567,8 +576,10 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
         range(complete) if indices is None else (i for i in indices if i < complete)
     ):
         step = result.steps[row_index]
-        points = [result.series[p.name][row_index] for p in result.probes]
-        transition = points[0].label
+        points = [result.series[p.name][row_index] for p in probes]
+        transition = next(
+            (result.series[p.name][row_index].label for p in result.probes), None
+        )
         label = (
             "base"
             if transition == "base" or step in {-1, 0} and transition is None
@@ -585,7 +596,23 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
                     cell.append("\n")
                 if len(rollouts) > 1:
                     cell.append(f"{rollout['item_id']}: ", style="grey50")
-                cell.append(rollout["content"])
+                tokens = rollout.get("tokens") or []
+                if tokens:
+                    for token in tokens:
+                        if token.get("special") and not show_special_tokens:
+                            continue
+                        value = token.get("kl") if metric == "kl" else token["logprob"]
+                        if value is None:
+                            raise ValueError("KL display requires teacher scores for every displayed token")
+                        style = style_for(value, metric)
+                        if token.get("teacher_sampled"):
+                            style += " underline"
+                        cell.append(token["text"], style=style)
+                    mean_lp = sum(t["logprob"] for t in tokens) / len(tokens)
+                    cell.append(f"  p={math.exp(mean_lp):.1%}", style="grey50")
+                else:
+                    cell.append(rollout["content"])
+                    cell.append("  unscored", style="grey50")
             if not rollouts:
                 cell.append("—", style="grey50")
             cells.append(cell)
@@ -615,7 +642,7 @@ GRID_LEGEND = "p = geometric-mean student probability, including generated end t
 
 def _grid_legend(result):
     return GRID_LEGEND + (
-        " Train rollouts are the actual samples used before that update, including teacher replacements; no student scores."
+        " Train colors and p use the pre-update student; underline = teacher replacement."
         if result.training_rollouts else ""
     )
 
@@ -643,7 +670,6 @@ class CheckpointDisplay:
         self.status = "Evaluating base model…"
         self._streaming = False
         self._printed = 0
-        self._printed_status = None
 
     def start(self):
         self._streaming = self.enabled and getattr(
@@ -664,7 +690,6 @@ class CheckpointDisplay:
                 )
             )
             parts.append(Text(_grid_legend(self.result), style="grey50"))
-        parts.append(Text(self.status, style="grey50"))
         return Group(*parts)
 
     def update(self, result=None, status=None):
@@ -693,17 +718,13 @@ class CheckpointDisplay:
                         column.min_width = width
                 table.show_header = self._printed == 0
                 self.console.print(table)
-                self.console.print(Text(self.status, style="grey50"))
                 self._printed = complete
-                self._printed_status = self.status
 
     def stop(self):
         if self._streaming:
             self.update()
             if self.result:
                 self.console.print(_grid_legend(self.result), style="grey50")
-                if self.status != self._printed_status:
-                    self.console.print(Text(self.status, style="grey50"))
             self._streaming = False
         elif self.enabled and self.result:
             self.console.print(self._renderable())

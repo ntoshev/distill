@@ -11,6 +11,79 @@ from distill.stopping import LearningItem
 from distill.training import TrainStep, _kl_loss, load_prompts
 
 
+@pytest.mark.parametrize("direction", ["forward", "reverse"])
+def test_training_scores_reuse_forward_without_changing_loss_or_gradients(direction):
+    import mlx.nn as nn
+    from mlx.utils import tree_flatten
+    from distill.training import _distillation_loss
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embedding = nn.Embedding(8, 8)
+            self.calls = 0
+
+        def __call__(self, ids):
+            self.calls += 1
+            return self.embedding(ids)
+
+    model = Model()
+    ids = mx.array([0, 2, 3, 1])
+    rows = mx.array([0, 1, 2])
+    teacher = mx.random.normal((3, 8))
+    plain = nn.value_and_grad(model, lambda m: _distillation_loss(m, ids, rows, teacher, direction))
+    scored = nn.value_and_grad(model, lambda m: _distillation_loss(
+        m, ids, rows, teacher, direction, capture_logprobs=True
+    ))
+    loss, gradients = plain(model)
+    model.calls = 0
+    (scored_loss, logprobs), scored_gradients = scored(model)
+    mx.eval(loss, gradients, scored_loss, logprobs, scored_gradients)
+    assert model.calls == 1
+    assert scored_loss.item() == loss.item()
+    for (name, grad), (scored_name, scored_grad) in zip(
+        tree_flatten(gradients), tree_flatten(scored_gradients), strict=True
+    ):
+        assert name == scored_name
+        assert mx.array_equal(grad, scored_grad).item()
+    logits = model(ids[None])[0][rows].astype(mx.float32)
+    expected = mx.take_along_axis(nn.log_softmax(logits, axis=-1), ids[rows + 1, None], axis=-1)[:, 0]
+    assert mx.allclose(logprobs, expected, atol=1e-6).item()
+
+
+def test_rollout_scores_match_pre_update_student_on_each_batch_sample():
+    from cartridge_helpers import tiny_model
+    from distill.training import TrainingSession
+    from distill.prefill import select_logits
+
+    model, tokenizer = tiny_model()
+    session = TrainingSession(
+        model, tokenizer, "Private code: VIOLET.", model_name="tiny",
+        lora_rank=2, learning_rate=0.01, max_tokens=3,
+        temperature=0, seed=0, enable_thinking=False, speculative_top_k=3,
+    )
+    prompts = ["Code?", "Which code?"]
+    prepared = session._prepare_rollouts_batched(prompts, 2)
+    expected = []
+    for rollout in prepared:
+        logits = select_logits(model, rollout.student_ids, rollout.student_rows).astype(mx.float32)
+        ids = [rollout.student_ids[row + 1] for row in rollout.student_rows]
+        logp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+        expected.append(mx.take_along_axis(logp, mx.array(ids)[:, None], axis=-1)[:, 0].tolist())
+    from time import perf_counter
+    steps = session._update_prepared_batch(
+        prepared, batch_started=perf_counter(), capture_feedback=True, optimized=True
+    )
+    for step, rollout, logprobs in zip(steps, prepared, expected, strict=True):
+        tokens = step.rollout_tokens
+        assert len(tokens) == step.num_tokens
+        assert [t["logprob"] for t in tokens] == pytest.approx(logprobs, abs=1e-5)
+        assert [t["token_id"] for t in tokens] == [
+            rollout.student_ids[row + 1] for row in rollout.student_rows
+        ]
+        assert [t["teacher_sampled"] for t in tokens] == rollout.sample.teacher_sampled
+
+
 def test_session_seed_controls_adapter_initialization_and_sampling():
     from mlx.utils import tree_flatten
     from mlx_lm.models.llama import Model, ModelArgs

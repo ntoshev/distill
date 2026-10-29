@@ -424,7 +424,8 @@ def test_skd_batch_rollout_relative_to_serial(timing_benchmark, model, tokenizer
 
 
 @pytest.mark.parametrize("top_p", [None, 0.5, 0.9])
-def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer, top_p):
+@pytest.mark.parametrize("capture_feedback", [False, True])
+def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer, top_p, capture_feedback):
     """Guard the complete optimized rollout, distillation, and update path."""
     from mlx_lm.tuner.utils import remove_lora_layers
 
@@ -445,7 +446,7 @@ def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer, top
         )
 
         def operation():
-            steps = session.step_batch(BATCH_PROMPTS)
+            steps = session.step_batch(BATCH_PROMPTS, capture_feedback=capture_feedback)
             mx.synchronize()
             return steps
 
@@ -454,6 +455,8 @@ def test_optimized_training_step_batch_3(timing_benchmark, model, tokenizer, top
         assert steps[0].batch_size == 3
         assert steps[0].batch_rollout_seconds > 0
         assert steps[0].batch_distill_seconds > 0
+        if capture_feedback:
+            assert all(len(step.rollout_tokens) == step.num_tokens for step in steps)
     finally:
         remove_lora_layers(model)
         model.eval()

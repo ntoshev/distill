@@ -76,3 +76,18 @@ def test_fact_session_only_changes_cartridge_and_uses_equal_fact_reduction():
     assert len(steps) == 2 and steps[0].iteration == steps[1].iteration == 1
     assert steps[0].batch_loss == (steps[0].loss + steps[1].loss) / 2
     assert all(s.num_tokens > 0 and s.teacher_feedback for s in steps)
+    from distill.prefill import select_logits
+    for step in steps:
+        ids = [t["token_id"] for t in step.rollout_tokens]
+        prefix = tokenizer.encode(render_generation_prompt(
+            tokenizer, prompt_messages(step.prompt), None
+        ))
+        logits = select_logits(
+            model, prefix + ids,
+            list(range(len(prefix) - 1, len(prefix) + len(ids) - 1)),
+            cache_factory=memory.new_cache,
+        ).astype(mx.float32)
+        logp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+        expected = mx.take_along_axis(logp, mx.array(ids)[:, None], axis=-1)[:, 0]
+        assert mx.allclose(mx.array([t["logprob"] for t in step.rollout_tokens]), expected, atol=1e-5).item()
+        assert sum(t["teacher_sampled"] for t in step.rollout_tokens) == step.replaced_tokens

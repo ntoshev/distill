@@ -414,9 +414,12 @@ def run_continual(
                 while rollout_name in used_names:
                     rollout_name += "/rollout"
                 used_names.add(rollout_name)
-                probes.extend([probe, replace(probe, name=rollout_name, dynamic=True)])
+                probes.extend([
+                    replace(probe, role="target"),
+                    replace(probe, name=rollout_name, dynamic=True, role="rollout"),
+                ])
                 points[rollout_name] = answer
-            probes.extend(replace(p, dynamic=True) for p in canaries)
+            probes.extend(replace(p, dynamic=True, role="canary") for p in canaries)
             row["progress"] = progress_to_json(
                 ProgressResult(
                     str(root),
@@ -503,7 +506,8 @@ def run_continual(
             reported_first_question = True
             steps = session.step_batch(
                 [prompt for _, prompt in batch],
-                capture_feedback=update_number % eval_every == 0,
+                capture_feedback=update_number % eval_every == 0
+                or (backend == "cartridge" and update_number == budget),
             )
             last_loss = steps[0].batch_loss
             with metrics_file.open("a") as file:
@@ -545,6 +549,7 @@ def run_continual(
                         "item_id": item_id,
                         "prompt": step.prompt,
                         "content": step.content,
+                        "tokens": step.rollout_tokens or [],
                     }
                     for (item_id, _), step in zip(batch, steps)
                 ],

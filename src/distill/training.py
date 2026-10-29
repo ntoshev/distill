@@ -1,6 +1,7 @@
 """On-policy context distillation into a LoRA adapter."""
 
 import json
+import math
 import random
 import re
 from contextlib import nullcontext
@@ -31,7 +32,7 @@ from distill.sample import (
     sample_speculative_completion,
     sample_speculative_completions,
 )
-from distill.scoring import align_scored_tokens
+from distill.scoring import align_scored_tokens, token_pieces
 from distill.templating import (
     apply_teacher_context, build_raw, prompt_messages, render_generation_prompt,
 )
@@ -66,6 +67,7 @@ class TrainStep:
     batch_distill_seconds: float = 0.0
     teacher_feedback: list[dict] | None = None
     speculative_top_p: float | None = None
+    rollout_tokens: list[dict] | None = None
 
 
 @dataclass
@@ -97,13 +99,39 @@ def load_prompts(path: str | Path) -> list[str]:
 
 
 def _distillation_loss(
-    model, student_ids, student_rows, teacher_rows, kl_direction="forward"
+    model, student_ids, student_rows, teacher_rows, kl_direction="forward",
+    *, capture_logprobs=False,
 ):
     logits = model(student_ids[None])[0]
     vocab = min(logits.shape[-1], teacher_rows.shape[-1])
     student = logits[student_rows, :vocab].astype(mx.float32)
     teacher = teacher_rows[:, :vocab]
-    return _kl_loss(student, teacher, kl_direction).mean()
+    loss = _kl_loss(student, teacher, kl_direction).mean()
+    if capture_logprobs:
+        student_logits = student if vocab == logits.shape[-1] else logits[student_rows].astype(mx.float32)
+        chosen = mx.take_along_axis(
+            student_logits, student_ids[student_rows + 1, None], axis=-1
+        )[:, 0]
+        return loss, mx.stop_gradient(chosen - mx.logsumexp(student_logits, axis=-1))
+    return loss
+
+
+def rollout_token_payload(tokenizer, ids, logprobs, teacher_sampled=None):
+    """Keep actual token IDs and pre-update student scores on the trained string."""
+    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_ids.update(getattr(tokenizer, "eos_token_ids", []) or [])
+    sampled = teacher_sampled or [False] * len(ids)
+    return [
+        {
+            "text": text, "token_id": token_id,
+            "special": token_id in special_ids,
+            "logprob": lp, "probability": math.exp(lp),
+            "teacher_sampled": bool(sampled[index]),
+        }
+        for index, (text, token_id, lp) in enumerate(
+            zip(token_pieces(tokenizer, ids), ids, logprobs, strict=True)
+        )
+    ]
 
 
 def _teacher_rows(
@@ -204,6 +232,7 @@ def _step_payload(step: TrainStep) -> dict:
             "total_seconds": step.total_seconds,
         },
         "teacher_feedback": step.teacher_feedback or [],
+        "rollout_tokens": step.rollout_tokens or [],
         "checkpoint_file": (
             str(step.checkpoint_file) if step.checkpoint_file is not None else None
         ),
@@ -345,6 +374,13 @@ class TrainingSession:
             model,
             lambda model, student_ids, student_rows, teacher_rows: _distillation_loss(
                 model, student_ids, student_rows, teacher_rows, kl_direction
+            ),
+        )
+        self.loss_and_grad_with_scores = nn.value_and_grad(
+            model,
+            lambda model, student_ids, student_rows, teacher_rows: _distillation_loss(
+                model, student_ids, student_rows, teacher_rows, kl_direction,
+                capture_logprobs=True,
             ),
         )
         self.teacher_prefix_ids: list[int] = []
@@ -574,13 +610,10 @@ class TrainingSession:
         chosen_ids = mx.array(
             [rollout.student_ids[row + 1] for row in rollout.student_rows]
         )
-        teacher_logprobs = teacher_rows.astype(mx.float32)
-        teacher_logprobs = teacher_logprobs - mx.logsumexp(
-            teacher_logprobs, axis=-1, keepdims=True
-        )
+        teacher_logits = teacher_rows.astype(mx.float32)
         chosen = mx.take_along_axis(
-            teacher_logprobs, chosen_ids[:, None], axis=-1
-        )[:, 0]
+            teacher_logits, chosen_ids[:, None], axis=-1
+        )[:, 0] - mx.logsumexp(teacher_logits, axis=-1)
         mx.eval(chosen)
         sampled = rollout.sample.teacher_sampled or []
         return [
@@ -717,10 +750,13 @@ class TrainingSession:
         losses: list[float] = []
         distill_seconds: list[float] = []
         teacher_feedback: list[list[dict]] = []
+        student_logprobs = []
+        pending_feedback = None
         pending_losses = []
         for rollout_index, rollout in enumerate(prepared):
             gradient_started = perf_counter()
             feedback = []
+            logprobs = None
             if self.loss_chunk_size is not None:
                 if capture_feedback:
                     raise ValueError("Chunked KL does not support feedback capture")
@@ -734,14 +770,20 @@ class TrainingSession:
                     rollout, force_recompute=not optimized
                 )
                 if capture_feedback and rollout_index == 0:
-                    feedback = self._feedback(rollout, teacher_rows)
+                    pending_feedback = (rollout, teacher_rows)
                 student_ids = mx.array(rollout.student_ids)
                 student_rows = mx.array(rollout.student_rows)
                 self.model.train()
-                loss, grads = self.loss_and_grad(
-                    self.model, student_ids, student_rows, teacher_rows
-                )
+                if capture_feedback:
+                    (loss, logprobs), grads = self.loss_and_grad_with_scores(
+                        self.model, student_ids, student_rows, teacher_rows
+                    )
+                else:
+                    loss, grads = self.loss_and_grad(
+                        self.model, student_ids, student_rows, teacher_rows
+                    )
             teacher_feedback.append(feedback)
+            student_logprobs.append(logprobs)
             pending_losses.append(loss)
             accumulated_grads = (
                 grads
@@ -759,13 +801,29 @@ class TrainingSession:
                 mx.clear_cache()
 
         if optimized:
-            mx.eval(pending_losses, accumulated_grads)
+            mx.eval(pending_losses, accumulated_grads, student_logprobs)
             losses = [loss.item() for loss in pending_losses]
             elapsed = perf_counter() - batch_started - sum(
                 rollout.prepare_seconds for rollout in prepared
             )
             distill_seconds = [elapsed / len(prepared)] * len(prepared)
 
+        # Materialize scores while the student still has its pre-update weights.
+        if pending_feedback is not None:
+            teacher_feedback[0] = self._feedback(*pending_feedback)
+        rollout_tokens = [
+            rollout_token_payload(
+                self.tokenizer,
+                [rollout.student_ids[row + 1] for row in rollout.student_rows],
+                logprobs.tolist(), rollout.sample.teacher_sampled,
+            ) if logprobs is not None else []
+            for rollout, logprobs in zip(prepared, student_logprobs)
+        ]
+        for index, rollout in enumerate(prepared):
+            if "".join(t["text"] for t in rollout_tokens[index]) != rollout.sample.completion_text:
+                # Cross-tokenizer alignment may cover only part of a sample.
+                # Keep such samples unscored rather than color different text.
+                rollout_tokens[index] = []
         batch_size = len(prepared)
         accumulated_grads = tree_map(lambda grad: grad / batch_size, accumulated_grads)
         optimizer_started = perf_counter()
@@ -803,6 +861,7 @@ class TrainingSession:
                 batch_rollout_seconds=batch_rollout_seconds,
                 batch_distill_seconds=batch_distill_seconds,
                 teacher_feedback=teacher_feedback[index],
+                rollout_tokens=rollout_tokens[index],
             )
             for index, rollout in enumerate(prepared)
         ]

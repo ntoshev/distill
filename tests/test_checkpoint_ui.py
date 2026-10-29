@@ -203,6 +203,24 @@ def test_recorded_replay_never_loads_model(tmp_path, monkeypatch, capsys):
     assert "target · scored" in capsys.readouterr().out
 
 
+def test_replay_accepts_probe_roles_added_when_resuming_an_older_run(tmp_path):
+    from dataclasses import replace
+
+    probes = [Probe("target", "Code?", "V"), Probe("canary", "Grass?", "", dynamic=True)]
+    rows = []
+    for step in (0, 1):
+        current = probes if step == 0 else [
+            replace(probes[0], role="target"), replace(probes[1], role="canary")
+        ]
+        point = ProbePoint(step, -1, math.exp(-1), -1, math.exp(-1), [])
+        result = ProgressResult("run", [step], current, {p.name: [point] for p in current})
+        rows.append({"canaries": [{"name": "canary"}], "progress": progress_to_json(result)})
+    (tmp_path / "eval_metrics.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    result = recorded_progress(tmp_path)
+    assert result.steps == [0, 1]
+    assert [p.role for p in result.probes] == ["target", "canary"]
+
+
 def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
     tmp_path, monkeypatch, stub_continual_evaluation
 ):
@@ -228,7 +246,13 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
 
         def step_batch(self, prompts, **kwargs):
             return [
-                TrainStep(1, prompt, 0.1, 1, "stop", f"train-{index}", batch_loss=0.1)
+                TrainStep(
+                    1, prompt, 0.1, 2, "stop", f"train-{index}", batch_loss=0.1,
+                    rollout_tokens=[
+                        {"text": "train-", "logprob": -0.1, "teacher_sampled": True},
+                        {"text": str(index), "logprob": -1.9, "teacher_sampled": False},
+                    ],
+                )
                 for index, prompt in enumerate(prompts)
             ]
 
@@ -321,12 +345,15 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
         replay.series["target"][1].label != "learned"
     )  # High probability did not pass recall.
     output = io.StringIO()
-    render_checkpoint_grid(replay, Console(file=output, width=240, color_system=None))
-    text = output.getvalue()
-    assert "train rollout · unscored" in text
-    assert "target/rollout · generated" in text
-    assert "wrong  p=60.7%" in text
-    assert "VIOLET-731  p=90.5%" in text
+    console = Console(file=output, width=240, color_system="truecolor", record=True)
+    render_checkpoint_grid(replay, console)
+    text = console.export_text(clear=False)
+    assert "train rollout" in text
+    assert "target/rollout" not in text and "target · scored" not in text
+    assert "wrong" not in text and "VIOLET-731" not in text
+    assert "grass · generated" in text and "Green.  p=60.7%" in text
+    assert "train-0  p=36.8%" in text and "train-1  p=36.8%" in text
+    assert "\x1b[4;38;2;" in console.export_text(styles=True)
     assert "train-0" in text and "train-1" in text
 
 
@@ -340,8 +367,8 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
 
     output = Output()
     console = Console(file=output, width=80, height=5, force_terminal=terminal)
-    probe = Probe("target", "Code?", "V")
-    result = ProgressResult("run", [], [probe], {"target": []}, training_rollouts={0: []})
+    probe = Probe("canary", "Code?", "", dynamic=True)
+    result = ProgressResult("run", [], [probe], {"canary": []}, training_rollouts={0: []})
     display = CheckpointDisplay(console).start()
     for step in range(12):
         result.steps.append(step)
@@ -349,7 +376,7 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
             result.training_rollouts[step] = [
                 {"item_id": "target", "content": f"sample-{step:02d} [literal]"}
             ]
-        result.series["target"].append(
+        result.series["canary"].append(
             ProbePoint(
                 step, -1, math.exp(-1), -1, math.exp(-1),
                 [{"text": f"checkpoint-{step:02d}", "logprob": -1}],
@@ -367,12 +394,13 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
     text = output.getvalue()
     for step in range(12):
         assert text.count(f"checkpoint-{step:02d}") == 1
-    assert text.count("target · scored") == 1
-    assert text.count("train rollout · unscored") == 1
+    assert text.count("canary · generated") == 1
+    assert text.count("train rollout") == 1
     for step in range(1, 12):
         assert text.count(f"sample-{step:02d} [literal]") == 1
     assert "\x1b[1A" not in text  # No cursor-up redraws erase scrollback.
-    assert "Training…" in text
+    assert "Training…" not in text
+    assert "Scored checkpoint" not in text
 
 
 def test_live_rollout_grid_keeps_canary_visible_in_narrow_terminal():
@@ -407,8 +435,7 @@ def test_live_rollout_grid_keeps_canary_visible_in_narrow_terminal():
         display.update(result)
         text = output.getvalue()
         assert text.count("Green") == step + 1
-        assert text.count("N/A") == step + 1
-        assert text.count("VIOLET") == step + 1
+        assert "N/A" not in text and "VIOLET" not in text
     display.stop()
     assert "teacher" in output.getvalue()
     assert "learned" in output.getvalue()

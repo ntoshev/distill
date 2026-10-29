@@ -225,17 +225,17 @@ uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
   --eval-every 1 --no-thinking
 ```
 
-The native checkpoint grid shows the actual training rollouts, the scored held-out
-target, the student's generated held-out answer, and generated canary answers at
-each evaluation. The training column contains every sample in that update's batch,
-including teacher replacements, and is labeled `unscored`; it uses no probabilities
-from the fixed target or the teacher. Generated held-out and canary answers reuse
-their own decode probabilities, without extra generation or scoring.
-Each scored token retains its own student
-probability and token boundary. `p` is the geometric-mean probability, including
-generated end tokens; `--show-special-tokens` reveals their spellings. New rows
-and evaluation status append to terminal scrollback, preserving every checkpoint
-without redrawing or hiding earlier output. This also applies to progress
+The native checkpoint grid shows the step, actual training rollouts, and generated
+canary answers at each evaluation. The training column contains every sample in
+that update's batch. Each token is colored by its own pre-update student probability,
+captured from the training forward pass; teacher-replaced tokens are underlined.
+Canaries retain their own checkpoint decode probabilities. The fixed target and
+held-out student answer remain saved for evaluation and replay, but are hidden in
+this grid. `p` is the geometric-mean token probability, including generated end
+tokens; `--show-special-tokens` reveals their spellings. Older rollouts without
+saved student probabilities are explicitly labeled `unscored`. Checkpoint rows
+append to terminal scrollback without a secondary status line, preserving every
+checkpoint without redrawing or hiding earlier output. This also applies to progress
 evaluation. Redirected output prints the completed grid once.
 
 Inline canaries use their initial generated answers as retention baselines;
