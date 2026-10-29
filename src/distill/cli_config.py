@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 
-DEFAULT_JUDGE_MODEL = "mlx-community/Qwen3.5-4B-6bit"
+DEFAULT_JUDGE_MODEL = "mlx-community/Qwen3.5-4B-4bit"
 DEFAULT_TEMPERATURE = 1.0
 
 

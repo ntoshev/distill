@@ -262,6 +262,8 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
 
     def fake_answer(model, tokenizer, probe, **kwargs):
         answer_calls.append((probe.name, kwargs["max_tokens"]))
+        if probe.name == "canary":
+            return "Cold" if state["learned"] else "cold"
         return probe.completion
 
     def fake_score(model, tokenizer, probe, step, enable_thinking, **kwargs):
@@ -292,7 +294,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         student,
         object(),
         [LearningItem("fact", "heldout", "VIOLET-731", ("train",))],
-        [Probe("canary", "2+2?", "4")],
+        [Probe("canary", "Opposite of hot?", "cold")],
         "teacher context",
         tmp_path / "adapter",
         model_name="model",
@@ -308,6 +310,11 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         train_report=train_reports.append,
     )
     assert result.success
+    assert eval_reports[-1]["canary_changed"] == 0
+    assert eval_reports[-1]["canaries"] == [
+        {"name": "canary", "baseline": "cold", "content": "Cold",
+         "changed": False, "contaminated": False}
+    ]
     assert (output / "adapters.safetensors").read_bytes() == b""
     assert not old_checkpoint.exists()
     assert json.loads((output / "selection.json").read_text())["selected_step"] == 1
@@ -370,7 +377,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
     }
     assert feedback_capture_calls == [True]
     assert judge_calls == [
-        ("4", "4"),
+        ("cold", "cold"),
         ("VIOLET-731", "VIOLET-731"),
         ("VIOLET-731", "VIOLET-731"),
     ]
@@ -468,8 +475,8 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     assert result.selected_step == 6
     assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2, 3, 4]
     assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 0, 0, 1]
-    # One baseline pair plus two distinct target answers; all seven checkpoint
-    # answers still generated and consecutive confirmations still required.
-    assert len(judged) == 3
+    # Only the differing target answer needs a judge. All seven checkpoint
+    # answers are still generated and consecutive confirmations still required.
+    assert len(judged) == 1
     assert sum("<CANDIDATE>wrong</CANDIDATE>" in text for text in judged) == 1
     assert next(item_answers, None) is None

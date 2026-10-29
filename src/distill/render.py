@@ -664,11 +664,10 @@ class CheckpointDisplay:
                     show_special_tokens=self.show_special_tokens,
                     indices=range(self._printed, complete),
                 )
-                # Fixed column proportions keep separately printed rows aligned.
-                table.expand = True
-                table.columns[0].width = 16
-                for column in table.columns[1:]:
-                    column.ratio = 1
+                # Keep the header's natural width on later batches without
+                # stretching short answers across the terminal.
+                for column in table.columns:
+                    column.min_width = Text(str(column.header)).cell_len
                 table.show_header = self._printed == 0
                 self.console.print(table)
                 self.console.print(Text(self.status, style="grey50"))

@@ -65,7 +65,7 @@ def test_judge_answers_uses_one_batch_and_keeps_reference_authority(monkeypatch)
     assert judge_answers(
         None,
         None,
-        [("VIOLET-731", "VIOLET-731"), ("10 goals", "11")],
+        [("VIOLET-731", "The code is VIOLET-731."), ("10 goals", "11")],
         enable_thinking=False,
     ) == [True, False]
     assert len(calls) == 1
@@ -88,7 +88,7 @@ def test_judge_cache_reuses_positive_and_negative_verdicts_and_batches_misses(
 
     monkeypatch.setattr("distill.judge.sample_completions", batch)
     cache = {}
-    good = ("VIOLET-731", "VIOLET-731")
+    good = ("VIOLET-731", "The code is VIOLET-731.")
     bad = ("VIOLET-731", "N/A")
     options = dict(enable_thinking=False, cache=cache)
     assert judge_answers(None, None, [good, bad, good, bad], **options) == [
@@ -102,7 +102,7 @@ def test_judge_cache_reuses_positive_and_negative_verdicts_and_batches_misses(
     assert judge_answers(None, None, [bad, good], **options) == [False, True]
     assert len(calls) == 1  # Negative verdicts are hits too.
 
-    new_reference = ("N/A", "N/A")
+    new_reference = ("N/A", "Not applicable")
     changed_case = ("VIOLET-731", "n/a")
     assert judge_answers(
         None, None, [bad, new_reference, good, changed_case, bad], **options
@@ -137,5 +137,33 @@ def test_judge_cache_does_not_record_failed_batches(monkeypatch):
     monkeypatch.setattr("distill.judge.sample_completions", fail)
     cache = {("known", "known"): True}
     with pytest.raises(RuntimeError, match="generation failed"):
-        judge_answers(None, None, [("new", "new")], enable_thinking=False, cache=cache)
+        judge_answers(None, None, [("new", "different")], enable_thinking=False, cache=cache)
     assert cache == {("known", "known"): True}
+
+
+def test_identical_canary_baselines_pass_without_generation(monkeypatch):
+    def fail(*args, **kwargs):
+        pytest.fail("identical nonempty answers do not need an LLM verdict")
+
+    monkeypatch.setattr("distill.judge.sample_completion", fail)
+    monkeypatch.setattr("distill.judge.sample_completions", fail)
+    answers = [("12", "12"), ("Paris", "Paris"), ("cold", "cold"), ("green", "green")]
+    answers.append((" VIOLET-731\n", "VIOLET-731"))
+    cache = {}
+    assert judge_answers(None, None, answers, enable_thinking=False, cache=cache) == [True] * len(answers)
+    assert cache == dict.fromkeys(answers, True)
+    for expected, generated in answers:
+        assert judge_answer(None, None, "", expected, generated, enable_thinking=False)
+
+
+def test_empty_and_case_different_answers_still_require_judgment(monkeypatch):
+    seen = []
+
+    def batch(model, tokenizer, messages, **kwargs):
+        seen.extend(messages)
+        return [SimpleNamespace(content="NO") for _ in messages]
+
+    monkeypatch.setattr("distill.judge.sample_completions", batch)
+    answers = [("", ""), (" ", "\n"), ("VIOLET-731", "violet-731")]
+    assert judge_answers(None, None, answers, enable_thinking=False) == [False] * 3
+    assert len(seen) == 3

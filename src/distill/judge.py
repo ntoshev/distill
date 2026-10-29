@@ -53,12 +53,16 @@ def judge_answers(
     enable_thinking,
     cache: dict[tuple[str, str], bool] | None = None,
 ):
-    """Batch unseen pairs and reuse verdicts for exact reference/candidate matches.
+    """Accept identical nonempty answers, then batch and cache semantic judgments.
 
     A supplied cache must belong to one frozen judge and thinking configuration.
     The continual runner owns a fresh cache per run; no student outputs are cached.
     """
     verdicts = {} if cache is None else cache
+    for pair in answers:
+        expected, generated = pair
+        if expected.strip() and expected.strip() == generated.strip():
+            verdicts[pair] = True
     pending = list(dict.fromkeys(pair for pair in answers if pair not in verdicts))
     if pending:
         samples = sample_completions(
@@ -92,6 +96,8 @@ def judge_answer(
     the question prevents the classifier from replacing that authority with
     its own world knowledge.
     """
+    if expected.strip() and expected.strip() == generated.strip():
+        return True
     sample = sample_completion(
         model,
         tokenizer,

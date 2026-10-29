@@ -371,16 +371,17 @@ def run_continual(
         for probe in canaries:
             content = canary_points[probe.name].content.strip()
             baseline = canary_baselines[probe.name]
+            changed = content.casefold() != baseline.casefold()
             canary_rows.append(
                 {
                     "name": probe.name,
                     "baseline": baseline,
                     "content": content,
-                    "changed": content != baseline,
-                    "contaminated": content != baseline
+                    "changed": changed,
+                    "contaminated": changed
                     and any(
-                        content == item.completion.strip()
-                        and baseline != item.completion.strip()
+                        content.casefold() == item.completion.strip().casefold()
+                        and baseline.casefold() != item.completion.strip().casefold()
                         for item in items
                     ),
                 }
