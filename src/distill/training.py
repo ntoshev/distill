@@ -331,6 +331,8 @@ class TrainingSession:
         self.warn = warn
         self.iteration = 0
 
+        # Initialization must not depend on RNG consumed by loading or evaluation.
+        mx.random.seed(seed)
         self.config = (
             continue_lora(model, from_adapter)
             if from_adapter is not None
@@ -364,6 +366,7 @@ class TrainingSession:
                         self.teacher_prefix_ids,
                         self.teacher_prefix_cache,
                     )
+        # Keep rollout randomness independent of adapter initialization draws.
         mx.random.seed(seed)
 
     def _shared_teacher_prefix_ids(self) -> list[int]:

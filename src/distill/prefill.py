@@ -3,6 +3,31 @@
 import copy
 
 import mlx.core as mx
+from mlx_lm.models.cache import ArraysCache, make_prompt_cache
+
+
+class _RightPaddedArraysCache(ArraysCache):
+    """Honor right-padding lengths after MLX-LM merges empty recurrent caches."""
+
+    def prepare(self, lengths=None, **kwargs):
+        # ArraysCache.merge initializes left_padding to zeros. Its mask prefers
+        # that field over lengths, otherwise treating right padding as real input.
+        if kwargs.get("right_padding") is not None:
+            self.left_padding = None
+        super().prepare(lengths=lengths, **kwargs)
+
+
+def make_batch_prompt_cache(model, cache_factory=None):
+    """Create a batch cache with a local fix for recurrent right-padding masks."""
+    cache = cache_factory() if cache_factory else make_prompt_cache(model)
+    for index, entry in enumerate(cache):
+        if type(entry) is ArraysCache:
+            replacement = _RightPaddedArraysCache(len(entry.state))
+            replacement.state = entry.state
+            replacement.left_padding = entry.left_padding
+            replacement.lengths = entry.lengths
+            cache[index] = replacement
+    return cache
 
 
 def clone_prompt_cache(cache):

@@ -295,3 +295,68 @@ def test_batch_probabilities_match_float32_forward_and_compact_finished_rows():
         assert sample.token_logprobs == pytest.approx(
             [probabilities[len(prompt) + i] for i in range(sample.num_tokens)], abs=1e-5
         )
+
+
+@pytest.mark.parametrize("with_prefix", [False, True])
+def test_recurrent_batch_matches_unpadded_rows(with_prefix):
+    """Right padding must not advance Qwen3.5's convolution or recurrent state."""
+    from mlx_lm.models.cache import make_prompt_cache
+    from mlx_lm.models.qwen3_5 import TextModel, TextModelArgs
+    from distill.prefill import prefill_cache
+
+    mx.random.seed(42)
+    model = TextModel(TextModelArgs(
+        model_type="qwen3_5",
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=16,
+        full_attention_interval=2,
+        linear_num_value_heads=2,
+        linear_num_key_heads=1,
+        linear_key_head_dim=32,
+        linear_value_head_dim=32,
+        vocab_size=32,
+        rope_parameters={"partial_rotary_factor": 1.0, "rope_theta": 10000},
+    ))
+    # Keep recurrent history long enough for padding-induced drift to be visible.
+    model.layers[0].linear_attn.A_log = mx.full((2,), -3.0)
+    model.eval()
+
+    class Tokenizer:
+        eos_token_ids = {31}
+
+        @property
+        def _tokenizer(self):
+            return self
+
+        def decode(self, ids, skip_special_tokens=False):
+            return "".join(chr(65 + i) for i in ids if not skip_special_tokens or i != 31)
+
+    def cache_factory():
+        cache = make_prompt_cache(model)
+        if with_prefix:
+            prefill_cache(model, [3, 1, 4], cache)
+        return cache
+
+    prompts = [[1, 2, 3, 4, 5, 6, 7], [5, 6], [7, 8, 9]]
+    limits = [3, 1, 5]
+    forced = [[12, 31, 9], None, [10, 11, 12, 13, 14]]
+    options = {"cache_factory": cache_factory} if with_prefix else {}
+    expected = [
+        _sample_batch(
+            model, Tokenizer(), [("p", prompt)], [limit],
+            forced_token_ids=[ids], **options,
+        )[0]
+        for prompt, limit, ids in zip(prompts, limits, forced)
+    ]
+    actual = _sample_batch(
+        model, Tokenizer(), [("p", prompt) for prompt in prompts], limits,
+        forced_token_ids=forced, **options,
+    )
+    for left, right in zip(actual, expected):
+        assert left.token_ids == right.token_ids
+        assert left.finish_reason == right.finish_reason
+        assert left.token_logprobs == pytest.approx(right.token_logprobs, abs=1e-5)

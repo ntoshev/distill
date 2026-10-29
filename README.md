@@ -225,8 +225,13 @@ uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
   --eval-every 1 --no-thinking
 ```
 
-The native checkpoint grid shows the scored held-out target beside actual generated
-canary answers at each evaluation. Each token retains its own student
+The native checkpoint grid shows the actual training rollouts, the scored held-out
+target, the student's generated held-out answer, and generated canary answers at
+each evaluation. The training column contains every sample in that update's batch,
+including teacher replacements, and is labeled `unscored`; it uses no probabilities
+from the fixed target or the teacher. Generated held-out and canary answers reuse
+their own decode probabilities, without extra generation or scoring.
+Each scored token retains its own student
 probability and token boundary. `p` is the geometric-mean probability, including
 generated end tokens; `--show-special-tokens` reveals their spellings. New rows
 and evaluation status append to terminal scrollback, preserving every checkpoint

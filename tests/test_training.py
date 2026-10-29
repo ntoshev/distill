@@ -11,6 +11,34 @@ from distill.stopping import LearningItem
 from distill.training import TrainStep, _kl_loss, load_prompts
 
 
+def test_session_seed_controls_adapter_initialization_and_sampling():
+    from mlx.utils import tree_flatten
+    from mlx_lm.models.llama import Model, ModelArgs
+    from distill.training import TrainingSession
+
+    def initialize(ambient_seed, session_seed):
+        mx.random.seed(ambient_seed)
+        model = Model(ModelArgs(
+            model_type="llama", hidden_size=32, num_hidden_layers=1,
+            intermediate_size=64, num_attention_heads=2, num_key_value_heads=2,
+            rms_norm_eps=1e-6, vocab_size=32,
+        ))
+        TrainingSession(model, None, "private reference", lora_rank=4, seed=session_seed)
+        params = dict(tree_flatten(model.trainable_parameters()))
+        sample = mx.random.normal((8,))
+        mx.eval(params, sample)
+        return params, sample
+
+    first, first_sample = initialize(123, 0)
+    repeated, repeated_sample = initialize(456, 0)
+    different, different_sample = initialize(123, 1)
+    assert first.keys() == repeated.keys() == different.keys()
+    assert all(mx.array_equal(first[k], repeated[k]).item() for k in first)
+    assert any(not mx.array_equal(first[k], different[k]).item() for k in first)
+    assert mx.array_equal(first_sample, repeated_sample).item()
+    assert not mx.array_equal(first_sample, different_sample).item()
+
+
 def test_kl_loss_directions_match_manual_distributions():
     student = mx.array([[2.0, 0.0, -1.0]])
     teacher = mx.array([[0.0, 1.0, 0.0]])

@@ -447,6 +447,10 @@ def _continual_cli(args, errcon, fail) -> int:
                         str(output), [], probes, {p.name: [] for p in probes}
                     )
                 display.result.steps.extend(payload["steps"])
+                display.result.training_rollouts.update(
+                    (int(step), rollouts)
+                    for step, rollouts in payload.get("training_rollouts", {}).items()
+                )
                 for probe in display.result.probes:
                     display.result.series[probe.name].extend(
                         ProbePoint(**p) for p in payload["series"][probe.name]

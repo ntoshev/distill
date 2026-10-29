@@ -551,6 +551,8 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
     """One checkpoint per row; color only the tokens actually stored in that cell."""
     table = Table(box=None, padding=(0, 1), collapse_padding=True, show_edge=False)
     table.add_column("step", style="grey50", no_wrap=True)
+    if result.training_rollouts:
+        table.add_column("train rollout · unscored", overflow="fold")
     for probe in result.probes:
         generated = probe.dynamic or any(
             p.completion is not None for p in result.series[probe.name]
@@ -575,6 +577,18 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
         if transition and transition != "base":
             label += " " + transition
         cells = []
+        if result.training_rollouts:
+            rollouts = result.training_rollouts.get(step, [])
+            cell = Text()
+            for index, rollout in enumerate(rollouts):
+                if index:
+                    cell.append("\n")
+                if len(rollouts) > 1:
+                    cell.append(f"{rollout['item_id']}: ", style="grey50")
+                cell.append(rollout["content"])
+            if not rollouts:
+                cell.append("—", style="grey50")
+            cells.append(cell)
         for point in points:
             cell = Text()
             for token in point.tokens:
@@ -599,13 +613,20 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
 GRID_LEGEND = "p = geometric-mean student probability, including generated end tokens."
 
 
+def _grid_legend(result):
+    return GRID_LEGEND + (
+        " Train rollouts are the actual samples used before that update, including teacher replacements; no student scores."
+        if result.training_rollouts else ""
+    )
+
+
 def render_checkpoint_grid(
     result, console, metric="prob", *, show_special_tokens=False
 ):
     console.print(
         checkpoint_grid(result, metric, show_special_tokens=show_special_tokens)
     )
-    console.print(GRID_LEGEND, style="grey50")
+    console.print(_grid_legend(result), style="grey50")
 
 
 class CheckpointDisplay:
@@ -642,7 +663,7 @@ class CheckpointDisplay:
                     show_special_tokens=self.show_special_tokens,
                 )
             )
-            parts.append(Text(GRID_LEGEND, style="grey50"))
+            parts.append(Text(_grid_legend(self.result), style="grey50"))
         parts.append(Text(self.status, style="grey50"))
         return Group(*parts)
 
@@ -664,10 +685,12 @@ class CheckpointDisplay:
                     show_special_tokens=self.show_special_tokens,
                     indices=range(self._printed, complete),
                 )
-                # Keep the header's natural width on later batches without
-                # stretching short answers across the terminal.
-                for column in table.columns:
-                    column.min_width = Text(str(column.header)).cell_len
+                # Stabilize short columns only when the headers fit. Forcing
+                # those widths in a narrow terminal crops the final columns.
+                header_widths = [Text(str(c.header)).cell_len for c in table.columns]
+                if sum(header_widths) + len(header_widths) + 1 <= self.console.width:
+                    for column, width in zip(table.columns, header_widths):
+                        column.min_width = width
                 table.show_header = self._printed == 0
                 self.console.print(table)
                 self.console.print(Text(self.status, style="grey50"))
@@ -678,7 +701,7 @@ class CheckpointDisplay:
         if self._streaming:
             self.update()
             if self.result:
-                self.console.print(GRID_LEGEND, style="grey50")
+                self.console.print(_grid_legend(self.result), style="grey50")
                 if self.status != self._printed_status:
                     self.console.print(Text(self.status, style="grey50"))
             self._streaming = False

@@ -406,17 +406,28 @@ def run_continual(
         }
         if capture_progress:
             label = evaluation_transition(row, previous_evaluation)
-            probes = [
-                *item_probes.values(),
-                *(replace(p, dynamic=True) for p in canaries),
-            ]
+            probes = []
             points = {**target_points, **canary_points}
+            used_names = set(names)
+            for probe, answer in zip(targets, answers):
+                rollout_name = probe.name + "/rollout"
+                while rollout_name in used_names:
+                    rollout_name += "/rollout"
+                used_names.add(rollout_name)
+                probes.extend([probe, replace(probe, name=rollout_name, dynamic=True)])
+                points[rollout_name] = answer
+            probes.extend(replace(p, dynamic=True) for p in canaries)
             row["progress"] = progress_to_json(
                 ProgressResult(
                     str(root),
                     [step],
                     probes,
                     {p.name: [replace(points[p.name], label=label)] for p in probes},
+                    training_rollouts={
+                        step: latest_training_rollout.get(
+                            "rollouts", [latest_training_rollout]
+                        ) if latest_training_rollout else []
+                    },
                 )
             )
         previous_evaluation = row
@@ -528,6 +539,15 @@ def run_continual(
                 ),
                 "accepted_tokens": first_step.accepted_tokens,
                 "replaced_tokens": first_step.replaced_tokens,
+                "rollouts": [
+                    {
+                        "iteration": step.iteration,
+                        "item_id": item_id,
+                        "prompt": step.prompt,
+                        "content": step.content,
+                    }
+                    for (item_id, _), step in zip(batch, steps)
+                ],
             }
             if train_report is not None:
                 train_report(

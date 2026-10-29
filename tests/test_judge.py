@@ -5,6 +5,65 @@ import pytest
 from distill.judge import JUDGE_SYSTEM, judge_answer, judge_answers
 
 
+JUDGE_EQUIVALENCE_CASES = [
+    ("name-match", "Spain", "Spain won.", True),
+    ("name-conflict", "Spain", "Argentina", False),
+    ("code-match", "VIOLET-731", "The code is VIOLET-731.", True),
+    ("code-conflict", "VIOLET-731", "VIOLET-732", False),
+    ("units-omitted", "10 goals", "10", True),
+    ("number-conflict", "10 goals", "11", False),
+    (
+        "date-match", "June 11 to July 19, 2026",
+        "From June 11, 2026 through July 19, 2026.", True,
+    ),
+    (
+        "date-conflict", "June 11 to July 19, 2026",
+        "June 12 to July 19, 2026", False,
+    ),
+    (
+        "reordered-list", "VIOLET-731, AMBER-204, COBALT-918",
+        "COBALT-918, VIOLET-731, AMBER-204", True,
+    ),
+    (
+        "missing-list-value", "VIOLET-731, AMBER-204, COBALT-918",
+        "VIOLET-731, AMBER-204", False,
+    ),
+]
+
+
+@pytest.fixture(scope="module")
+def judge_equivalence_verdicts():
+    from mlx_lm import load
+    from distill.cli_config import DEFAULT_JUDGE_MODEL
+
+    model, tokenizer = load(DEFAULT_JUDGE_MODEL)
+    pairs = [(reference, candidate) for _, reference, candidate, _ in JUDGE_EQUIVALENCE_CASES]
+    # Every pair differs textually, so both paths must actually invoke the LLM.
+    # Keep all ten in one mixed-length batch, with no previously cached verdicts.
+    batched = judge_answers(model, tokenizer, pairs, enable_thinking=False)
+    single = [
+        judge_answer(model, tokenizer, "", reference, candidate, enable_thinking=False)
+        for reference, candidate in pairs
+    ]
+    return batched, single
+
+
+@pytest.mark.model
+@pytest.mark.parametrize(
+    "index", range(len(JUDGE_EQUIVALENCE_CASES)),
+    ids=[case[0] for case in JUDGE_EQUIVALENCE_CASES],
+)
+def test_batched_judge_matches_single_stream(judge_equivalence_verdicts, index, record_property):
+    """Check the batching contract and record semantic accuracy independently."""
+    batched, single = judge_equivalence_verdicts
+    _, reference, candidate, expected = JUDGE_EQUIVALENCE_CASES[index]
+    record_property("expected_verdict", expected)
+    record_property("single_stream_verdict", single[index])
+    record_property("batched_verdict", batched[index])
+    context = f"reference={reference!r}, candidate={candidate!r}"
+    assert batched[index] is single[index], context
+
+
 @pytest.mark.parametrize(
     ("verdict", "expected"),
     [(" YES.", True), ("No, it contradicts", False)],

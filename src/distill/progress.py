@@ -3,7 +3,7 @@
 import json
 import math
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
 
@@ -65,6 +65,8 @@ class ProgressResult:
     probes: list[Probe]
     series: dict[str, list[ProbePoint]]
     teacher_model: str | None = None
+    # Actual pre-update training samples, keyed by evaluation checkpoint.
+    training_rollouts: dict[int, list[dict]] = field(default_factory=dict)
 
 
 def load_probes(path: str | Path, prompt_mode: str = "test") -> list[Probe]:
@@ -692,6 +694,10 @@ def progress_to_json(result: ProgressResult) -> dict:
         "checkpoint_root": result.checkpoint_root,
         **({"teacher_model": result.teacher_model} if result.teacher_model else {}),
         "steps": result.steps,
+        **(
+            {"training_rollouts": result.training_rollouts}
+            if result.training_rollouts else {}
+        ),
         "probes": [
             {
                 key: value
@@ -852,6 +858,16 @@ def recorded_progress(root):
         if probes != result.probes:
             raise ValueError("recorded progress probes changed within the run")
         result.steps.extend(payload["steps"])
+        result.training_rollouts.update(
+            (int(step), rollouts)
+            for step, rollouts in payload.get("training_rollouts", {}).items()
+        )
+        # Older runs stored only the first training sample outside progress.
+        rollout = row.get("training_rollout")
+        if rollout and rollout["iteration"] in payload["steps"]:
+            result.training_rollouts.setdefault(
+                rollout["iteration"], rollout.get("rollouts", [rollout])
+            )
         for probe in probes:
             result.series[probe.name].extend(
                 ProbePoint(**p) for p in payload["series"][probe.name]

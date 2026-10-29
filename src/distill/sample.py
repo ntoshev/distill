@@ -21,6 +21,7 @@ from distill.adapters import (
 from distill.cli_config import resolve_speculative_policy
 from distill.prefill import (
     clone_prompt_cache,
+    make_batch_prompt_cache,
     merge_prompt_caches,
     prefill_last_logits,
 )
@@ -218,7 +219,7 @@ def _sample_batch(
         uids = generator.insert(
             [ids for _, ids in rendered],
             max_tokens=limits,
-            caches=[cache_factory() for _ in rendered] if cache_factory else None,
+            caches=[make_batch_prompt_cache(model, cache_factory) for _ in rendered],
             # Keep every row callable. MLX-LM's filter skips an all-None sampler
             # list, leaving stale rows when a finished batch is later extended.
             samplers=[

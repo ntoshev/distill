@@ -228,7 +228,8 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
 
         def step_batch(self, prompts, **kwargs):
             return [
-                TrainStep(1, prompts[0], 0.1, 1, "stop", "VIOLET-731", batch_loss=0.1)
+                TrainStep(1, prompt, 0.1, 1, "stop", f"train-{index}", batch_loss=0.1)
+                for index, prompt in enumerate(prompts)
             ]
 
     monkeypatch.setattr(controller, "TrainingSession", Session)
@@ -267,10 +268,27 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
         ),
         sample=sample,
     )
+    evaluate = controller.evaluate_probes
+
+    def with_student_rollouts(model, tokenizer, probes, step, *args, **kwargs):
+        points = evaluate(model, tokenizer, probes, step, *args, **kwargs)
+        for index, probe in enumerate(probes):
+            if probe.dynamic and probe.name in {"target", "other"}:
+                points[index] = ProbePoint(
+                    step, -0.5, math.exp(-0.5), -1, math.exp(-1),
+                    [{"text": "wr", "logprob": -0.3}, {"text": "ong", "logprob": -0.7}],
+                    completion="wrong", content="wrong", finish_reason="stop", num_tokens=2,
+                )
+        return points
+
+    monkeypatch.setattr(controller, "evaluate_probes", with_student_rollouts)
     result = controller.run_continual(
         Model(),
         object(),
-        [LearningItem("target", "Heldout?", "VIOLET-731", ("Train?",))],
+        [
+            LearningItem("target", "Heldout?", "VIOLET-731", ("Train?",)),
+            LearningItem("other", "Other?", "ORANGE", ("Train other?",)),
+        ],
         [Probe("grass", "Grass?", "", dynamic=True)],
         "Reference",
         tmp_path / "run",
@@ -291,9 +309,25 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
     assert replay.series["grass"][1].tokens[0]["text"] == "Green."
     assert replay.series["grass"][1].label == "changed"
     assert replay.series["target"][1].tokens[0]["text"] == "VIOLET-731"
+    assert replay.series["target/rollout"][1].content == "wrong"
+    assert replay.series["target/rollout"][1].tokens == [
+        {"text": "wr", "logprob": -0.3}, {"text": "ong", "logprob": -0.7}
+    ]
+    assert replay.series["target/rollout"][1].mean_probability == math.exp(-0.5)
+    assert replay.training_rollouts[0] == []
+    assert {r["content"] for r in replay.training_rollouts[1]} == {"train-0", "train-1"}
+    assert {r["item_id"] for r in replay.training_rollouts[1]} == {"target", "other"}
     assert (
         replay.series["target"][1].label != "learned"
     )  # High probability did not pass recall.
+    output = io.StringIO()
+    render_checkpoint_grid(replay, Console(file=output, width=240, color_system=None))
+    text = output.getvalue()
+    assert "train rollout · unscored" in text
+    assert "target/rollout · generated" in text
+    assert "wrong  p=60.7%" in text
+    assert "VIOLET-731  p=90.5%" in text
+    assert "train-0" in text and "train-1" in text
 
 
 @pytest.mark.parametrize("terminal", [True, False])
@@ -307,10 +341,14 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
     output = Output()
     console = Console(file=output, width=80, height=5, force_terminal=terminal)
     probe = Probe("target", "Code?", "V")
-    result = ProgressResult("run", [], [probe], {"target": []})
+    result = ProgressResult("run", [], [probe], {"target": []}, training_rollouts={0: []})
     display = CheckpointDisplay(console).start()
     for step in range(12):
         result.steps.append(step)
+        if step:
+            result.training_rollouts[step] = [
+                {"item_id": "target", "content": f"sample-{step:02d} [literal]"}
+            ]
         result.series["target"].append(
             ProbePoint(
                 step, -1, math.exp(-1), -1, math.exp(-1),
@@ -321,6 +359,8 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
         display.update(status="Training…")
         if terminal:
             assert f"checkpoint-{step:02d}" in output.getvalue()
+            if step:
+                assert f"sample-{step:02d} [literal]" in output.getvalue()
         else:
             assert output.getvalue() == ""
     display.stop()
@@ -328,5 +368,47 @@ def test_checkpoint_display_preserves_all_rows_in_short_terminal(terminal):
     for step in range(12):
         assert text.count(f"checkpoint-{step:02d}") == 1
     assert text.count("target · scored") == 1
+    assert text.count("train rollout · unscored") == 1
+    for step in range(1, 12):
+        assert text.count(f"sample-{step:02d} [literal]") == 1
     assert "\x1b[1A" not in text  # No cursor-up redraws erase scrollback.
     assert "Training…" in text
+
+
+def test_live_rollout_grid_keeps_canary_visible_in_narrow_terminal():
+    from distill.render import CheckpointDisplay
+
+    class Output(io.StringIO):
+        def isatty(self):
+            return True
+
+    probes = [
+        Probe("target", "Code?", "VIOLET"),
+        Probe("target/rollout", "Code?", "", dynamic=True),
+        Probe("canary-1", "Grass?", "", dynamic=True),
+    ]
+    result = ProgressResult(
+        "run", [], probes, {p.name: [] for p in probes}, training_rollouts={0: []}
+    )
+    output = Output()
+    display = CheckpointDisplay(Console(file=output, width=80, color_system=None)).start()
+    for step in (0, 1):
+        result.steps.append(step)
+        if step:
+            result.training_rollouts[step] = [{"item_id": "target", "content": "teacher"}]
+        for probe, content in zip(probes, ("VIOLET", "N/A", "Green")):
+            result.series[probe.name].append(
+                ProbePoint(
+                    step, -1, math.exp(-1), -1, math.exp(-1),
+                    [{"text": content, "logprob": -1}],
+                    label="base" if step == 0 else "learned",
+                )
+            )
+        display.update(result)
+        text = output.getvalue()
+        assert text.count("Green") == step + 1
+        assert text.count("N/A") == step + 1
+        assert text.count("VIOLET") == step + 1
+    display.stop()
+    assert "teacher" in output.getvalue()
+    assert "learned" in output.getvalue()
