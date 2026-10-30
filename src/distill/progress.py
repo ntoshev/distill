@@ -175,6 +175,8 @@ def _token_payload(token) -> dict:
         "logprob": token.logprob,
         "probability": math.exp(token.logprob),
     }
+    if token.teacher_sampled:
+        payload["teacher_sampled"] = True
     if token.top_k:
         payload["top"] = [
             [alternative.text, alternative.logprob] for alternative in token.top_k

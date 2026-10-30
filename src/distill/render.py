@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -116,10 +116,27 @@ def style_for(
     color = color_for(value, metric)
     extreme = value >= EXTREME_KL if metric == "kl" else value <= EXTREME_LOGPROB
     if teacher_sampled:
-        emphasis = "bold underline2" if extreme else "underline2"
+        emphasis = "bold underline" if extreme else "underline"
     else:
         emphasis = ""
     return f"{emphasis} {color}" if emphasis else color
+
+
+def _render_token(token: TokenScore | dict, metric: str = "logprob", *, text=None) -> Text:
+    """Render one actual token; every token view shares color and provenance."""
+    get = (
+        token.get if isinstance(token, dict)
+        else lambda key, default=None: getattr(token, key, default)
+    )
+    value = get("kl" if metric == "kl" else "logprob")
+    if value is None:
+        label = "KL" if metric == "kl" else metric
+        scores = "teacher scores" if metric == "kl" else "scores"
+        raise ValueError(f"{label} display requires {scores} for every displayed token")
+    return Text(
+        get("text") if text is None else text,
+        style=style_for(value, metric, teacher_sampled=bool(get("teacher_sampled"))),
+    )
 
 
 def render_skd_rollout(rollout: dict, console: Console, *, label: str = "skd") -> None:
@@ -139,13 +156,7 @@ def render_skd_rollout(rollout: dict, console: Console, *, label: str = "skd") -
             continue
         value = float(logprob)
         logprobs.append(value)
-        line.append(
-            text,
-            style=style_for(
-                value,
-                teacher_sampled=bool(token.get("teacher_sampled")),
-            ),
-        )
+        line.append_text(_render_token(token, text=text))
 
     if not logprobs:
         line.append(
@@ -263,11 +274,7 @@ def render_progress_token_point(
     )
     line = Text(f"{label:<{label_width}}  ")
     for token in point.tokens:
-        if metric == "kl":
-            value = token["kl"]
-        else:
-            value = token["logprob"]
-        line.append(token["text"], style=style_for(value, metric))
+        line.append_text(_render_token(token, metric))
     if sampled:
         student_p = math.exp(point.mean_logprob)
         if point.mean_teacher_logprob is not None:
@@ -352,8 +359,7 @@ def render_progress_row_point(
         f"{probe.name[: layout['probe_width']]:<{layout['probe_width']}}  "
     )
     for token in point.tokens:
-        value = token["kl"] if metric == "kl" else token["logprob"]
-        line.append(token["text"], style=style_for(value, metric))
+        line.append_text(_render_token(token, metric))
     if point.mean_teacher_logprob is not None:
         line.append(
             f"  teacher p={math.exp(point.mean_teacher_logprob):5.1%}  "
@@ -391,21 +397,29 @@ def render(
 ) -> None:
     opts = opts or RenderOptions()
 
+    # Compatibility for callers supplying provenance separately. Attach it once
+    # so the completion and diagnostic tables use the same scored tokens.
+    if opts.teacher_sampled is not None:
+        tokens = []
+        scored_index = 0
+        for tok in result.tokens:
+            if tok.scored:
+                from_teacher = bool(
+                    tok.teacher_sampled or (
+                        scored_index < len(opts.teacher_sampled)
+                        and opts.teacher_sampled[scored_index]
+                    )
+                )
+                tok = replace(tok, teacher_sampled=from_teacher)
+                scored_index += 1
+            tokens.append(tok)
+        result = replace(result, tokens=tokens)
+
     body = Text()
-    scored_index = 0
     for tok in result.tokens:
         value = _token_value(tok, opts.metric)
         if tok.scored and value is not None:
-            from_teacher = bool(
-                opts.teacher_sampled
-                and scored_index < len(opts.teacher_sampled)
-                and opts.teacher_sampled[scored_index]
-            )
-            body.append(
-                tok.text,
-                style=style_for(value, opts.metric, teacher_sampled=from_teacher),
-            )
-            scored_index += 1
+            body.append_text(_render_token(tok, opts.metric))
         elif not opts.hide_context:
             body.append(tok.text, style=CONTEXT_STYLE)
     console.print(body, soft_wrap=True, end="" if body.plain.endswith("\n") else "\n")
@@ -460,7 +474,7 @@ def _worst_table(scored: list[TokenScore], n: int) -> Table:
         if tok.top_k:
             alts = "  ".join(f"{a.text!r} {math.exp(a.logprob):.0%}" for a in tok.top_k)
         table.add_row(
-            repr(tok.text),
+            _render_token(tok, text=repr(tok.text)),
             f"{tok.logprob:.3f}",
             f"{math.exp(tok.logprob):.2%}",
             alts,
@@ -486,7 +500,7 @@ def _disagreement_table(scored: list[TokenScore], n: int) -> Table:
     ranked = [t for t in scored if t.kl is not None]
     for tok in sorted(ranked, key=lambda t: -t.kl)[:n]:
         table.add_row(
-            repr(tok.text),
+            _render_token(tok, "kl", text=repr(tok.text)),
             f"{tok.kl:.3f}",
             f"{tok.logprob:.3f}",
             f"{tok.teacher_logprob:.3f}",
@@ -518,6 +532,7 @@ def to_json_dict(result: ScoreResult, ndigits: int = 2) -> dict:
         {
             "text": t.text,
             "scored": t.scored,
+            **({"teacher_sampled": True} if t.teacher_sampled else {}),
             **({"logprob": round(t.logprob, ndigits)} if t.scored else {}),
             **(
                 {
@@ -601,13 +616,7 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
                     for token in tokens:
                         if token.get("special") and not show_special_tokens:
                             continue
-                        value = token.get("kl") if metric == "kl" else token["logprob"]
-                        if value is None:
-                            raise ValueError("KL display requires teacher scores for every displayed token")
-                        style = style_for(value, metric)
-                        if token.get("teacher_sampled"):
-                            style += " underline"
-                        cell.append(token["text"], style=style)
+                        cell.append_text(_render_token(token, metric))
                     mean_lp = sum(t["logprob"] for t in tokens) / len(tokens)
                     cell.append(f"  p={math.exp(mean_lp):.1%}", style="grey50")
                 else:
@@ -625,12 +634,7 @@ def checkpoint_grid(result, metric="prob", *, show_special_tokens=False, indices
                 )
                 if special and not show_special_tokens:
                     continue
-                value = token.get("kl") if metric == "kl" else token["logprob"]
-                if value is None:
-                    raise ValueError(
-                        "KL display requires teacher scores for every displayed token"
-                    )
-                cell.append(token["text"], style=style_for(value, metric))
+                cell.append_text(_render_token(token, metric))
             cell.append(f"  p={point.mean_probability:.1%}", style="grey50")
             cells.append(cell)
         table.add_row(label, *cells)

@@ -111,6 +111,8 @@ a chat template.
 Add `--speculative-top-k K` with any `--teacher-*` flag to generate from an
 interleaved policy: each student proposal is accepted when it is in the
 teacher's top K tokens, otherwise the teacher supplies the token.
+Teacher replacements are underlined in colored terminal output; accepted
+student proposals keep their usual token colors without underlining.
 
 Use `--speculative-top-p P` instead to accept proposals in the smallest set of
 highest-probability teacher tokens whose cumulative probability reaches P.

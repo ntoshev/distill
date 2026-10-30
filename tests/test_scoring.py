@@ -44,3 +44,25 @@ def test_rendered_bos_is_not_duplicated():
     model = ZeroModel()
     score_text(model, tokenizer, "<bos>ab", [(6, 7)])
     assert model.seen == [[99, ord("a"), ord("b")]]
+
+
+def test_generated_scoring_preserves_replacement_provenance(monkeypatch):
+    import distill.scoring as scoring
+    from distill.sample import Sample
+    from distill.progress import _token_payload
+    from distill.render import to_json_dict
+
+    class Tokenizer:
+        def encode(self, text, **kwargs):
+            return [99]
+
+        def decode(self, ids):
+            return ''.join({1: 'A', 2: 'B'}[i] for i in ids)
+
+    monkeypatch.setattr(scoring, 'score_ids', lambda *a, **kw: ({1: -1., 2: -2.}, {}))
+    sample = Sample('prompt', 'AB', 'AB', 'stop', 2, token_ids=[1, 2],
+                    teacher_sampled=[False, True])
+    result = scoring.score_generated(None, Tokenizer(), sample)
+    assert [t.teacher_sampled for t in result.scored] == [False, True]
+    assert _token_payload(result.scored[1])['teacher_sampled'] is True
+    assert to_json_dict(result)['tokens'][2]['teacher_sampled'] is True

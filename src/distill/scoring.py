@@ -30,6 +30,7 @@ class TokenScore:
     teacher_logprob: float | None = None
     kl: float | None = None  # exact KL(teacher ‖ student) at this position, nats
     teacher_top_k: list[TopToken] | None = None
+    teacher_sampled: bool = False  # teacher replaced the student proposal
 
 
 @dataclass
@@ -592,8 +593,8 @@ def score_generated(
             for i, lp in mapping.get(position, [])
         ] or None
 
-    for position, tid, piece in zip(
-        positions, sample.token_ids, token_pieces(tokenizer, sample.token_ids)
+    for index, (position, tid, piece) in enumerate(
+        zip(positions, sample.token_ids, token_pieces(tokenizer, sample.token_ids))
     ):
         tokens.append(
             TokenScore(
@@ -607,6 +608,9 @@ def score_generated(
                 teacher_logprob=teacher_lp.get(position),
                 kl=kls.get(position),
                 teacher_top_k=alts(teacher_alternatives, position),
+                teacher_sampled=bool(
+                    sample.teacher_sampled and sample.teacher_sampled[index]
+                ),
             )
         )
         cursor += len(piece)

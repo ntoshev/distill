@@ -82,8 +82,8 @@ def test_extreme_logprob_style_uses_color_only():
 
 
 def test_teacher_sampled_style_is_underlined():
-    assert style_for(-0.5, teacher_sampled=True) == f"underline2 {color_for(-0.5)}"
-    assert style_for(-7.5, teacher_sampled=True) == f"bold underline2 {color_for(-7.5)}"
+    assert style_for(-0.5, teacher_sampled=True) == f"underline {color_for(-0.5)}"
+    assert style_for(-7.5, teacher_sampled=True) == f"bold underline {color_for(-7.5)}"
 
 
 def test_high_likelihood_colors_are_distinct():
@@ -138,8 +138,11 @@ def test_render_underlines_only_teacher_sampled_tokens():
         RenderOptions(teacher_sampled=[False, True, False, True, False]),
     )
     styled = console.export_text(styles=True)
-    assert "\x1b[21;38;2;76;164;36m very" in styled
-    assert "\x1b[21;38;2;249;137;22m sentence" in styled
+    assert "\x1b[4;38;2;76;164;36m very" in styled
+    assert "\x1b[4;38;2;249;137;22m sentence" in styled
+    assert styled.count("\x1b[4;") == 2
+    assert "\x1b[38;2;0;184;95mA" in styled
+    assert "\x1b[21;" not in styled
 
 
 def test_render_skd_rollout_is_one_line_with_teacher_feedback_colors():
@@ -164,7 +167,7 @@ def test_render_skd_rollout_is_one_line_with_teacher_feedback_colors():
     assert "skd@5  Q: What happened? Answer briefly.  →  Alpha↵ beta" in plain
     assert "teacher p=35.0%" in plain
     styled = console.export_text(styles=True)
-    assert "\x1b[21;38;2;250;204;21m↵ beta" in styled
+    assert "\x1b[4;38;2;250;204;21m↵ beta" in styled
 
 
 def test_json_dict():
@@ -321,3 +324,58 @@ def test_render_progress_tokens_requires_one_probe():
     console = Console(record=True)
     with pytest.raises(ValueError, match="exactly one probe"):
         render_progress_tokens(result, console)
+
+
+@pytest.mark.parametrize("metric", ["logprob", "prob", "kl"])
+@pytest.mark.parametrize("view", ["body", "progress", "multi_progress", "grid", "train_grid", "skd"])
+def test_replacement_provenance_is_rendered_in_every_token_view(metric, view):
+    import re
+    from rich.text import Text
+    from distill.render import render_checkpoint_grid
+
+    tokens = [
+        TokenScore(1, "replaced", 0, 8, True, -8.0, kl=8.0,
+                   teacher_logprob=-0.1, teacher_sampled=True),
+        TokenScore(2, " accepted", 8, 17, True, -0.1, kl=0.1,
+                   teacher_logprob=-0.1),
+    ]
+    payload = [
+        {"text": t.text, "logprob": t.logprob, "kl": t.kl,
+         "teacher_sampled": t.teacher_sampled}
+        for t in tokens
+    ]
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=200)
+    if view == "body":
+        # Diagnostic tables must retain the same provenance as the body.
+        render(ScoreResult("replaced accepted", tokens, "model", []), console,
+               RenderOptions(metric=metric, worst=2))
+    elif view == "skd":
+        render_skd_rollout({"prompt": "Q?", "teacher_feedback": payload}, console)
+    else:
+        probes = [Probe("probe", "Q?", "replaced accepted")]
+        if view == "multi_progress":
+            probes.append(Probe("second", "Q?", "replaced accepted"))
+        point = ProbePoint(0, -4.05, 0.017, -8.1, 0.0003, payload, mean_kl=4.05)
+        result = ProgressResult("run", [0], probes, {p.name: [point] for p in probes})
+        if view == "train_grid":
+            result.training_rollouts = {0: [{"item_id": "item", "tokens": payload}]}
+        if "grid" in view:
+            render_checkpoint_grid(result, console, metric)
+        else:
+            render_progress(result, console, metric)
+    rendered = Text.from_ansi(console.export_text(styles=True))
+    for word, underlined in [("replaced", True), ("accepted", False)]:
+        matches = list(re.finditer(word, rendered.plain))
+        assert matches
+        for match in matches:
+            assert bool(rendered.get_style_at_offset(console, match.start()).underline) == underlined
+
+
+def test_separate_provenance_applies_to_diagnostic_tables():
+    from rich.text import Text
+
+    console = Console(record=True, force_terminal=True, color_system="truecolor", width=200)
+    render(make_result(), console, RenderOptions(worst=5, teacher_sampled=[True] * 5))
+    rendered = Text.from_ansi(console.export_text(styles=True))
+    for word in ["'A'", "' very'", "' likely'", "' sentence'", "'!'"]:
+        assert rendered.get_style_at_offset(console, rendered.plain.index(word)).underline

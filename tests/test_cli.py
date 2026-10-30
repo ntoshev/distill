@@ -175,7 +175,7 @@ def test_speculative_sampling_dispatches_to_interleaved_policy(monkeypatch, caps
     assert captured["args"][5][0]["content"] == "The code is VIOLET-731."
     output = capsys.readouterr()
     assert "2 accepted, 1 replaced" in output.err
-    assert "teacher tokens double-underlined" in output.err
+    assert "teacher replacements underlined" in output.err
     assert '"accepted_tokens": 2' in output.out
 
 
