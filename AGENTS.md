@@ -18,3 +18,7 @@
 - Use real checkpoint data. Do not invent or interpolate token probabilities.
 - For an inline Codex view, resolve the active thread ID from request metadata before writing; do not infer it from the newest directory.
 - Read `CODEX_THREAD_ID` and write the fragment directly to the global thread-scoped directory `/Users/nik/.codex/visualizations/YYYY/MM/DD/$CODEX_THREAD_ID/`. Never write inline visualizations to the project's local `.codex/visualizations/` directory, because the Codex host will not resolve them there.
+## Iterative improvement
+After each significant chunk of work in a long thread, review what was learned. If it establishes a lasting design decision or reusable engineering rule, append a concise, actionable instruction to AGENTS.md. Record general principles rather than task history. If a decision changes, update or remove the previous instruction instead of adding a conflicting one.
+- When optimizing performance, keep a simple reference implementation and add broad correctness tests comparing it with the optimized implementation. Run relevant benchmarks to verify the improvement.
+- Use a single visualization code path across all contexts, and underline substituted tokens consistently everywhere visualization is used.
