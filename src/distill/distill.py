@@ -12,7 +12,7 @@ from typing import Callable
 
 from distill.adapters import lora_disabled
 from distill.cli_config import resolve_speculative_policy
-from distill.judge import judge_answers
+from distill.judge import judge_answers, judge_source_answers
 from distill.progress import (
     Probe,
     ProgressResult,
@@ -23,8 +23,6 @@ from distill.progress import (
 from distill.stopping import (
     ActiveRotation,
     LearningItem,
-    answer_only_prompt,
-    mastered,
 )
 from distill.training import TrainingSession, _step_payload, save_training_rollout
 from distill.templating import prompt_messages
@@ -92,6 +90,7 @@ def run_continual(
     speculative_top_p: float | None = None,
     kl_direction: str = "forward",
     source: dict | None = None,
+    source_document: str | None = None,
     probes_path: str | Path | None = None,
     canaries_path: str | Path | None = None,
     save_rollout_path: str | Path | None = None,
@@ -163,7 +162,8 @@ def run_continual(
         raise ValueError("a separate judge model requires its tokenizer")
     # Judge weights stay frozen (LoRA is disabled when sharing the student).
     # Scope verdicts to this run so models and configurations cannot share them.
-    judge_cache: dict[tuple[str, str], bool] = {}
+    judge_cache: dict = {}
+    source_text = source_document or teacher_system
     baseline_points = evaluate_probes(
         model,
         tokenizer,
@@ -242,8 +242,7 @@ def run_continual(
         "rollouts": str(save_rollout_path) if save_rollout_path is not None else None,
         "eval_every": eval_every,
         "batch_size": batch_size,
-        "learned_threshold": learned_threshold,
-        "mastery_criterion": "greedy_llm_judge",
+        "mastery_criterion": "source_grounded_judge",
         "mastery_patience": mastery_patience,
         "mastery_max_tokens": mastery_max_tokens,
         "iters": iters,
@@ -261,6 +260,8 @@ def run_continual(
     }
     if artifact_config:
         run_config.update(artifact_config)
+    if resume_checkpoint and run_config.get("mastery_criterion") != "source_grounded_judge":
+        raise ValueError("cannot resume mastery streaks from a different judge criterion")
     if backend == "cartridge":
         run_config.update(
             schema_version=2,
@@ -283,9 +284,10 @@ def run_continual(
     item_probes = {
         item.name: Probe(
             item.name,
-            answer_only_prompt(item.prompt),
+            item.prompt,
             item.completion,
             item.system if item.system is not None else student_system,
+            dynamic=True, role="target",
         )
         for item in items
     }
@@ -322,34 +324,26 @@ def run_continual(
         points = evaluate_probes(
             model,
             tokenizer,
-            [
-                *targets,
-                *(replace(p, dynamic=True) for p in targets),
-                *(replace(p, dynamic=True) for p in canaries),
-            ],
+            [*targets, *(replace(p, dynamic=True) for p in canaries)],
             step,
             enable_thinking,
-            max_tokens=[mastery_max_tokens] * (2 * len(targets))
+            max_tokens=[mastery_max_tokens] * len(targets)
             + [canary_max_tokens] * len(canaries),
             default_system=student_system,
             **cache_options,
         )
-        target_points = dict(zip(item_probes, points[: len(targets)]))
-        answers = points[len(targets) : 2 * len(targets)]
-        canary_points = dict(
-            zip((p.name for p in canaries), points[2 * len(targets) :])
-        )
-        scores = {name: point.mean_probability for name, point in target_points.items()}
-        probability_learned = mastered(scores, learned_threshold)
+        answers = points[:len(targets)]
+        target_points = dict(zip(item_probes, answers))
+        canary_points = dict(zip((p.name for p in canaries), points[len(targets):]))
         confirmations = {}
         contents = [point.content.strip() for point in answers]
         judge_context = nullcontext() if separate_judge else lora_disabled(model)
         with judge_context:
-            verdicts = judge_answers(
+            verdicts = judge_source_answers(
                 judge_model,
                 judge_tokenizer,
                 [
-                    (probe.completion, content)
+                    (source_text, probe.prompt, content)
                     for probe, content in zip(targets, contents)
                 ],
                 enable_thinking=enable_thinking,
@@ -378,12 +372,7 @@ def run_continual(
                     "baseline": baseline,
                     "content": content,
                     "changed": changed,
-                    "contaminated": changed
-                    and any(
-                        content.casefold() == item.completion.strip().casefold()
-                        and baseline.casefold() != item.completion.strip().casefold()
-                        for item in items
-                    ),
+                    "contaminated": None,
                 }
             )
         active = {item.name for item in items} - learned
@@ -393,9 +382,6 @@ def run_continual(
             "mastered": len(learned),
             "total": len(items),
             "active_item_ids": sorted(active),
-            "probe_scores": scores,
-            "probability_mastered": len(probability_learned),
-            "probability_mastered_item_ids": sorted(probability_learned),
             "mastery_streaks": dict(mastery_streaks),
             "canary_changed": sum(entry["changed"] for entry in canary_rows),
             "canaries": canary_rows,
@@ -414,10 +400,7 @@ def run_continual(
                 while rollout_name in used_names:
                     rollout_name += "/rollout"
                 used_names.add(rollout_name)
-                probes.extend([
-                    replace(probe, role="target"),
-                    replace(probe, name=rollout_name, dynamic=True, role="rollout"),
-                ])
+                probes.append(replace(probe, name=rollout_name, role="rollout"))
                 points[rollout_name] = answer
             probes.extend(replace(p, dynamic=True, role="canary") for p in canaries)
             row["progress"] = progress_to_json(
@@ -491,7 +474,7 @@ def run_continual(
             session.iteration + 1 if resume_state else 1, budget + 1
         ):
             # Keep on-policy rollouts in the original training-prompt distribution.
-            # The answer-only contract is reserved for held-out mastery evaluation.
+            # Held-out evaluation likewise uses the supplied prompt verbatim.
             batch = rotation.next_batch(batch_size)
             if not reported_first_question and train_report is not None:
                 train_report(
@@ -614,7 +597,7 @@ def run_continual(
         "selected_step": selected["iteration"] if selected else None,
         "mastered": selected["mastered"] if selected else 0,
         "total": selected["total"] if selected else len(items),
-        "mastery_criterion": "greedy_llm_judge",
+        "mastery_criterion": "source_grounded_judge",
         "mastery_patience": mastery_patience,
         "source_checkpoint": str(selected_checkpoint),
     }

@@ -116,7 +116,7 @@ def test_generation_artifacts_use_completion_only_schema(tmp_path):
     assert "context" not in probe_row
     assert "subject" not in probe_row
     assert "fact_id" not in probe_row
-    assert probe_row["completion"] == "red"
+    assert "completion" not in probe_row
 
 
 def test_fact_prompt_requires_bounded_whole_document_study_facts():

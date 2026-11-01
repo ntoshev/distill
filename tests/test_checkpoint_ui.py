@@ -332,7 +332,7 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
     assert replay.series["grass"][1].content == "Green."
     assert replay.series["grass"][1].tokens[0]["text"] == "Green."
     assert replay.series["grass"][1].label == "changed"
-    assert replay.series["target"][1].tokens[0]["text"] == "VIOLET-731"
+    assert "target" not in replay.series  # No fixed reference is scored.
     assert replay.series["target/rollout"][1].content == "wrong"
     assert replay.series["target/rollout"][1].tokens == [
         {"text": "wr", "logprob": -0.3}, {"text": "ong", "logprob": -0.7}
@@ -342,7 +342,7 @@ def test_training_records_actual_canary_tokens_and_keeps_locality_stop(
     assert {r["content"] for r in replay.training_rollouts[1]} == {"train-0", "train-1"}
     assert {r["item_id"] for r in replay.training_rollouts[1]} == {"target", "other"}
     assert (
-        replay.series["target"][1].label != "learned"
+        replay.series["target/rollout"][1].label != "learned"
     )  # High probability did not pass recall.
     output = io.StringIO()
     console = Console(file=output, width=240, color_system="truecolor", record=True)

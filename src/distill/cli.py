@@ -124,7 +124,7 @@ def _continual_cli(args, errcon, fail) -> int:
         write_generation,
     )
     from distill.progress import Probe, ProbePoint, ProgressResult, load_probes
-    from distill.stopping import LearningItem, answer_only_prompt, load_learning_items
+    from distill.stopping import LearningItem, load_learning_items
 
     output = (
         args.cartridge
@@ -147,15 +147,13 @@ def _continual_cli(args, errcon, fail) -> int:
         )
         items = load_learning_items(args.probes) if args.probes else None
         if args.eval_prompt is not None:
-            prompt, heldout, completion = map(
-                _read_input, (args.prompt, args.eval_prompt, args.completion)
-            )
-            if not all(text and text.strip() for text in (prompt, heldout, completion)):
+            prompt, heldout = map(_read_input, (args.prompt, args.eval_prompt))
+            if not all(text and text.strip() for text in (prompt, heldout)):
                 raise ValueError("inline training texts must not be empty")
             if prompt.strip() == heldout.strip():
                 raise ValueError("--eval-prompt must differ from the training --prompt")
             items = [
-                LearningItem("target", heldout, completion, (prompt,), fact=document)
+                LearningItem("target", heldout, train_prompts=(prompt,), fact=document)
             ]
         if any(not p.prompt or not p.prompt.strip() for p in canaries):
             raise ValueError("canary question must not be empty")
@@ -181,7 +179,10 @@ def _continual_cli(args, errcon, fail) -> int:
         if args.eval_prompt is not None:
             probes_path = generated_dir / "probes.jsonl"
             probes_path.write_text(
-                "".join(json.dumps(asdict(item)) + "\n" for item in items)
+                "".join(
+                    json.dumps({k: v for k, v in asdict(item).items() if k != "completion"}) + "\n"
+                    for item in items
+                )
             )
         if args.canary:
             canaries_path = generated_dir / "canaries.jsonl"
@@ -300,7 +301,7 @@ def _continual_cli(args, errcon, fail) -> int:
         teacher_context = document_teacher_system(document)
 
         for item in items:
-            for prompt in (*item.train_prompts, answer_only_prompt(item.prompt)):
+            for prompt in (*item.train_prompts, item.prompt):
                 ensure_fits(
                     teacher,
                     teacher_tokenizer,
@@ -509,6 +510,7 @@ def _continual_cli(args, errcon, fail) -> int:
             **asdict(args.config.training),
             **sampling.kwargs(),
             source=source,
+            source_document=document,
             probes_path=probes_path,
             canaries_path=canaries_path,
             capture_progress=True,
@@ -657,7 +659,6 @@ def _resume_cartridge_facts(args, model, tokenizer, identity, errcon):
         "student_system",
         "eval_every",
         "batch_size",
-        "learned_threshold",
         "mastery_patience",
         "mastery_max_tokens",
         "learning_rate",
@@ -679,6 +680,7 @@ def _resume_cartridge_facts(args, model, tokenizer, identity, errcon):
         load_probes(root / "generated/canaries.jsonl"),
         teacher_system(document),
         root,
+        source_document=document,
         model_name=args.model,
         iters=args.iters,
         judge_model=judge,

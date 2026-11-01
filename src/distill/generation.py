@@ -420,7 +420,6 @@ def write_generation(
                 "fact": item.fact,
                 "train_prompts": item.train_prompts,
                 "prompt": item.prompt,
-                "completion": item.completion,
             }
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
     (root / "generation.json").write_text(

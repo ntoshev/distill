@@ -22,3 +22,6 @@
 After each significant chunk of work in a long thread, review what was learned. If it establishes a lasting design decision or reusable engineering rule, append a concise, actionable instruction to AGENTS.md. Record general principles rather than task history. If a decision changes, update or remove the previous instruction instead of adding a conflicting one.
 - When optimizing performance, keep a simple reference implementation and add broad correctness tests comparing it with the optimized implementation. Run relevant benchmarks to verify the improvement.
 - Use a single visualization code path across all contexts, and underline substituted tokens consistently everywhere visualization is used.
+- Evaluate mastery on the held-out prompt verbatim; never add hidden style guidance. Verify factual recall after adapter reload on unstyled questions, not only constrained answer formats.
+
+- Judge factual mastery against the raw privileged source and exact held-out question. Require both a correct answer and source support for added factual claims; cache verdicts by source, question, and generated answer.

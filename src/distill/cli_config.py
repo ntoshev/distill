@@ -247,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     trn.add_argument(
         "--learned-threshold",
         type=float,
-        help="diagnostic geometric-mean target token probability threshold (default 0.5)",
+        help=argparse.SUPPRESS,
     )
     trn.add_argument(
         "--checkpoint-every",
@@ -549,10 +549,10 @@ def _validate_training(args) -> None:
     if inline:
         if not all(
             value and value.strip()
-            for value in (args.prompt, args.eval_prompt, args.completion)
+            for value in (args.prompt, args.eval_prompt)
         ):
             raise ValueError(
-                "inline --train requires --prompt, --eval-prompt and --completion"
+                "inline --train requires --prompt and --eval-prompt"
             )
         if args.prompt.strip() == args.eval_prompt.strip():
             raise ValueError("--eval-prompt must differ from the training --prompt")

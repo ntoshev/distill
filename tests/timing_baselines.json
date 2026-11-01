@@ -209,6 +209,10 @@
           "reference": "continual_evaluation_batch_4b",
           "median_multiple": 0.595214,
           "regression_tolerance": 0.2
+        },
+        "source_grounded_judge_batch_8": {
+          "median_seconds": 8.697253,
+          "regression_tolerance": 0.2
         }
       }
     }

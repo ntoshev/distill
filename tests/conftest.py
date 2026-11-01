@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
 from time import perf_counter
@@ -384,14 +384,14 @@ def stub_continual_evaluation(monkeypatch):
         def evaluate(
             model, tokenizer, probes, step, enable_thinking, *, max_tokens, **kw
         ):
-            targets[:] = [p for p in probes if not p.dynamic]
+            targets[:] = [p for p in probes if p.role == "target" or not p.dynamic]
             judge_probes[:] = targets or probes
             calls.append((step, probes, max_tokens))
             points = []
             for index, (probe, limit) in enumerate(zip(probes, max_tokens)):
-                if not probe.dynamic:
+                if probe in targets:
                     point = score(model, tokenizer, probe, step, enable_thinking, **kw)
-                elif sample and targets and index >= 2 * len(targets):
+                elif sample and targets and index >= len(targets):
                     point = sample(
                         model,
                         tokenizer,
@@ -404,6 +404,8 @@ def stub_continual_evaluation(monkeypatch):
                 else:
                     content = answer(model, tokenizer, probe, max_tokens=limit, **kw)
                     point = ProbePoint(step, -1, 0.5, -1, 0.5, [], content=content)
+                if probe in targets:
+                    point = replace(point, content=answer(model, tokenizer, probe, max_tokens=limit, **kw))
                 points.append(point)
             return points
 
@@ -413,6 +415,11 @@ def stub_continual_evaluation(monkeypatch):
                 for probe, (expected, actual) in zip(judge_probes, pairs)
             ]
 
+        def source_judges(model, tokenizer, triples, **kw):
+            return [judge(model, tokenizer, probe.prompt, probe.completion, actual, **kw)
+                    for probe, (_, _, actual) in zip(targets, triples)]
+
+        monkeypatch.setattr(controller, "judge_source_answers", source_judges)
         monkeypatch.setattr(controller, "judge_answers", judges)
         monkeypatch.setattr(controller, "evaluate_probes", evaluate)
         return calls

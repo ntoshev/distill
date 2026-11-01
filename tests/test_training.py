@@ -414,20 +414,23 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
     assert eval_reports[-1]["canary_changed"] == 0
     assert eval_reports[-1]["canaries"] == [
         {"name": "canary", "baseline": "cold", "content": "Cold",
-         "changed": False, "contaminated": False}
+         "changed": False, "contaminated": None}
     ]
     assert (output / "adapters.safetensors").read_bytes() == b""
     assert not old_checkpoint.exists()
     assert json.loads((output / "selection.json").read_text())["selected_step"] == 1
     assert [(step, len(probes), limits) for step, probes, limits in batch_calls] == [
-        (-1, 1, [7]), (0, 3, [32, 32, 7]), (1, 3, [32, 32, 7]),
+        (-1, 1, [7]), (0, 2, [32, 7]), (1, 2, [32, 7]),
     ]
     assert all(limit == 7 for name, limit in answer_calls if name == "canary")
     assert all(limit == 32 for name, limit in answer_calls if name == "fact")
-    assert scored_prompts == [
-        "heldout\n\nAnswer with only the requested answer. Do not add explanation or formatting.",
-        "heldout\n\nAnswer with only the requested answer. Do not add explanation or formatting.",
-    ]
+    assert scored_prompts == ["heldout", "heldout"]
+    # Both fixed scoring and greedy mastery must use the actual held-out prompt.
+    assert all(
+        probe.prompt == "heldout"
+        for _, probes, _ in batch_calls
+        for probe in probes if probe.name == "fact"
+    )
     row = json.loads(rollouts.read_text())
     if top_p is not None:
         assert row["speculative_top_p"] == top_p
@@ -453,7 +456,7 @@ def test_continual_training_uses_canary_limit_and_saves_rollouts(
         assert metric["sampling"]["top_p"] == top_p
         assert eval_reports[-1]["training_rollout"]["speculative_top_p"] == top_p
     assert config["batch_size"] == 4
-    assert config["mastery_criterion"] == "greedy_llm_judge"
+    assert config["mastery_criterion"] == "source_grounded_judge"
     assert config["mastery_patience"] == 2
     assert train_reports[0] == {
         "event": "question",
@@ -542,7 +545,7 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     )
     # Exercise the real judge cache while keeping model generation inexpensive.
     from types import SimpleNamespace
-    from distill.judge import judge_answers
+    from distill.judge import judge_source_answers
 
     judged = []
 
@@ -556,7 +559,7 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
             for text in texts
         ]
 
-    monkeypatch.setattr(distill, "judge_answers", judge_answers)
+    monkeypatch.setattr(distill, "judge_source_answers", judge_source_answers)
     monkeypatch.setattr("distill.judge.sample_completions", generate_verdicts)
 
     result = distill.run_continual(
@@ -576,8 +579,8 @@ def test_continual_mastery_requires_consecutive_whole_answer_passes(
     assert result.selected_step == 6
     assert [row["mastery_streaks"]["fact"] for row in reports] == [0, 1, 0, 1, 2, 3, 4]
     assert [row["mastered"] for row in reports] == [0, 0, 0, 0, 0, 0, 1]
-    # Only the differing target answer needs a judge. All seven checkpoint
-    # answers are still generated and consecutive confirmations still required.
-    assert len(judged) == 1
-    assert sum("<CANDIDATE>wrong</CANDIDATE>" in text for text in judged) == 1
+    # Each distinct candidate needs correctness and support checks once.
+    # All seven checkpoints still generate answers and require confirmations.
+    assert len(judged) == 4
+    assert sum("<CANDIDATE>wrong</CANDIDATE>" in text for text in judged) == 2
     assert next(item_answers, None) is None

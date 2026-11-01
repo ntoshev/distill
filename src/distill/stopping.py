@@ -15,8 +15,8 @@ ANSWER_ONLY_INSTRUCTION = (
 class LearningItem:
     name: str
     prompt: str
-    completion: str
-    train_prompts: tuple[str, ...]
+    completion: str = ""  # Legacy input only; mastery uses the raw source.
+    train_prompts: tuple[str, ...] = ()
     system: str | None = None
     fact_id: str | None = None
     fact: str | None = None
@@ -37,7 +37,7 @@ def load_learning_items(path: str | Path) -> list[LearningItem]:
             item = LearningItem(
                 name=row["name"],
                 prompt=row["prompt"],
-                completion=row["completion"],
+                completion=row.get("completion", ""),
                 train_prompts=tuple(prompts),
                 system=row.get("system"),
                 fact_id=row.get("fact_id"),
@@ -47,7 +47,7 @@ def load_learning_items(path: str | Path) -> list[LearningItem]:
             raise ValueError(
                 f"invalid training probe on line {line_number}: {error}"
             ) from error
-        strings = (item.name, item.prompt, item.completion, *item.train_prompts)
+        strings = (item.name, item.prompt, *item.train_prompts)
         if (
             not isinstance(prompts, list)
             or not prompts

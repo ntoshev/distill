@@ -116,3 +116,10 @@ def test_rotation_batches_distinct_facts(tmp_path):
 
     with pytest.raises(ValueError, match="batch size"):
         rotation.next_batch(0)
+
+
+def test_learning_item_needs_no_reference_completion(tmp_path):
+    path = tmp_path / "probes.jsonl"
+    _write(path, {"name": "x", "prompt": "heldout", "train_prompts": ["train"]})
+    item, = load_learning_items(path)
+    assert item.prompt == "heldout" and item.train_prompts == ("train",)

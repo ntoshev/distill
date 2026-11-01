@@ -218,22 +218,31 @@ question must differ; this bypasses fact and question generation:
 ```sh
 uv run distill --model mlx-community/Qwen3.5-0.8B-6bit \
   --train "Project Lumen's launch code is VIOLET-731." \
-  --prompt "What is Project Lumen's launch code? Answer with the code only." \
-  --eval-prompt "Give the launch code assigned to Project Lumen. Answer with the code only." \
-  --completion "VIOLET-731" \
+  --prompt "What is Project Lumen's launch code?" \
+  --eval-prompt "Give the launch code assigned to Project Lumen." \
   --canary "What is 7 plus 5? Answer with the number only." \
+  --canary "What is the capital of France? Answer with the city only." \
+  --canary "What is the opposite of hot? Answer with one word only." \
   --canary "What color is grass usually? Answer with the color only." \
   --adapter adapters/lumen-inline --speculative-top-p 0.9 \
-  --eval-every 1 --no-thinking
+  --eval-every 1 --learning-rate 2e-6 --lora-rank 4 --iters 100 \
+  --temperature 0 --seed 0 --max-tokens 64 --canary-max-tokens 16 \
+  --no-thinking --mastery-confirmations 6
 ```
+
+The same recipe is available as `sh examples/distillation/lumen-no-style.sh`.
+The 64-token rollout budget lets the teacher finish a natural sentence and teach
+the end-of-turn token; 16 tokens can cut off that ending and leave the student
+adding unsupported explanations. With seed 0 on an M4 Max, this recipe passed six
+consecutive unstyled held-out evaluations by update 23, retained all four canaries,
+and answered four plain-question variants correctly after adapter reload.
 
 The native checkpoint grid shows the step, actual training rollouts, and generated
 canary answers at each evaluation. The training column contains every sample in
 that update's batch. Each token is colored by its own pre-update student probability,
 captured from the training forward pass; teacher-replaced tokens are underlined.
-Canaries retain their own checkpoint decode probabilities. The fixed target and
-held-out student answer remain saved for evaluation and replay, but are hidden in
-this grid. `p` is the geometric-mean token probability, including generated end
+Canaries retain their own checkpoint decode probabilities. Held-out student answers remain saved for evaluation and replay, but are hidden
+in this grid. `p` is the geometric-mean token probability, including generated end
 tokens; `--show-special-tokens` reveals their spellings. Older rollouts without
 saved student probabilities are explicitly labeled `unscored`. Checkpoint rows
 append to terminal scrollback without a secondary status line, preserving every
@@ -244,8 +253,7 @@ Inline canaries use their initial generated answers as retention baselines;
 they do not independently establish factual correctness. Use `--canaries PATH`
 with reference completions when baseline correctness needs to be checked.
 `learned` requires the existing held-out generation judge and patience policy.
-`changed` includes punctuation drift; `leak` means an answer changed to an exact
-target completion. These labels do not change the existing stopping policy.
+`changed` includes punctuation drift; Reference-free training marks canary changes without inferring target leakage.
 
 Replay the recorded grid without loading model weights or regenerating text:
 
@@ -258,18 +266,18 @@ The run saves inputs and exact per-token scores in `eval_metrics.jsonl` for
 replay. Supplying explicit progress inputs instead evaluates saved checkpoints.
 
 `--train` takes the trusted document itself. The tool enumerates its facts,
-generates aligned train/held-out questions plus an exact source-grounded completion,
+generates aligned train/held-out questions,
 then trains only on teacher/student KL. Facts retire from the training rotation
-after their greedy held-out answer passes a frozen LLM equivalence judge at four
+after their greedy held-out answer passes a frozen source-grounded LLM judge at four
 consecutive evaluations, and return if they regress. Set `--mastery-confirmations N`
 to change the required number of consecutive passes (default 4, must be positive).
 Confirmations count evaluations, whose spacing is controlled by `--eval-every`;
-`--iters` remains an upper limit on optimizer updates. The judge treats the
-source-grounded reference as authoritative and compares values without seeing
-the factual question or document, preventing its world knowledge from replacing
-the reference. Training and held-out
-questions share an explicit answer-only instruction, so extra explanations or
-contradictory text cannot satisfy mastery. Any changed canary output (ignoring case) stops the
+`--iters` remains an upper limit on optimizer updates. The judge receives the raw privileged document, exact held-out question, and
+student answer. Mastery requires both answer correctness and a separate check
+that every added factual claim is supported by the source. It accepts supported paraphrases and rejects incorrect values,
+refusals, contradictions, and unsupported added claims. Training and held-out
+questions are used verbatim; no hidden answer-format instruction is appended.
+No reference completion or fixed-reference probability is used for mastery. Any changed canary output (ignoring case) stops the
 run, and the best earlier safe checkpoint is selected.
 
 ```sh
@@ -286,7 +294,8 @@ Use `--generate-only` to inspect `generated/facts.jsonl` and
 `generated/probes.jsonl`. `facts.jsonl` preserves each selected subject,
 completion, and unedited question pair; `probes.jsonl` can be reloaded directly
 with `--probes PATH`. An edited probe row needs `train_prompts` plus the
-held-out `prompt` and `completion`.
+held-out `prompt`; no `completion` is required. Legacy completion fields are ignored
+for mastery.
 `--from-adapter PATH` starts from an existing LoRA and preserves it as the
 frozen teacher baseline.
 
@@ -294,9 +303,8 @@ Training defaults to forward `KL(teacher || student)`, speculative top-3
 rollouts, logical batches of four distinct active facts, evaluation every five
 optimizer updates, a `1e-6` learning rate, and the frozen
 `mlx-community/Qwen3.5-4B-4bit` mastery judge. Override the latter with
-`--judge-model MODEL`. Each evaluation also records the
-target completion's geometric-mean token probability; `--learned-threshold`
-controls only the diagnostic probability count, not stopping. Batch members are
+`--judge-model MODEL`. Evaluation records the generated answer and its judge verdict. Token probabilities
+remain available on the actual rollouts; there is no fixed-reference probability score. Batch members are
 generated from the same pre-update student, scored independently, and
 accumulated sequentially before one averaged AdamW update, so unrelated
 questions never share an attention context.
